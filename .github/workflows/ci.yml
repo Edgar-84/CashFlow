@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  # Same gate as local: lint + types + unit tests via scripts/verify.sh
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python & deps
+        run: |
+          uv python install 3.13
+          uv sync --frozen
+
+      - name: Run verify gate (ruff + mypy + pytest unit)
+        run: bash scripts/verify.sh
+
+  # Integration tests against a real Postgres (migrations + @integration)
+  integration:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cashflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cashflow_test
+      INTERNAL_TOKEN: ci-test-token
+      BOT_TOKEN: "000000:ci-fake-token"
+      BACKEND_BASE_URL: http://localhost:8000
+      ALLOWED_TG_IDS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python & deps
+        run: |
+          uv python install 3.13
+          uv sync --frozen
+
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+
+      - name: Run integration tests
+        run: uv run pytest -q -m integration

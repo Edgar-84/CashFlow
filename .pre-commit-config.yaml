@@ -1,0 +1,44 @@
+# Install once:
+#   uv add --dev pre-commit
+#   uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+# Update hook versions periodically: uv run pre-commit autoupdate
+
+repos:
+  # Fast hygiene checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key   # last line of defense for tokens/keys
+
+  # Lint + format (isolated env, fast)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.4          # run `pre-commit autoupdate` to bump
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Type check in the PROJECT env (sees real deps, unlike mirrors-mypy)
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy .
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Fast unit tests — on PUSH, not on every commit (commits stay cheap,
+      # broken code still cannot leave the machine)
+      - id: pytest-unit
+        name: pytest (unit, no integration)
+        entry: uv run pytest -q -m "not integration"
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
