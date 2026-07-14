@@ -47,7 +47,11 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 `DATABASE_URL`, `BOT_TOKEN`, `BACKEND_BASE_URL`, `INTERNAL_TOKEN`, `ALLOWED_TG_IDS` (comma-separated tg_ids).
 
 ## Out of scope (V2)
-Voice input · Mini App frontend · Bot self-registration · OAuth/JWT (tg_id + internal token is enough for now) · Scheduled digests/APScheduler (V1 notifies on expense creation only).
+- Voice input · Mini App frontend · Bot self-registration · OAuth/JWT (tg_id + internal token is enough for now) · Scheduled digests/APScheduler (V1 notifies on expense creation only).
+- Admin panel for account/user management. PREREQUISITE: migrate the bot
+  allowlist from ALLOWED_TG_IDS in .env to a DB lookup against the users
+  table (one change in bot/middlewares.py). Until then, adding a user
+  requires editing .env + bot restart.
 
 ## Do not edit without asking
 `migrations/versions/`, `.env*`, `uv.lock`.
