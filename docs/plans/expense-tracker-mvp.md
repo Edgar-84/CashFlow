@@ -25,7 +25,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
 
 ## Milestone M0 — Foundation & contracts
 
-- [ ] **U0.1 Skeleton**: config.py (pydantic-settings incl. INTERNAL_TOKEN),
+- [x] **U0.1 Skeleton**: config.py (pydantic-settings incl. INTERNAL_TOKEN),
       database.py (asyncpg pool, init/close/get_connection), main.py app
       factory with lifespan, GET /health.
       AC: app boots; /health returns 200 in a test with pool mocked/test DB.
@@ -153,10 +153,16 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   fire on create only. Rejected: scheduled digests — no V1 requirement.
 - D5 (plan review): category delete = ON DELETE RESTRICT + API returns 409.
   Rejected: SET NULL (contradicts D2), soft delete (V2 complexity).
+- D6 (U0.1): added `pythonpath = ["."]` and an `asyncpg.*` mypy override to
+  pyproject.toml. Required for the flat layout (no `src/`) to let pytest
+  import root modules (`main`, `database`, `config`) and for mypy to accept
+  asyncpg's missing type stubs. Not a contract change — tooling config only.
 
 ## STATE (handoff)
-- Done: plan approved? ← pending human review
-- Next: U0.1
+- Done: U0.1 (config.py, database.py, main.py app factory + /health,
+  tests/test_health.py). verify.sh green.
+- Next: U0.2 (Pydantic contracts) — human-review unit, locks architecture.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
-  units immediately.
+  units immediately. No `.env` file exists yet — tests set env vars directly
+  via monkeypatch; real `.env` still needed before running the app/bot for real.

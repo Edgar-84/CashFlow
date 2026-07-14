@@ -56,7 +56,12 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "integration: requires a live Postgres, skipped in the fast local gate",
     "slow: long-running test",
 ]
+
+[[tool.mypy.overrides]]
+module = "asyncpg.*"
+ignore_missing_imports = true
