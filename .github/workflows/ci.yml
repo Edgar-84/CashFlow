@@ -62,8 +62,20 @@ jobs:
           uv python install 3.13
           uv sync --frozen
 
+      - name: Check for migrations
+        id: check
+        run: |
+          if [ -z "$(find migrations/versions -name '*.py' 2>/dev/null)" ]; then
+            echo "No migrations yet (pre-U0.3) — skipping integration steps."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Apply migrations
+        if: steps.check.outputs.skip == 'false'
         run: uv run alembic upgrade head
 
       - name: Run integration tests
+        if: steps.check.outputs.skip == 'false'
         run: uv run pytest -q -m integration

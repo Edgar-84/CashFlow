@@ -1,16 +1,30 @@
-# This is a sample Python script.
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
+from fastapi import FastAPI
 
-
-def print_hi(name: str) -> None:
-    # Use a breakpoint in the code line below to debug your script.
-    print(f"Hi, {name}")  # Press ⌘F8 to toggle the breakpoint.
+import database
+from config import get_settings
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == "__main__":
-    print_hi("PyCharm")
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    await database.init_pool(settings.database_url)
+    try:
+        yield
+    finally:
+        await database.close_pool()
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="CashFlow", lifespan=lifespan)
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return app
+
+
+app = create_app()
