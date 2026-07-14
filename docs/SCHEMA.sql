@@ -43,7 +43,8 @@ CREATE TABLE expenses (
   category_id UUID REFERENCES categories(id),
   user_id     UUID NOT NULL REFERENCES users(id),
   account_id  UUID NOT NULL REFERENCES accounts(id),
-  created_at  TIMESTAMPTZ DEFAULT now()
+  created_at  TIMESTAMPTZ DEFAULT now(),
+  updated_at  TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE TABLE expense_tags (
@@ -60,6 +61,7 @@ CREATE TABLE budget_plans (
   period             TEXT NOT NULL DEFAULT 'monthly',
   notify_threshold   INT  NOT NULL DEFAULT 80, -- percent (0-100)
   created_at         TIMESTAMPTZ DEFAULT now(),
+  updated_at         TIMESTAMPTZ DEFAULT now(),
   UNIQUE (category_id, account_id, period)
 );
 
@@ -74,3 +76,23 @@ CREATE TABLE permissions (
   own_only   BOOLEAN NOT NULL DEFAULT true,  -- true = only own records
   UNIQUE (user_id, resource)
 );
+
+-- updated_at maintenance: DB trigger is the single source of truth.
+-- Application/repository code must never set updated_at manually.
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER expenses_set_updated_at
+  BEFORE UPDATE ON expenses
+  FOR EACH ROW
+  EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER budget_plans_set_updated_at
+  BEFORE UPDATE ON budget_plans
+  FOR EACH ROW
+  EXECUTE FUNCTION set_updated_at();

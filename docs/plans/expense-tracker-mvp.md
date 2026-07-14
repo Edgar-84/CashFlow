@@ -30,7 +30,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
       factory with lifespan, GET /health.
       AC: app boots; /health returns 200 in a test with pool mocked/test DB.
       Model: sonnet.
-- [ ] **U0.2 Contracts — all Pydantic models** (user, expense, category, tag,
+- [x] **U0.2 Contracts — all Pydantic models** (user, expense, category, tag,
       budget_plan, permission) in the 4-schema pattern; shared enums
       (Role, Resource, Action); typed domain errors (NotFoundError,
       PermissionDeniedError, LimitExceeded warning type).
@@ -157,12 +157,59 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   pyproject.toml. Required for the flat layout (no `src/`) to let pytest
   import root modules (`main`, `database`, `config`) and for mypy to accept
   asyncpg's missing type stubs. Not a contract change — tooling config only.
+- D7 (U0.2): added `models/__init__.py` (empty). Without it, mypy scanning
+  `.` resolved `models/tag.py` under two module names ("tag" and
+  "models.tag") and failed with a duplicate-module error. Tooling fix only;
+  other currently-empty packages (`repositories/`, `services/`, `api/`,
+  `bot/`) will need the same `__init__.py` once they gain `.py` files.
+- D8 (U0.2): `Resource.BUDGET_PLANS` enum value is `"budget_plans"`, matching
+  the table name. SCHEMA.sql's comment on `permissions.resource` lists
+  `budgets` instead — that comment is stale/inconsistent with the actual
+  table name `budget_plans`; the table name was treated as authoritative.
+  Flag if `permissions.resource` ever needs to literally read `"budgets"`.
+- D9 (U0.2): `LimitExceeded` implemented as `LimitExceededWarning(DomainError)`
+  in `models/errors.py` — a typed signal for "budget threshold crossed", not
+  necessarily raised to abort a request (consistent with D3: notification
+  failures/threshold crossings must never fail expense creation). Services
+  wiring this up (M3) decide whether it's raised-and-caught or just
+  constructed and passed to notification_service.
+- D10 (post-U0.2 correction): added `updated_at TIMESTAMPTZ DEFAULT now()` to
+  `expenses` and `budget_plans` in `docs/SCHEMA.sql`, plus a `set_updated_at()`
+  trigger function and a `BEFORE UPDATE` trigger on each table (DB-maintained,
+  app code must never set it). `models/CLAUDE.md` updated to require the field
+  on `ExpenseResponse`/`BudgetPlanResponse` only, never `Create`/`Update`.
+  Contract change to already-reviewed U0.2 output. Follow-up applied same
+  session: `ExpenseResponse`/`BudgetPlanResponse` gained `updated_at: datetime`
+  (required, no default — matches "trigger always sets it"); `tests/test_models.py`
+  updated, incl. a case proving each `Response` rejects a payload missing
+  `updated_at`.
 
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
-  tests/test_health.py). verify.sh green.
-- Next: U0.2 (Pydantic contracts) — human-review unit, locks architecture.
+  tests/test_health.py). U0.2 (models/enums.py, models/errors.py,
+  models/{user,category,tag,expense,budget_plan,permission}.py,
+  models/__init__.py, tests/test_models.py), incl. the D10 `updated_at`
+  follow-up on `ExpenseResponse`/`BudgetPlanResponse`. verify.sh green.
+- Next: U0.3 (initial Alembic migration from docs/SCHEMA.sql). No Alembic
+  scaffolding exists yet at all (no alembic.ini, no migrations/versions/) —
+  U0.3 starts from scratch, it does not edit an existing migration. The
+  migration must include the `set_updated_at()` trigger function + both
+  `BEFORE UPDATE` triggers from `docs/SCHEMA.sql` (D10), not just the tables.
+  ⚠ U0.2 diff (now incl. D10) still needs human review before U0.3 starts —
+  locks the architecture; see D8/D9/D10 for the judgment calls made.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
   via monkeypatch; real `.env` still needed before running the app/bot for real.
+  New packages under repositories/services/api/bot will need an empty
+  `__init__.py` each (see D7) or mypy will fail with duplicate-module errors.
+  `docs/seed.sql` now exists (manual account/user onboarding, V1 has no
+  self-registration) — matches the Account-model deferral below.
+
+
+## Deferred decisions (tracked, not forgotten)
+- Account Pydantic model: intentionally absent in V1. Accounts are seeded
+  via docs/seed.sql. Trigger to add: first service needing a typed account
+  row, or V2 self-registration. See models/CLAUDE.md.
+- Bot allowlist in .env: replace with users-table lookup before building
+  the admin panel. See root CLAUDE.md → Out of scope.

@@ -7,6 +7,12 @@ Only Pydantic v2 schemas live here. No SQLAlchemy models, no DB session code,
 no business logic. These schemas are the contract at API boundaries and
 between layers (repository ↔ service ↔ route).
 
+- Account: DEFERRED — no Pydantic model in V1. Account rows are seeded
+  manually via docs/seed.sql and never cross the API boundary (only
+  account_id: UUID appears in other schemas). Add AccountResponse when
+  a service needs a typed account row; add AccountCreate in V2
+  (self-registration / admin panel). Do NOT create models/account.py now.
+
 ## Four-schema pattern (every entity)
 For an entity `Expense`, define:
 
@@ -37,6 +43,7 @@ class ExpenseResponse(ExpenseBase):
     user_id: UUID
     account_id: UUID
     created_at: datetime
+    updated_at: datetime
     tags: list[TagResponse] = []
     model_config = ConfigDict(from_attributes=True)
 ```
@@ -49,6 +56,10 @@ class ExpenseResponse(ExpenseBase):
   or a `StrEnum` in the same module.
 - One module per entity: `user.py`, `expense.py`, `category.py`, `tag.py`,
   `budget_plan.py`, `permission.py`.
+- `updated_at` exists only on `ExpenseResponse` and `BudgetPlanResponse` (the
+  only tables with a `set_updated_at()` DB trigger — see `docs/SCHEMA.sql`).
+  It never appears on the corresponding `Create`/`Update` schemas: the DB
+  trigger is the single source of truth, application code must never set it.
 
 ## What does NOT belong here
 - SQL queries — `repositories/`.
