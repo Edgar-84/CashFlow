@@ -76,6 +76,23 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         run: uv run alembic upgrade head
 
+      - name: Verify downgrade/upgrade round-trip
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
       - name: Run integration tests
         if: steps.check.outputs.skip == 'false'
-        run: uv run pytest -q -m integration
+        run: |
+          set +e
+          uv run pytest -q -m integration
+          code=$?
+          set -e
+          # Exit code 5 = no tests collected. Expected until U0.4 adds the
+          # first @integration test; treat as a pass, not a failure.
+          if [ "$code" -eq 5 ]; then
+            echo "No integration tests collected yet (pre-U0.4) — treating as pass."
+            exit 0
+          fi
+          exit "$code"
