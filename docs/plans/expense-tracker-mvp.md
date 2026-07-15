@@ -53,7 +53,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
 
 - [x] **U1.1 BaseRepository[T] + user_repo**.
       AC: generic CRUD integration tests via test DB (create/get/update/delete).
-- [ ] **U1.2 category_repo + tag_repo**.
+- [x] **U1.2 category_repo + tag_repo**.
       AC: CRUD tests + unique-per-account behavior documented in tests.
 - [ ] **U1.3 expense_repo** incl. expense_tags junction handling,
       get_by_period, get_by_category, sum_by_category_month.
@@ -275,6 +275,16 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `list(**filters)` does simple equality AND-filtering, sufficient for the
   generic case — richer queries (joins, aggregates) live on the concrete
   repo per repositories/CLAUDE.md's "Query surface", not here.
+- D19 (U1.2): `docs/SCHEMA.sql` has no `UNIQUE(account_id, name)` constraint
+  on `categories` or `tags` — the AC's "unique-per-account behavior
+  documented in tests" is satisfied by a test that proves and documents the
+  *actual* (unenforced) behavior (duplicate names within one account
+  currently succeed), not by adding a DB constraint. No migration touched —
+  `migrations/versions/` is in root CLAUDE.md's do-not-edit-without-asking
+  list, and adding a real constraint is an unreviewed schema change beyond
+  this unit's scope. Flag before any upstream code (service layer) assumes
+  category/tag names are unique per account — they are not, at the DB level,
+  today.
 - D18 (U1.1, environment gotcha, not fixed): `alembic upgrade head` fails
   locally on this machine (macOS arm64) with
   `ValueError: the greenlet library is required...` — `uv.lock`'s
@@ -325,7 +335,17 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   real local Postgres this session (D18) — D16's "unconfirmed in CI" note
   from the U0.4 handoff is stale, since master now already contains U0.4
   merged (PR #4).
-- Next: M1 — U1.2 category_repo + tag_repo.
+- Done: U1.2 (repositories/category_repo.py — `CategoryRepository(BaseRepository[CategoryResponse])`;
+  repositories/tag_repo.py — `TagRepository(BaseRepository[TagResponse])`, both same
+  thin-subclass pattern as U1.1's `user_repo.py` (D17). tests/test_category_repo.py,
+  tests/test_tag_repo.py — `@pytest.mark.integration`, create/get/update/delete
+  round-trip, get/delete on missing id, list(**filters) by account, and a test
+  documenting the current lack of a DB-level unique-per-account constraint on
+  names (D19)). verify.sh green (24 tests total, 9 non-integration); full
+  integration suite (15 tests incl. this unit's 10) run and confirmed green
+  against a throwaway local Docker Postgres with `docs/SCHEMA.sql` applied
+  via psql (same D18 workaround as U1.1).
+- Next: M1 — U1.3 expense_repo.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly

@@ -17,6 +17,8 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 - Verify everything: `bash scripts/verify.sh` ← run before finishing ANY task
 - Single test: `uv run pytest tests/test_x.py -k name -q`
 - Alembic: `uv run alembic revision --autogenerate -m "..."` / `alembic upgrade head`
+- Integration tests without a reachable local Postgres: `bash scripts/integration_docker.sh`
+  (throwaway Docker Postgres, schema applied via psql — see tests/CLAUDE.md)
 
 ## Architecture map (flat layout, no `src/` wrapper)
 - `models/` — Pydantic v2 schemas (Base/Create/Update/Response) — see its CLAUDE.md

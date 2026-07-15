@@ -6,6 +6,13 @@
 ## Runner
 - Fast unit suite: `uv run pytest -q -m "not integration"`.
 - Full suite (needs DB): `uv run pytest -q`.
+- Integration tests, no reachable Postgres (e.g. local `alembic upgrade head`
+  broken — see plan Decision log D18): `bash scripts/integration_docker.sh`.
+  Spins up a throwaway `postgres:16` container, applies `docs/SCHEMA.sql`
+  directly via `psql` (bypassing Alembic), runs `pytest -m integration`, and
+  always removes the container on exit (trap on EXIT — safe to re-run,
+  leaves nothing behind). Extra args pass through to pytest, e.g.
+  `bash scripts/integration_docker.sh -k test_category_repo`.
 
 ## Markers (register in `pyproject.toml`)
 - `integration` — requires a live Postgres. Skipped in fast runs and in the

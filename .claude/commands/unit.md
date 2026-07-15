@@ -23,6 +23,9 @@ Implement exactly ONE unit from an approved plan.
 6. Run bash scripts/verify.sh and fix failures.
 7. Update the plan file: tick the unit checkbox, append to Decision log
    if any decision was made, refresh STATE.
-8. Report: files changed, decisions, verify result. Do NOT commit.
+8. Report: files changed, decisions, verify result, plus a drafted commit
+   message (task-methodology skill's commit message format) and a drafted
+   PR body (task-methodology skill's PR body template) ready for the human
+   to use as-is. Do NOT commit and do NOT open the PR yourself.
 
 Arguments (unit id + plan file): $ARGUMENTS
