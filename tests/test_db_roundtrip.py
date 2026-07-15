@@ -4,6 +4,7 @@ from factories import make_account, make_category, make_expense, make_user
 
 
 @pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
 async def test_expense_round_trip(db_conn: asyncpg.Connection) -> None:
     account_id = await make_account(db_conn)
     category_id = await make_category(db_conn, account_id=account_id)

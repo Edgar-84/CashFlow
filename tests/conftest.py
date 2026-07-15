@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 
 import asyncpg
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -56,7 +57,7 @@ async def client(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
             yield ac
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def db_pool() -> AsyncIterator[asyncpg.Pool]:
     dsn = os.environ.get("DATABASE_URL", _DEFAULT_TEST_DATABASE_URL)
     pool = await asyncpg.create_pool(dsn=dsn)
@@ -66,7 +67,7 @@ async def db_pool() -> AsyncIterator[asyncpg.Pool]:
         await pool.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(loop_scope="session")
 async def db_conn(db_pool: asyncpg.Pool) -> AsyncIterator[asyncpg.Connection]:
     async with db_pool.acquire() as conn:
         tx = conn.transaction()

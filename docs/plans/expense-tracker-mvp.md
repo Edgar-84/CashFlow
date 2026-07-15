@@ -245,6 +245,21 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   (`test_health.py` via the new `client` fixture = the "dummy repo-less"
   case; `test_db_roundtrip.py` = the DB round-trip case).
 
+- D16 (U0.4 PR #4 CI fix): CI's `integration` job failed
+  `test_expense_round_trip` with
+  `asyncpg.exceptions._base.InterfaceError: cannot perform operation:
+  another operation is in progress` (root cause:
+  `RuntimeError: ...Future ... attached to a different loop`). Cause:
+  `db_pool` was session-scoped but `pytest-asyncio` gives each async test
+  its own event loop by default, so the pool's connections were bound to
+  one test's loop and broke when reused from another. Fixed by switching
+  `db_pool`/`db_conn` in `tests/conftest.py` to
+  `pytest_asyncio.fixture(..., loop_scope="session")`, and marking
+  `test_expense_round_trip` with `@pytest.mark.asyncio(loop_scope="session")`
+  — scoped to just the integration fixtures/test, not a global
+  `asyncio_default_fixture_loop_scope` change, so unit tests are
+  unaffected. Not yet confirmed green in CI (pushed for re-run).
+
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
   tests/test_health.py). U0.2 (models/enums.py, models/errors.py,
@@ -284,9 +299,11 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   Desktop installed but its daemon wasn't running) — `test_db_roundtrip.py`
   was verified by collection only (`pytest -m integration --collect-only`,
   confirms imports/fixtures wire up) and manual review, NOT executed against
-  a live DB locally. It will get its first live run in CI's `integration`
-  job (same postgres:16 service used for the U0.3 migration round-trip) —
-  confirm that job passes it. See D11 for the FK `ON DELETE` gap left for
+  a live DB locally. First CI run of PR #4's `integration` job caught a real
+  bug (D16, event-loop scope mismatch on `db_pool`) — fixed same session,
+  still unconfirmed green in CI as of this handoff since Docker remained
+  unavailable locally for a live re-check; confirm the re-run passes.
+  See D11 for the FK `ON DELETE` gap left for
   M1 to pick up.
 
 
