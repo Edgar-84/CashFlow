@@ -51,7 +51,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
 
 ## Milestone M1 — Data layer (repositories)
 
-- [ ] **U1.1 BaseRepository[T] + user_repo**.
+- [x] **U1.1 BaseRepository[T] + user_repo**.
       AC: generic CRUD integration tests via test DB (create/get/update/delete).
 - [ ] **U1.2 category_repo + tag_repo**.
       AC: CRUD tests + unique-per-account behavior documented in tests.
@@ -260,6 +260,35 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `asyncio_default_fixture_loop_scope` change, so unit tests are
   unaffected. Not yet confirmed green in CI (pushed for re-run).
 
+- D17 (U1.1): `BaseRepository[T]` takes a live `asyncpg.Connection` (not a
+  `Pool`) in its constructor — chosen so repo instances can be handed the
+  same connection `tests/conftest.py`'s `db_conn` fixture already opened a
+  transaction on (U0.4's per-test rollback isolation pattern). If repos
+  acquired their own connection from a pool internally, repo queries
+  wouldn't participate in that transaction and test isolation would break.
+  Production call sites (services, via a future FastAPI dependency) get a
+  connection per request from `database.get_connection()` and construct the
+  repo with it. `get`/`update` return `T | None` (not-found is not
+  exceptional at this layer — services decide whether to raise
+  `NotFoundError`); `create`/`update` take `dict[str, Any]` (callers pass
+  `Create`/`Update.model_dump(exclude_unset=True)`); `delete` returns `bool`.
+  `list(**filters)` does simple equality AND-filtering, sufficient for the
+  generic case — richer queries (joins, aggregates) live on the concrete
+  repo per repositories/CLAUDE.md's "Query surface", not here.
+- D18 (U1.1, environment gotcha, not fixed): `alembic upgrade head` fails
+  locally on this machine (macOS arm64) with
+  `ValueError: the greenlet library is required...` — `uv.lock`'s
+  `sqlalchemy` dependency marks `greenlet` as required only when
+  `platform_machine` is `aarch64`/`x86_64`/etc., but macOS ARM reports
+  `arm64`, so `uv sync` never installs it here. Pre-existing gap, unrelated
+  to this unit, and `uv.lock` is in root CLAUDE.md's do-not-edit-without-asking
+  list, so not fixed. CI runs on ubuntu (`x86_64`, marker matches) and is
+  unaffected. Worked around for this unit's local verification only: started
+  a throwaway `postgres:16` Docker container and applied `docs/SCHEMA.sql`
+  directly via `psql` (bypassing Alembic) to get a real schema to run the
+  new integration tests against; container removed after. Flag before
+  relying on local `alembic upgrade head` again.
+
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
   tests/test_health.py). U0.2 (models/enums.py, models/errors.py,
@@ -286,7 +315,17 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   [the dummy repo-less test]; tests/test_db_roundtrip.py added
   [`@pytest.mark.integration`, full account→category→user→expense insert +
   read-back]; tests/test_sanity.py deleted, D13-D15). verify.sh green.
-- Next: M1 — U1.1 BaseRepository[T] + user_repo.
+- Done: U1.1 (repositories/base.py — `BaseRepository[T]` generic CRUD
+  [get/list/create/update/delete] over a live `asyncpg.Connection`, D17;
+  repositories/user_repo.py — `UserRepository(BaseRepository[UserResponse])`;
+  repositories/__init__.py added per D7. tests/test_user_repo.py —
+  `@pytest.mark.integration`, create/get/update/delete round-trip + get/delete
+  on missing id + list(**filters) case). verify.sh green; integration suite
+  (this unit's + pre-existing D16 test) run and confirmed green against a
+  real local Postgres this session (D18) — D16's "unconfirmed in CI" note
+  from the U0.4 handoff is stale, since master now already contains U0.4
+  merged (PR #4).
+- Next: M1 — U1.2 category_repo + tag_repo.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
@@ -295,14 +334,9 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `__init__.py` each (see D7) or mypy will fail with duplicate-module errors.
   `docs/seed.sql` now exists (manual account/user onboarding, V1 has no
   self-registration) — matches the Account-model deferral below.
-  No local Postgres/docker was available in this session either (Docker
-  Desktop installed but its daemon wasn't running) — `test_db_roundtrip.py`
-  was verified by collection only (`pytest -m integration --collect-only`,
-  confirms imports/fixtures wire up) and manual review, NOT executed against
-  a live DB locally. First CI run of PR #4's `integration` job caught a real
-  bug (D16, event-loop scope mismatch on `db_pool`) — fixed same session,
-  still unconfirmed green in CI as of this handoff since Docker remained
-  unavailable locally for a live re-check; confirm the re-run passes.
+  `alembic upgrade head` doesn't work on this machine locally — see D18;
+  use a throwaway Docker Postgres + `docs/SCHEMA.sql` via `psql` for local
+  integration-test runs until the `uv.lock`/greenlet marker gap is fixed.
   See D11 for the FK `ON DELETE` gap left for
   M1 to pick up.
 
