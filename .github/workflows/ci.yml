@@ -76,6 +76,12 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         run: uv run alembic upgrade head
 
+      - name: Verify downgrade/upgrade round-trip
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
       - name: Run integration tests
         if: steps.check.outputs.skip == 'false'
         run: uv run pytest -q -m integration

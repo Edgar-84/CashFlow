@@ -25,17 +25,17 @@ every subsequent migration is a delta.
   the default (which is `NO ACTION`, easy to trip on).
 
 ## Commands
-- Generate: `uv run alembic revision --autogenerate -m "short description"`.
-  Autogenerate is a **starting point**, not a finished migration — always
-  review the file before applying.
+- Generate: `uv run alembic revision -m "short description"` (blank), then
+  hand-write the DDL as `op.execute("""...""")`. `--autogenerate` does not
+  work in this project — `env.py` sets `target_metadata = None` since there
+  is no ORM model layer to diff against (raw SQL, no ORM, per project
+  CLAUDE.md). Every migration follows the "First migration" option (1) path.
 - Apply: `uv run alembic upgrade head`.
 - Downgrade one step: `uv run alembic downgrade -1` (only in dev).
 
 ## First migration
-Bootstrap from `docs/SCHEMA.sql`. Options:
-1. `alembic revision -m "initial schema"` (blank), then paste the DDL into
-   `upgrade()` as `op.execute("""...""")`.
-2. Or write it as native Alembic ops for autogenerate-friendliness.
-
-Pick (1) if the schema is stable and you want a faithful reproduction of the
-canonical SQL; pick (2) if you'll iterate on the schema early.
+Bootstrapped from `docs/SCHEMA.sql` via `alembic revision -m "initial schema"`
+(blank) with the DDL pasted into `upgrade()`/`downgrade()` as
+`op.execute("""...""")` — see `migrations/versions/`. This is also the
+pattern for every future migration (see Commands above: autogenerate is
+not usable here).

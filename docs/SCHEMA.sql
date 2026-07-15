@@ -40,7 +40,7 @@ CREATE TABLE expenses (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   amount      BIGINT NOT NULL,       -- minor units (kopecks / cents)
   comment     TEXT,
-  category_id UUID REFERENCES categories(id),
+  category_id UUID NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
   user_id     UUID NOT NULL REFERENCES users(id),
   account_id  UUID NOT NULL REFERENCES accounts(id),
   created_at  TIMESTAMPTZ DEFAULT now(),
@@ -55,7 +55,7 @@ CREATE TABLE expense_tags (
 
 CREATE TABLE budget_plans (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  category_id        UUID NOT NULL REFERENCES categories(id),
+  category_id        UUID NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
   account_id         UUID NOT NULL REFERENCES accounts(id),
   amount             BIGINT NOT NULL,          -- minor units
   period             TEXT NOT NULL DEFAULT 'monthly',
@@ -76,6 +76,10 @@ CREATE TABLE permissions (
   own_only   BOOLEAN NOT NULL DEFAULT true,  -- true = only own records
   UNIQUE (user_id, resource)
 );
+
+CREATE INDEX ix_expenses_account_id_created_at ON expenses (account_id, created_at);
+CREATE INDEX ix_expenses_category_id ON expenses (category_id);
+CREATE INDEX ix_expense_tags_tag_id ON expense_tags (tag_id);
 
 -- updated_at maintenance: DB trigger is the single source of truth.
 -- Application/repository code must never set updated_at manually.

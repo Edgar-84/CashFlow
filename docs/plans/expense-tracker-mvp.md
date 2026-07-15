@@ -37,7 +37,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
       AC: mypy green; import-and-instantiate tests pass; expense.category_id
       REQUIRED (decision D2).
       Model: sonnet. ⚠ Human-review this diff — it locks the architecture.
-- [ ] **U0.3 Initial migration**: full schema + indexes
+- [x] **U0.3 Initial migration**: full schema + indexes
       expenses(account_id, created_at), expenses(category_id),
       expense_tags(tag_id); categories.id referenced with ON DELETE RESTRICT.
       AC: alembic upgrade head on a clean DB, then downgrade base, both clean.
@@ -173,6 +173,18 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   failures/threshold crossings must never fail expense creation). Services
   wiring this up (M3) decide whether it's raised-and-caught or just
   constructed and passed to notification_service.
+- D11 (U0.3): `docs/SCHEMA.sql` gained explicit `ON DELETE RESTRICT` on the
+  two FKs to `categories(id)` (`expenses.category_id`, `budget_plans.category_id`)
+  to match D5 and the "never rely on the FK default" rule in
+  `migrations/CLAUDE.md`, plus the three indexes named in this unit's AC
+  (`ix_expenses_account_id_created_at`, `ix_expenses_category_id`,
+  `ix_expense_tags_tag_id`). Scope was kept to exactly what D5/the AC called
+  for — the other FKs (`account_id`, `user_id` refs) still rely on the
+  Postgres default (`NO ACTION`), which is a latent inconsistency with
+  `migrations/CLAUDE.md`'s explicit-`ON DELETE` rule; not fixed here since
+  choosing CASCADE/RESTRICT for each is an unreviewed architecture call
+  beyond this unit's budget. Flag before or during M1 (repositories touch
+  delete behavior directly).
 - D10 (post-U0.2 correction): added `updated_at TIMESTAMPTZ DEFAULT now()` to
   `expenses` and `budget_plans` in `docs/SCHEMA.sql`, plus a `set_updated_at()`
   trigger function and a `BEFORE UPDATE` trigger on each table (DB-maintained,
@@ -183,20 +195,48 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   (required, no default — matches "trigger always sets it"); `tests/test_models.py`
   updated, incl. a case proving each `Response` rejects a payload missing
   `updated_at`.
+- D12 (U0.3 review fixes): three findings from PR review, all fixed same
+  session:
+  1. BLOCKER — `expenses.category_id` was missing `NOT NULL` in both
+     `docs/SCHEMA.sql` and the migration (copy-paste of a pre-existing gap
+     in the canonical SQL). This directly contradicted D2 and the
+     non-negotiable rule in root `CLAUDE.md` ("`expenses.category_id` is
+     NOT NULL") — `models/expense.py`'s `ExpenseBase.category_id: UUID`
+     (non-optional) already assumed this was enforced at the DB level.
+     Fixed in both files.
+  2. Downgrade correctness was untested against a real DB (offline `--sql`
+     mode only proves syntax, not that Postgres accepts it). Fixed by
+     adding an "upgrade head → downgrade base → upgrade head" round-trip
+     step to CI's `integration` job (`.github/workflows/ci.yml`), ahead of
+     the "Run integration tests" step — closed now rather than deferred to
+     U0.4.
+  3. NIT — `migrations/env.py`'s `target_metadata = None` means
+     `alembic revision --autogenerate` can never detect a diff (no ORM
+     layer to diff against, by design — raw SQL, no ORM). Documented in
+     `migrations/CLAUDE.md`: autogenerate is not usable in this project,
+     every migration uses the blank-revision + hand-written `op.execute()`
+     path.
 
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
   tests/test_health.py). U0.2 (models/enums.py, models/errors.py,
   models/{user,category,tag,expense,budget_plan,permission}.py,
   models/__init__.py, tests/test_models.py), incl. the D10 `updated_at`
-  follow-up on `ExpenseResponse`/`BudgetPlanResponse`. verify.sh green.
-- Next: U0.3 (initial Alembic migration from docs/SCHEMA.sql). No Alembic
-  scaffolding exists yet at all (no alembic.ini, no migrations/versions/) —
-  U0.3 starts from scratch, it does not edit an existing migration. The
-  migration must include the `set_updated_at()` trigger function + both
-  `BEFORE UPDATE` triggers from `docs/SCHEMA.sql` (D10), not just the tables.
-  ⚠ U0.2 diff (now incl. D10) still needs human review before U0.3 starts —
-  locks the architecture; see D8/D9/D10 for the judgment calls made.
+  follow-up on `ExpenseResponse`/`BudgetPlanResponse`; human-reviewed. U0.3
+  (alembic.ini, migrations/env.py — async engine built from
+  `config.get_settings().database_url`, driver rewritten to
+  `postgresql+asyncpg://` — migrations/script.py.mako (`file_template` in
+  alembic.ini prefixes future revisions with a sortable date/time),
+  migrations/versions/2026_07_14_2005-1fd1bea5a842_initial_schema.py —
+  full schema as raw
+  `op.execute()` DDL: all 8 tables, the 3 indexes, `set_updated_at()` +
+  both triggers; `docs/SCHEMA.sql` updated to match, D11). Review fixes
+  applied same session (D12): `expenses.category_id NOT NULL` restored,
+  CI now round-trips upgrade/downgrade/upgrade against real Postgres,
+  `migrations/CLAUDE.md` documents autogenerate as unusable here.
+  verify.sh green.
+- Next: U0.4 Test infrastructure (conftest.py — async httpx client fixture,
+  test-DB fixture with per-test transaction rollback, factory helpers).
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
@@ -205,6 +245,16 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `__init__.py` each (see D7) or mypy will fail with duplicate-module errors.
   `docs/seed.sql` now exists (manual account/user onboarding, V1 has no
   self-registration) — matches the Account-model deferral below.
+  No local Postgres/docker was available in this session — U0.3's
+  `alembic upgrade head` / `downgrade base` round-trip was NOT run against a
+  live DB locally. Verified locally via `alembic upgrade head --sql` and
+  `alembic downgrade 1fd1bea5a842:base --sql` (offline mode, no DB
+  connection — renders the literal DDL and catches syntax/ordering errors)
+  plus manual review against `docs/SCHEMA.sql`. The real round-trip (now
+  including a downgrade→re-upgrade cycle, D12) runs in CI's `integration`
+  job (postgres:16 service) on push/PR — confirm that job goes green as
+  the first live-DB check of this migration. See D11 for the FK
+  `ON DELETE` gap left for M1 to pick up.
 
 
 ## Deferred decisions (tracked, not forgotten)
