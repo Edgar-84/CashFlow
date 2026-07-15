@@ -54,3 +54,28 @@ One unit = one commit (Conventional Commits, mention the unit id).
 Long units: WIP checkpoints after each green verify.sh, squash before
 finishing. The plan file is committed and updated with every unit commit.
 Never commit unless the user explicitly asks.
+
+### Commit message format
+```
+U<milestone>.<unit>: <summary>
+U<milestone>.<unit>: <type>(<scope>): <summary>
+```
+- Always prefix with the unit id: `U<milestone>.<unit>: `.
+- Bare imperative summary for "build the unit" commits, e.g.
+  `U0.3: add initial Alembic migration`.
+- Conventional Commits `type(scope):` after the prefix for narrower fixes/
+  refactors within a unit, e.g.
+  `U0.4: fix(ci): treat zero collected integration tests as a pass`.
+
+### PR body template
+Use when opening a PR that bundles one or more U0.** units:
+```markdown
+## Summary
+- U<id>: <what the unit implements, one line>
+- Decisions: <Dn ids from the plan's Decision log, one-line each>
+
+## Test plan
+- [x] `bash scripts/verify.sh` green
+- [ ] <any CI-only check not run locally, e.g. integration job against live DB>
+- [x] Plan file updated: checkbox ticked, Decision log, STATE refreshed
+```

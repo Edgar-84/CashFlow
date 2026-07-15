@@ -42,7 +42,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
       expense_tags(tag_id); categories.id referenced with ON DELETE RESTRICT.
       AC: alembic upgrade head on a clean DB, then downgrade base, both clean.
       Model: sonnet (mechanical — haiku acceptable).
-- [ ] **U0.4 Test infrastructure**: conftest.py — async httpx client fixture,
+- [x] **U0.4 Test infrastructure**: conftest.py — async httpx client fixture,
       test-DB fixture with per-test transaction rollback, factory helpers
       (make_user/make_expense).
       AC: one dummy repo-less test and one DB round-trip test pass;
@@ -217,6 +217,34 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
      every migration uses the blank-revision + hand-written `op.execute()`
      path.
 
+- D13 (U0.4): `tests/conftest.py`'s env-defaults fixture only sets a var via
+  `monkeypatch.setenv` when it isn't already present in `os.environ`
+  (`os.environ.get(key, default)`), instead of unconditionally overwriting
+  it as `test_health.py`'s old local fixture did. Required so the same
+  autouse fixture can be shared by every test: in CI's `integration` job the
+  real `DATABASE_URL`/`INTERNAL_TOKEN`/etc. are already exported by the
+  workflow, and unconditional overwrite would have clobbered them with the
+  dummy unit-test values. `db_pool` (session-scoped asyncpg pool) similarly
+  reads `os.environ.get("DATABASE_URL", ...)` directly rather than going
+  through `get_settings()`, avoiding a session/function fixture-scope
+  mismatch with the (function-scoped) monkeypatch env fixture; its fallback
+  DSN matches the CI `integration` job's postgres service
+  (`postgresql://postgres:postgres@localhost:5432/cashflow_test`) so
+  `pytest -m integration` also works against a local docker Postgres with no
+  extra config. Not a contract change — test tooling only.
+- D14 (U0.4): `tests/factories.py` helpers (`make_account`, `make_category`,
+  `make_user`, `make_expense`) insert directly via raw `asyncpg` SQL rather
+  than going through a repository layer, since `repositories/` doesn't exist
+  yet (M1). They return the Pydantic `Response` models via
+  `model_validate(dict(row))`. Once M1 lands real repos, M1 tests may prefer
+  calling repos directly; these factories stay useful as thin DB-seeding
+  helpers for tests that aren't testing the repo itself (e.g. service/API
+  tests in M2+).
+- D15 (U0.4): `tests/test_sanity.py` (the pre-U0.4 bootstrap placeholder)
+  deleted per its own comment now that real coverage exists
+  (`test_health.py` via the new `client` fixture = the "dummy repo-less"
+  case; `test_db_roundtrip.py` = the DB round-trip case).
+
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
   tests/test_health.py). U0.2 (models/enums.py, models/errors.py,
@@ -235,8 +263,15 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   CI now round-trips upgrade/downgrade/upgrade against real Postgres,
   `migrations/CLAUDE.md` documents autogenerate as unusable here.
   verify.sh green.
-- Next: U0.4 Test infrastructure (conftest.py — async httpx client fixture,
-  test-DB fixture with per-test transaction rollback, factory helpers).
+- Done: U0.4 (tests/conftest.py — `_test_env` autouse fixture, `app`/`client`
+  fixtures [mocked pool, ASGITransport], `db_pool`/`db_conn` fixtures [real
+  asyncpg pool, per-test transaction + rollback]; tests/factories.py —
+  `make_account`/`make_category`/`make_user`/`make_expense` raw-SQL seed
+  helpers; tests/test_health.py simplified to use the `client` fixture
+  [the dummy repo-less test]; tests/test_db_roundtrip.py added
+  [`@pytest.mark.integration`, full account→category→user→expense insert +
+  read-back]; tests/test_sanity.py deleted, D13-D15). verify.sh green.
+- Next: M1 — U1.1 BaseRepository[T] + user_repo.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
@@ -245,16 +280,14 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `__init__.py` each (see D7) or mypy will fail with duplicate-module errors.
   `docs/seed.sql` now exists (manual account/user onboarding, V1 has no
   self-registration) — matches the Account-model deferral below.
-  No local Postgres/docker was available in this session — U0.3's
-  `alembic upgrade head` / `downgrade base` round-trip was NOT run against a
-  live DB locally. Verified locally via `alembic upgrade head --sql` and
-  `alembic downgrade 1fd1bea5a842:base --sql` (offline mode, no DB
-  connection — renders the literal DDL and catches syntax/ordering errors)
-  plus manual review against `docs/SCHEMA.sql`. The real round-trip (now
-  including a downgrade→re-upgrade cycle, D12) runs in CI's `integration`
-  job (postgres:16 service) on push/PR — confirm that job goes green as
-  the first live-DB check of this migration. See D11 for the FK
-  `ON DELETE` gap left for M1 to pick up.
+  No local Postgres/docker was available in this session either (Docker
+  Desktop installed but its daemon wasn't running) — `test_db_roundtrip.py`
+  was verified by collection only (`pytest -m integration --collect-only`,
+  confirms imports/fixtures wire up) and manual review, NOT executed against
+  a live DB locally. It will get its first live run in CI's `integration`
+  job (same postgres:16 service used for the U0.3 migration round-trip) —
+  confirm that job passes it. See D11 for the FK `ON DELETE` gap left for
+  M1 to pick up.
 
 
 ## Deferred decisions (tracked, not forgotten)
