@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 import asyncpg
@@ -18,6 +19,16 @@ async def make_category(
 ) -> UUID:
     row = await conn.fetchrow(
         "INSERT INTO categories (name, account_id) VALUES ($1, $2) RETURNING id",
+        name,
+        account_id,
+    )
+    assert row is not None
+    return row["id"]
+
+
+async def make_tag(conn: asyncpg.Connection, *, account_id: UUID, name: str = "urgent") -> UUID:
+    row = await conn.fetchrow(
+        "INSERT INTO tags (name, account_id) VALUES ($1, $2) RETURNING id",
         name,
         account_id,
     )
@@ -56,11 +67,12 @@ async def make_expense(
     category_id: UUID,
     amount: int = 1000,
     comment: str | None = None,
+    created_at: datetime | None = None,
 ) -> ExpenseResponse:
     row = await conn.fetchrow(
         """
-        INSERT INTO expenses (amount, comment, category_id, user_id, account_id)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO expenses (amount, comment, category_id, user_id, account_id, created_at)
+        VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()))
         RETURNING id, amount, comment, category_id, user_id, account_id,
                   created_at, updated_at
         """,
@@ -69,6 +81,7 @@ async def make_expense(
         category_id,
         user_id,
         account_id,
+        created_at,
     )
     assert row is not None
     return ExpenseResponse.model_validate(dict(row))
