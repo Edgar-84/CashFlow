@@ -3,6 +3,7 @@ from uuid import UUID
 
 import asyncpg
 
+from models.budget_plan import BudgetPlanResponse
 from models.enums import Role
 from models.expense import ExpenseResponse
 from models.user import UserResponse
@@ -85,3 +86,29 @@ async def make_expense(
     )
     assert row is not None
     return ExpenseResponse.model_validate(dict(row))
+
+
+async def make_budget_plan(
+    conn: asyncpg.Connection,
+    *,
+    account_id: UUID,
+    category_id: UUID,
+    amount: int = 10000,
+    period: str = "monthly",
+    notify_threshold: int = 80,
+) -> BudgetPlanResponse:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO budget_plans (category_id, account_id, amount, period, notify_threshold)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, category_id, account_id, amount, period, notify_threshold,
+                  created_at, updated_at
+        """,
+        category_id,
+        account_id,
+        amount,
+        period,
+        notify_threshold,
+    )
+    assert row is not None
+    return BudgetPlanResponse.model_validate(dict(row))

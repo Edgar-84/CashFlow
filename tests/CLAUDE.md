@@ -44,6 +44,18 @@
 Always compare `int` minor units directly. If a test writes `1000` it means
 10.00 in display. Never `pytest.approx` on money.
 
+When a value comes out of a SQL aggregate (`SUM`, `AVG`, ...), also assert
+its **type** (`type(x) is int`), not just its value — Postgres promotes
+`SUM(bigint)` to `numeric`, and `Decimal(3500) == 3500` is `True`, so a
+value-only assertion won't catch a `Decimal` leak.
+
+## Documentation
+Whenever a test is added or removed, update its entry in `tests/README.md` in
+the same commit — one section per test target (repository tests, service
+tests, API/route tests, bot tests, ...), each entry: test name, a short
+statement of what it verifies, and a link to the function/file under test. A
+stale README is worse than none — don't let this drift.
+
 ## Priority coverage
 1. `PermissionChecker` — every row of the default matrix, plus at least one
    override case.

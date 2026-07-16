@@ -59,7 +59,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
       get_by_period, get_by_category, sum_by_category_month.
       AC: aggregation tests on seeded fixture data (known sums, month
       boundaries, timezone-safe created_at filtering).
-- [ ] **U1.4 budget_plan_repo + check_limit** → returns fill percent
+- [x] **U1.4 budget_plan_repo + check_limit** → returns fill percent
       computed in SQL from BIGINT sums (no float money math).
       AC: parametrized tests — no plan, 0%, exactly threshold, >100%.
       RISKY → reviewer subagent.
@@ -330,6 +330,38 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   static check (it applies the same class-body scoping rule regardless).
   Flag if any future repository subclass needs a method that shadows a
   builtin used in its own class's later annotations.
+- D23 (U1.4): `BudgetPlanRepository.check_limit`'s signature deviates from
+  repositories/CLAUDE.md's originally-documented `check_limit(category_id,
+  account_id) -> float`: now `check_limit(account_id, category_id, *, start,
+  end) -> float | None`. (1) `account_id`-first parameter order matches
+  `expense_repo`'s convention (`get_by_category`, `get_by_period`,
+  `sum_by_category_month`). (2) Takes explicit tz-aware `start`/`end` month
+  bounds from the caller instead of computing "current month" internally,
+  consistent with D20 — the repo layer has no notion of the family's local
+  timezone. (3) Returns `float | None`: `None` signals no `budget_plans` row
+  exists for that (account, category), distinguishing "no plan" from "0%
+  spent" — both are valid, distinct AC cases (parametrized tests: no plan,
+  0%, exactly at `notify_threshold`, >100%). `repositories/CLAUDE.md` and
+  `services/CLAUDE.md` (its notification-flow invariant referenced the old
+  signature) updated to match. SQL: `COALESCE(SUM(e.amount), 0)::bigint`
+  keeps the spent-total an exact `bigint` (no `Decimal` leak, per D20's
+  precedent); `GROUP BY bp.id` (not `bp.amount` — grouping by a non-key
+  column would silently merge/duplicate rows once a second `period` value
+  exists alongside `Period = Literal["monthly"]`, a reviewer-caught latent
+  bug fixed before merge, currently unreachable but cheap to close now).
+  `check_limit` also returns `None` (not a `ZeroDivisionError`) for a
+  non-positive `amount` — `models/budget_plan.py`'s `BudgetPlanBase.amount`
+  has no positivity constraint (pre-existing model gap, not fixed here since
+  `models/` is U0.2's reviewed contract and DB `CHECK` constraints require a
+  migration; flagged for whoever adds `Field(gt=0)`/a schema `CHECK` later).
+  Reviewed by the reviewer subagent same session (APPROVE, with WARNs — the
+  `GROUP BY`/zero-amount items above fixed same session; a
+  `test_duplicate_plan_raises_unique_violation` test added documenting that
+  `budget_plans`' real `UNIQUE(category_id, account_id, period)` constraint
+  — unlike categories/tags' unenforced case, D19 — raises a raw
+  `asyncpg.UniqueViolationError`, untranslated to a domain exception, same
+  pre-existing gap as every other repo today; not fixed here, flagged for
+  M2 service-layer error translation).
 - D18 (U1.1, environment gotcha, not fixed): `alembic upgrade head` fails
   locally on this machine (macOS arm64) with
   `ValueError: the greenlet library is required...` — `uv.lock`'s
@@ -412,7 +444,24 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   9 non-integration); full integration suite (27 tests incl. this unit's 18)
   run and confirmed green against a throwaway local Docker Postgres (D18
   workaround, Docker Desktop started this session to run it).
-- Next: M1 — U1.4 budget_plan_repo + check_limit (RISKY → reviewer subagent).
+- Done: U1.4 (repositories/budget_plan_repo.py — `BudgetPlanRepository(BaseRepository[BudgetPlanResponse])`;
+  `check_limit(account_id, category_id, *, start, end) -> float | None` — LEFT
+  JOIN `expenses` aggregated as `COALESCE(SUM(e.amount), 0)::bigint`, grouped
+  by `bp.id`, percentage = exact-bigint spent / exact-bigint limit (D23).
+  tests/factories.py — `make_budget_plan` added. tests/test_budget_plan_repo.py
+  — `@pytest.mark.integration`, CRUD round-trip, duplicate-plan unique-violation
+  documentation test, get/delete on missing id, and the AC's parametrized
+  `check_limit` cases [no plan → `None`, 0% spent, exactly at `notify_threshold`
+  (80%), >100%] plus zero-amount-plan → `None`, out-of-period exclusion, and
+  account-scoping. repositories/CLAUDE.md and services/CLAUDE.md's notification-
+  flow invariant updated to the real signature (D23). tests/README.md gained the
+  new section per its living-index rule). Reviewed by the reviewer subagent same
+  session (APPROVE with WARNs — `GROUP BY bp.id` fix and zero-amount guard
+  applied same session; duplicate-plan behavior test added; doc-drift WARNs
+  fixed). verify.sh green (9 non-integration tests); full integration suite
+  (47 tests total: 9 unit + 38 integration, this unit's 11) run and confirmed
+  green against a throwaway local Docker Postgres (D18 workaround).
+- Next: M1 — U1.5 permission_repo.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
@@ -427,6 +476,15 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   See D11 for the FK `ON DELETE` gap left for
   M1 to pick up. See D22 before naming any repository method after a builtin
   (`list`, `dict`, etc.) used in that class's later type annotations.
+  See D23: `budget_plans`' real unique constraint raises a raw
+  `asyncpg.UniqueViolationError` on duplicate `(category_id, account_id,
+  period)` inserts, untranslated to a domain exception — same gap as every
+  other repo today (no repo yet implements repositories/CLAUDE.md's
+  "translate unique/FK violations" rule); flag for M2 service-layer error
+  translation. `models/budget_plan.py`'s `amount` has no positivity
+  constraint (no `Field(gt=0)`, no DB `CHECK`) — `check_limit` guards against
+  it (returns `None`), but `create`/`update` still accept `amount <= 0`
+  silently; flag if a future unit tightens the model/schema.
 
 
 ## Deferred decisions (tracked, not forgotten)
