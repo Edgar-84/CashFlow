@@ -86,6 +86,17 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 | `test_check_limit_ignores_expenses_outside_period` | Expenses outside `[start, end)` are excluded from the fill percentage |
 | `test_check_limit_scopes_by_account` | `check_limit()` excludes another account's expenses and plans |
 
+### `test_permission_repo.py` → [`repositories/permission_repo.py`](../repositories/permission_repo.py)
+| Test | Checks |
+|---|---|
+| `test_create_get_update_delete` | Full CRUD round trip |
+| `test_get_missing_returns_none` | `get()` on a missing id returns `None` |
+| `test_delete_missing_returns_false` | `delete()` on a missing id returns `False` |
+| `test_duplicate_user_resource_raises_unique_violation` | `UNIQUE(user_id, resource)` violation propagates as a raw `asyncpg.UniqueViolationError` — untranslated, same gap as `budget_plans` (D23) |
+| `test_get_by_user_and_resource_returns_row` | `get_by_user_and_resource()` returns the matching row |
+| `test_get_by_user_and_resource_returns_none_when_no_row` | Returns `None` when no permission row exists for that (user, resource) |
+| `test_get_by_user_and_resource_scopes_by_user` | Excludes another user's permission row for the same resource |
+
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)
 | Test | Checks | Target |
 |---|---|---|
