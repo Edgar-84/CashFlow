@@ -23,8 +23,9 @@ repositories MUST NOT know about other repositories.
 ## Notification flow (invariant)
 On `ExpenseService.create(...)`:
 1. Save expense via `expense_repo.create(...)`.
-2. `fill_pct = await budget_plan_repo.check_limit(category_id, account_id)`.
-3. If `fill_pct >= budget_plan.notify_threshold`:
+2. `fill_pct = await budget_plan_repo.check_limit(account_id, category_id, start=..., end=...)`
+   (`None` if no plan exists for that category — skip the notification check).
+3. If `fill_pct is not None and fill_pct >= budget_plan.notify_threshold`:
    `await notification_service.send(user, category, fill_pct)`.
 4. Return the created `ExpenseResponse`.
 

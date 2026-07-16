@@ -15,8 +15,12 @@ constructor injection.
 
 ## Query surface (from the spec)
 - `expense_repo`: `get_by_period`, `get_by_category`, `sum_by_category_month`.
-- `budget_plan_repo`: `check_limit(category_id, account_id) -> float` — returns
-  current fill percentage (0.0–100.0+) for the current month.
+- `budget_plan_repo`: `check_limit(account_id, category_id, *, start, end) -> float | None`
+  — fill percentage (0.0–100.0+) for the given period; `None` if no plan
+  exists for that (account, category). Takes explicit tz-aware bounds from
+  the caller rather than computing "current month" internally, same as
+  `expense_repo`'s period methods (see plan Decision log D20) — the repo has
+  no notion of the family's local timezone.
 - `permission_repo`: fetch per-(user, resource) row for the auth pipeline.
 
 ## Rules
@@ -31,6 +35,19 @@ constructor injection.
 - Return typed Pydantic response models (e.g. `ExpenseResponse`), never raw
   `Record` or `dict`. Map at the repo boundary.
 - Money is `BIGINT` (minor units). Read/write as `int`.
+- SQL aggregates (`SUM`, `AVG`, ...) can change asyncpg's returned type even
+  for `BIGINT`/money columns — `SUM(bigint)` is promoted to `numeric` by
+  Postgres to avoid overflow, so asyncpg returns `decimal.Decimal`, not `int`.
+  Always cast aggregates back explicitly (`SUM(amount)::bigint`) before
+  returning from a repository method.
+- Any repository method that performs more than one write statement (e.g. an
+  insert plus junction-table rows, or a delete-then-reinsert) must wrap them
+  in `async with self._conn.transaction():`. asyncpg does not implicitly
+  group separate `fetchrow`/`execute`/`executemany` calls into one
+  transaction — a constraint violation partway through would otherwise leave
+  a partial write. asyncpg nests this as a `SAVEPOINT` when already inside a
+  transaction, so it composes safely with tests' per-test transaction
+  fixture.
 
 ## Error handling
 - `asyncpg.PostgresError` subclasses bubble up. Do NOT wrap in generic
