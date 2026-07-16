@@ -63,7 +63,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
       computed in SQL from BIGINT sums (no float money math).
       AC: parametrized tests — no plan, 0%, exactly threshold, >100%.
       RISKY → reviewer subagent.
-- [ ] **U1.5 permission_repo**.
+- [x] **U1.5 permission_repo**.
       AC: CRUD + UNIQUE(user_id, resource) conflict test.
 Model for M1: sonnet throughout.
 
@@ -362,6 +362,17 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `asyncpg.UniqueViolationError`, untranslated to a domain exception, same
   pre-existing gap as every other repo today; not fixed here, flagged for
   M2 service-layer error translation).
+- D24 (U1.5): `PermissionRepository.get_by_user_and_resource(user_id: UUID,
+  resource: Resource) -> PermissionResponse | None` implements
+  repositories/CLAUDE.md's "fetch per-(user, resource) row for the auth
+  pipeline" query-surface line, which named the purpose but not an exact
+  signature. Takes the `Resource` enum (not a raw `str`) to match the model
+  layer (`PermissionBase.resource: Resource`); `resource.value` used for the
+  SQL parameter since the `resource` column is `TEXT`. Duplicate
+  `(user_id, resource)` inserts raise a raw `asyncpg.UniqueViolationError`
+  (DB has `UNIQUE(user_id, resource)`, docs/SCHEMA.sql), untranslated to a
+  domain exception — same pre-existing gap as `budget_plans` (D23), flagged
+  again for the same M2 service-layer error-translation follow-up.
 - D18 (U1.1, environment gotcha, not fixed): `alembic upgrade head` fails
   locally on this machine (macOS arm64) with
   `ValueError: the greenlet library is required...` — `uv.lock`'s
@@ -461,7 +472,18 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   fixed). verify.sh green (9 non-integration tests); full integration suite
   (47 tests total: 9 unit + 38 integration, this unit's 11) run and confirmed
   green against a throwaway local Docker Postgres (D18 workaround).
-- Next: M1 — U1.5 permission_repo.
+- Done: U1.5 (repositories/permission_repo.py — `PermissionRepository(BaseRepository[PermissionResponse])`;
+  `get_by_user_and_resource(user_id, resource) -> PermissionResponse | None` (D24).
+  tests/test_permission_repo.py — `@pytest.mark.integration`, CRUD round-trip, get/delete
+  on missing id, `UNIQUE(user_id, resource)` conflict test documenting the raw untranslated
+  `asyncpg.UniqueViolationError` (D24, same gap as D23), and `get_by_user_and_resource`
+  found/not-found/scoped-by-user cases. tests/README.md gained the new section). verify.sh
+  green (9 non-integration tests); full integration suite (54 tests total: 9 unit + 45
+  integration, this unit's 7) run and confirmed green against a throwaway local Docker
+  Postgres (D18 workaround).
+- Next: M1 complete — proceed to M2, starting with U2.1 (deps.py: get_current_user +
+  PermissionChecker, MOST COMPLEX LOGIC IN PROJECT, /effort high, reviewer subagent, human
+  reads the diff).
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
