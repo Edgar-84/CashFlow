@@ -55,7 +55,7 @@ Voice input, Mini App, self-registration, OAuth/JWT, scheduled digest jobs
       AC: generic CRUD integration tests via test DB (create/get/update/delete).
 - [x] **U1.2 category_repo + tag_repo**.
       AC: CRUD tests + unique-per-account behavior documented in tests.
-- [ ] **U1.3 expense_repo** incl. expense_tags junction handling,
+- [x] **U1.3 expense_repo** incl. expense_tags junction handling,
       get_by_period, get_by_category, sum_by_category_month.
       AC: aggregation tests on seeded fixture data (known sums, month
       boundaries, timezone-safe created_at filtering).
@@ -285,6 +285,51 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   this unit's scope. Flag before any upstream code (service layer) assumes
   category/tag names are unique per account — they are not, at the DB level,
   today.
+- D20 (U1.3): `ExpenseRepository.get_by_period`/`sum_by_category_month` take explicit
+  tz-aware `start`/`end` datetime bounds from the caller rather than computing
+  "current month" internally — the repo has no notion of the family's local
+  timezone (not in config), so pushing boundary computation to the caller
+  (future `statistics_service`/`budget_service`) keeps the repo timezone-
+  agnostic while still being correct: TIMESTAMPTZ comparison is instant-based,
+  so any tz-aware bound works regardless of the offset the caller expresses it
+  in. Tested explicitly with equivalent instants expressed in different UTC
+  offsets straddling a month boundary. Review follow-up (same session):
+  `sum_by_category_month`'s SQL changed to `SUM(amount)::bigint AS total` —
+  Postgres promotes `SUM(bigint)` to `numeric`, so asyncpg was returning
+  `decimal.Decimal` instead of `int`, a real money-rule violation the
+  original test didn't catch (`Decimal(3500) == 3500` passes despite the
+  wrong type). Now asserted explicitly with `type(...) is int`. Also added
+  account-scoping tests for `get_by_period` and `sum_by_category_month`
+  (previously only `get_by_category` had one).
+- D21 (U1.3): `ExpenseRepository` overrides `get`/`list`/`create`/`update` (not
+  just adding new methods) to attach `tags` via a join on `expense_tags`,
+  since `BaseRepository`'s generic CRUD has no notion of a junction table and
+  `ExpenseResponse.tags` must be populated for these to be meaningful. `create`
+  and `update` accept an optional `tag_ids` key in the input dict (matching
+  `ExpenseCreate`/`ExpenseUpdate.model_dump()`); `update`'s `tag_ids` is
+  replace-semantics (delete then reinsert), not a diff/merge. `delete` is not
+  overridden — `expense_tags.expense_id` has `ON DELETE CASCADE` (docs/SCHEMA.sql),
+  so removing the expense row is sufficient; confirmed by an explicit test.
+  Review follow-up (same session): `create`/`update` now wrap their
+  expense-row + junction-row writes in `async with self._conn.transaction():`
+  (asyncpg nests this as a SAVEPOINT when already inside a transaction, so it
+  composes safely with the test fixture's per-test transaction) — without it,
+  a PK violation on a duplicate `tag_id` or an FK violation on a stale one
+  would abort partway through and leave an expense created/updated with only
+  some of its intended tags. Covered by
+  `test_create_with_duplicate_tag_ids_rolls_back_whole_expense`.
+- D22 (U1.3, mypy/runtime gotcha): defining a method literally named `list` on
+  `ExpenseRepository` broke every other method's `list[...]` return-type
+  annotation in the same class body — Python (and mypy, matching its scoping)
+  resolves a bare name in a class body against names already bound earlier in
+  that same class body before falling back to builtins, so `list[ExpenseResponse]`
+  after the `list` method definition resolved to the method itself, not
+  `builtins.list` (`TypeError: 'function' object is not subscriptable` at
+  import time). Fixed by moving the `list` method to be the last definition in
+  the class; `from __future__ import annotations` alone did not fix mypy's
+  static check (it applies the same class-body scoping rule regardless).
+  Flag if any future repository subclass needs a method that shadows a
+  builtin used in its own class's later annotations.
 - D18 (U1.1, environment gotcha, not fixed): `alembic upgrade head` fails
   locally on this machine (macOS arm64) with
   `ValueError: the greenlet library is required...` — `uv.lock`'s
@@ -345,7 +390,29 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   integration suite (15 tests incl. this unit's 10) run and confirmed green
   against a throwaway local Docker Postgres with `docs/SCHEMA.sql` applied
   via psql (same D18 workaround as U1.1).
-- Next: M1 — U1.3 expense_repo.
+- Done: U1.3 (repositories/expense_repo.py — `ExpenseRepository(BaseRepository[ExpenseResponse])`;
+  overrides `get`/`list`/`create`/`update` to attach `tags` via an
+  `expense_tags` JOIN `tags` query (D21), `create`/`update` wrapped in
+  `self._conn.transaction()` (D21 review follow-up); `get_by_period`,
+  `get_by_category`, `sum_by_category_month` — the two period-based methods
+  take explicit tz-aware `start`/`end` bounds (D20), `sum_by_category_month`
+  casts `SUM(amount)::bigint` to avoid a `Decimal` leak (D20 review
+  follow-up). tests/factories.py — `make_expense` gained an optional
+  `created_at` override (single `COALESCE`-based query, no branch
+  duplication), added `make_tag`. tests/test_expense_repo.py —
+  `@pytest.mark.integration`, CRUD round-trip, tag attach/replace/cascade-on-
+  delete, get_by_category account+category filtering, get_by_period/
+  sum_by_category_month with known sums, cross-timezone month-boundary
+  cases, account-scoping cases for get_by_period/sum_by_category_month, an
+  `int`-not-`Decimal` type assertion, and a duplicate-tag_ids atomicity
+  test proving the transaction wrap rolls back the whole expense). Reviewed
+  by the reviewer subagent same session (BLOCKER: Decimal leak; WARN: no
+  transaction wrap; WARN: missing account-scoping/atomicity tests; NIT:
+  factories duplication) — all four fixed. verify.sh green (36 tests total,
+  9 non-integration); full integration suite (27 tests incl. this unit's 18)
+  run and confirmed green against a throwaway local Docker Postgres (D18
+  workaround, Docker Desktop started this session to run it).
+- Next: M1 — U1.4 budget_plan_repo + check_limit (RISKY → reviewer subagent).
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
@@ -358,7 +425,8 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   use a throwaway Docker Postgres + `docs/SCHEMA.sql` via `psql` for local
   integration-test runs until the `uv.lock`/greenlet marker gap is fixed.
   See D11 for the FK `ON DELETE` gap left for
-  M1 to pick up.
+  M1 to pick up. See D22 before naming any repository method after a builtin
+  (`list`, `dict`, etc.) used in that class's later type annotations.
 
 
 ## Deferred decisions (tracked, not forgotten)
