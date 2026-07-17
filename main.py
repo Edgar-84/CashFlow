@@ -8,6 +8,7 @@ import database
 from api.budgets import router as budgets_router
 from api.categories import router as categories_router
 from api.expenses import router as expenses_router
+from api.statistics import router as statistics_router
 from api.tags import router as tags_router
 from api.users import router as users_router
 from config import get_settings
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(tags_router)
     app.include_router(expenses_router)
     app.include_router(budgets_router)
+    app.include_router(statistics_router)
 
     return app
 
