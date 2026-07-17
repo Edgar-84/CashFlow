@@ -5,6 +5,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 import database
+from api.categories import router as categories_router
+from api.tags import router as tags_router
 from api.users import router as users_router
 from config import get_settings
 from models.errors import ConflictError, NotFoundError, PermissionDeniedError
@@ -42,6 +44,8 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     app.include_router(users_router)
+    app.include_router(categories_router)
+    app.include_router(tags_router)
 
     return app
 

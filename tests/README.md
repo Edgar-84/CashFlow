@@ -142,6 +142,74 @@ Hermetic — `UserRepositoryProtocol` replaced with an in-memory `FakeUserRepo`.
 | `test_delete_removes_user` | `delete()` removes the row via the repo |
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
 
+## Service tests (`test_category_service.py`) → [`services/category_service.py`](../services/category_service.py)
+Hermetic — `CategoryRepositoryProtocol` replaced with an in-memory `FakeCategoryRepo`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_list_scopes_by_account` | `list()` excludes another account's categories |
+| `test_get_returns_category_in_account` | `get()` returns a category belonging to the given account |
+| `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
+| `test_get_foreign_account_raises_not_found` | `get()` on a category from another account raises `NotFoundError` |
+| `test_create_forces_account_id_from_caller` | `create()` stamps the caller's `account_id` |
+| `test_update_changes_fields` | `update()` applies a partial `CategoryUpdate` |
+| `test_update_explicit_null_is_ignored_not_nulled` | An explicit `{"name": null}` is ignored, not sent to the repo as `SET name = NULL` (same D30 precedent as users) |
+| `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
+| `test_delete_removes_category` | `delete()` removes the row via the repo |
+| `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
+| `test_delete_referenced_category_raises_conflict` | A `RESTRICT`-violating delete (`asyncpg.ForeignKeyViolationError` from the repo) is translated to `ConflictError` (plan Decision log D5) |
+
+## Service tests (`test_tag_service.py`) → [`services/tag_service.py`](../services/tag_service.py)
+Hermetic — `TagRepositoryProtocol` replaced with an in-memory `FakeTagRepo`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_list_scopes_by_account` | `list()` excludes another account's tags |
+| `test_get_returns_tag_in_account` | `get()` returns a tag belonging to the given account |
+| `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
+| `test_get_foreign_account_raises_not_found` | `get()` on a tag from another account raises `NotFoundError` |
+| `test_create_forces_account_id_from_caller` | `create()` stamps the caller's `account_id` |
+| `test_update_changes_fields` | `update()` applies a partial `TagUpdate` |
+| `test_update_explicit_null_is_ignored_not_nulled` | An explicit `{"name": null}` is ignored, same D30 precedent |
+| `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
+| `test_delete_removes_tag` | `delete()` removes the row via the repo |
+| `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
+
+## API/route tests (`test_categories_api.py`) → [`api/categories.py`](../api/categories.py)
+Hermetic — the real app with `CategoryRepository`/`UserRepository`/`PermissionRepository`
+replaced by in-memory fakes via `app.dependency_overrides`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_list_categories_as_member_returns_account_categories` | Member `GET /categories` returns the account's categories (default matrix: read-only) |
+| `test_get_category_as_viewer` | Viewer `GET /categories/{id}` returns the category |
+| `test_get_missing_category_is_404` | Unknown id → 404 |
+| `test_create_category_as_admin` | Admin `POST /categories` → 201 |
+| `test_create_category_as_member_is_403` | Member `POST /categories` → 403 (default matrix: no create) |
+| `test_create_category_as_viewer_is_403` | Viewer `POST /categories` → 403 |
+| `test_update_category_as_admin` | Admin `PATCH /categories/{id}` applies a partial update |
+| `test_update_category_as_member_is_403` | Member `PATCH /categories/{id}` → 403 |
+| `test_delete_category_as_admin` | Admin `DELETE /categories/{id}` → 204, row removed |
+| `test_delete_category_as_member_is_403` | Member `DELETE /categories/{id}` → 403 |
+| `test_delete_referenced_category_as_admin_is_409` | `RESTRICT`-violating delete → 409 (`ConflictError` mapped by `main.py`'s handler) |
+
+## API/route tests (`test_tags_api.py`) → [`api/tags.py`](../api/tags.py)
+Hermetic — the real app with `TagRepository`/`UserRepository`/`PermissionRepository`
+replaced by in-memory fakes via `app.dependency_overrides`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_list_tags_as_member_returns_account_tags` | Member `GET /tags` returns the account's tags (default matrix: read-only) |
+| `test_get_tag_as_viewer` | Viewer `GET /tags/{id}` returns the tag |
+| `test_get_missing_tag_is_404` | Unknown id → 404 |
+| `test_create_tag_as_admin` | Admin `POST /tags` → 201 |
+| `test_create_tag_as_member_is_403` | Member `POST /tags` → 403 |
+| `test_create_tag_as_viewer_is_403` | Viewer `POST /tags` → 403 |
+| `test_update_tag_as_admin` | Admin `PATCH /tags/{id}` applies a partial update |
+| `test_update_tag_as_member_is_403` | Member `PATCH /tags/{id}` → 403 |
+| `test_delete_tag_as_admin` | Admin `DELETE /tags/{id}` → 204, row removed |
+| `test_delete_tag_as_member_is_403` | Member `DELETE /tags/{id}` → 403 |
+
 ## API/route tests (`test_users_api.py`) → [`api/users.py`](../api/users.py)
 Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replaced by
 `TgLookupFakeUserRepo` via `app.dependency_overrides`. No DB.
@@ -171,8 +239,8 @@ Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replac
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Service tests (M2: categories/tags/expenses/budgets/statistics services)
-- API/route tests (M2: categories/tags/expenses/budgets/statistics)
+- Service tests (M2: expenses/budgets/statistics services)
+- API/route tests (M2: expenses/budgets/statistics)
 - Notification service tests (M3)
 - Bot tests (M4: client, middlewares, handlers)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)

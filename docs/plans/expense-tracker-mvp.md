@@ -79,7 +79,7 @@ Model for M1: sonnet throughout.
       human reads the diff.
 - [x] **U2.2 users: service + API** (admin-only CRUD).
       AC: route tests incl. member/viewer → 403.
-- [ ] **U2.3 categories + tags: services + API**.
+- [x] **U2.3 categories + tags: services + API**.
       AC: HTTP CRUD tests; RESTRICT delete returns clean 409 with message.
 - [ ] **U2.4 expenses: service (CRUD only, no notification yet) + API**.
       AC: create/list/update/delete via HTTP; own_only enforced (member
@@ -445,6 +445,30 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `test_update_mixes_real_value_with_ignored_null` (service level) and
   `test_update_user_explicit_null_is_ignored_not_500` (API level). Found by
   a review pass on this unit's diff.
+- D32 (U2.3): `CategoryService`/`TagService` follow `UserService`'s D29/D30
+  patterns exactly: constructor-DI'd structural `*RepositoryProtocol`,
+  `account_id` always the caller's own (never client-supplied), and
+  `update()` drops explicit `None` values from the payload before calling
+  the repo — `categories.name`/`tags.name` are `NOT NULL` columns with no
+  "clear" semantics, same gap D30 fixed for `users.name`/`users.role`.
+  `CategoryService.delete` additionally catches
+  `asyncpg.ForeignKeyViolationError` (raised by `expenses.category_id`/
+  `budget_plans.category_id`'s `ON DELETE RESTRICT`, D5) and translates it
+  to `ConflictError`, reusing D28's domain type rather than adding a new
+  one — `main.py`'s existing `ConflictError`→409 handler covers it with no
+  new wiring. `TagService.delete` has no equivalent try/except:
+  `expense_tags.tag_id` is `ON DELETE CASCADE` (docs/SCHEMA.sql), so a tag
+  delete cannot raise a FK violation. Routes use `PermissionChecker`
+  (not `require_admin` — categories/tags are in the `Resource` enum, D27
+  doesn't apply) with no `enforce_ownership` call: the default matrix has
+  no `own_only` concept for these two resources (api/CLAUDE.md, D26).
+  `api/categories.py`/`api/tags.py`'s `PermissionChecker(...)` call sites use
+  the `Resource`/`Action` enum members, not string literals — these are
+  categories/tags being the first routes to actually wire `PermissionChecker`
+  (U2.1 built and tested it, U2.2's `users` used `require_admin` instead).
+  `api/CLAUDE.md`'s route-pattern example updated to match (enum form is now
+  the documented default for new call sites; string form still supported,
+  D26, and still covered by `test_permission_checker_accepts_enum_and_string_forms`).
 - D31 (post-U2.2 architecture review): no Unit-of-Work / request-wide
   transaction layer in V1 — evaluated and deliberately deferred. Rationale:
   (1) UoW buys atomicity, not performance — asyncpg's pool already covers
@@ -613,16 +637,39 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   reaching the DB as `SET name = NULL` against a `NOT NULL` column and
   surfacing as an unhandled 500; 3 tests added for this. verify.sh green
   (102 non-integration tests: 76 + 23 new + 3 review-fix).
-- Next: U2.3 (categories + tags: services + API). Notes for U2.3+:
-  (1) `require_admin` (D27) is specific to `users`/`permissions` — categories/
-  tags/budget_plans/expenses stay on `PermissionChecker` + the `Resource`
-  enum, unchanged. (2) `ConflictError` (D28) is now available for any future
+- Done: U2.3 (services/category_service.py — `CategoryService`, DI'd via a
+  structural `CategoryRepositoryProtocol`; services/tag_service.py —
+  `TagService`, DI'd via a structural `TagRepositoryProtocol`; both
+  account-scoped, both drop explicit-`None` update payloads (D30 pattern,
+  D32); `CategoryService.delete` translates a `RESTRICT`-triggered
+  `asyncpg.ForeignKeyViolationError` to `ConflictError` (D32). api/deps.py
+  — `get_category_repo`/`get_tag_repo`/`get_category_service`/
+  `get_tag_service` factories. api/categories.py, api/tags.py — full CRUD
+  routers gated by `PermissionChecker(Resource.CATEGORIES/TAGS, Action...)`
+  (enum form, D32), no `enforce_ownership` call (no `own_only` concept for
+  these resources).
+  main.py — registers both routers (no new exception handler needed,
+  reuses the existing `ConflictError`→409 mapping).
+  tests/test_category_service.py, tests/test_tag_service.py — hermetic,
+  `FakeCategoryRepo`/`FakeTagRepo`, account-scoping, explicit-null-ignored,
+  not-found cases; category service also covers the RESTRICT→`ConflictError`
+  translation. tests/test_categories_api.py, tests/test_tags_api.py —
+  hermetic HTTP tests via the real app + `app.dependency_overrides`
+  (user/permission/category/tag repos all faked), admin/member/viewer
+  200-vs-403 per route, 404 mapping, category RESTRICT-delete→409 case.
+  tests/README.md gained all four new sections). verify.sh green
+  (144 non-integration tests: 102 + 42 new).
+- Next: U2.4 (expenses: service (CRUD only, no notification yet) + API).
+  Notes for U2.4: (1) `ConflictError` (D28) is now available for any future
   service that needs to translate a unique-violation (e.g. `budget_plans`'
   `UNIQUE(category_id, account_id, period)`, D23) — reuse it rather than
-  inventing another domain error. (3) Step 6 is opt-in by design (D26):
-  when wiring U2.4, the route reads `request.state.permission_decision` and
-  passes it into the service (services never touch `Request`); U2.4's review
-  must confirm every own_only-capable route calls `enforce_ownership`.
+  inventing another domain error, same as `CategoryService`'s
+  FK-violation→`ConflictError` translation (D32). (2) Step 6 is opt-in by
+  design (D26): when wiring U2.4, the route reads
+  `request.state.permission_decision` and passes it into the service
+  (services never touch `Request`); U2.4's review must confirm every
+  own_only-capable route calls `enforce_ownership` — expenses is the first
+  resource with real `own_only` semantics (member update/delete own only).
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly

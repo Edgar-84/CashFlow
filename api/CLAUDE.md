@@ -24,11 +24,16 @@ model. Business logic and DB access are forbidden here.
 @router.post("/expenses", response_model=ExpenseResponse)
 async def create_expense(
     data: ExpenseCreate,
-    user: User = Depends(PermissionChecker("expenses", "create")),
+    user: User = Depends(PermissionChecker(Resource.EXPENSES, Action.CREATE)),
     service: ExpenseService = Depends(),
 ):
     return await service.create(data, user)
 ```
+Prefer the `Resource`/`Action` enum members (`models/enums.py`) over raw strings
+at call sites — `PermissionChecker` accepts both (`Resource | str`, `Action | str`,
+D26), but the enum form gets typo-checking from mypy instead of a runtime
+`ValueError`. String literals still work and existing tests cover both forms;
+this is a style default for new call sites, not a contract change.
 
 ## Choosing an auth dependency
 Three tiers, pick the narrowest that fits the route:
