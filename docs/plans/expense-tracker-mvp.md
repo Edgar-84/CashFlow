@@ -69,7 +69,7 @@ Model for M1: sonnet throughout.
 
 ## Milestone M2 — Auth, permissions, services, API
 
-- [ ] **U2.1 deps.py: get_current_user + PermissionChecker** implementing the
+- [x] **U2.1 deps.py: get_current_user + PermissionChecker** implementing the
       6-step enforcement order from CLAUDE.md, plus X-Internal-Token check
       (decision D1).
       AC: parametrized test grid over the full default matrix
@@ -373,6 +373,36 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   (DB has `UNIQUE(user_id, resource)`, docs/SCHEMA.sql), untranslated to a
   domain exception — same pre-existing gap as `budget_plans` (D23), flagged
   again for the same M2 service-layer error-translation follow-up.
+- D25 (U2.1): `api/deps.py` is the API layer's composition root — the one
+  place under `api/` that imports from `repositories/`. `api/CLAUDE.md`'s
+  blanket "Never import from `repositories/` here" rule contradicted the same
+  doc's Structure/Auth sections (which put repo/service factories and the
+  `user_repo` lookup inside `deps.py`); the rule line was clarified to
+  "never in router modules; `deps.py` is the exception". `get_current_user`
+  resolves tg_id via the generic `user_repo.list(tg_id=...)` filter instead
+  of adding a `get_by_tg_id` method — no repo edit needed, keeps the unit
+  inside `api/` + tests.
+- D26 (U2.1): PermissionChecker design. The 6-step order is split into:
+  `get_current_user` (step 1: `X-Internal-Token` via `secrets.compare_digest`
+  + `X-Telegram-User-Id` → user, any failure → 401; the tg header is declared
+  `str` and parsed by hand so a malformed value 401s instead of FastAPI's
+  422), pure `resolve_permission(role, resource, action, permission_row) ->
+  PermissionDecision(allowed, own_only)` (steps 2–5 — this is what the AC's
+  48-cell grid tests directly), and `enforce_ownership(decision, user,
+  owner_id)` (step 6 — the checker can't know the target record at
+  dependency-resolution time, so `PermissionChecker.__call__` stores the
+  decision on `request.state.permission_decision` and the route/service
+  owning the record applies step 6; call-site choice deferred to U2.4).
+  `__call__` returns the user per the api/CLAUDE.md route-pattern contract
+  and accepts `Resource | str` / `Action | str` (contract shows string form).
+  Literal step-order semantics locked in by tests: step 2 before 4 → an
+  all-False row cannot restrict an admin; step 3 before 4 → a viewer can
+  never be granted writes, but a row's `can_read=False` DOES restrict a
+  viewer's reads (step 3 only blocks writes); an override row replaces role
+  defaults entirely (a member can lose default expense create); in member
+  defaults `own_only` applies only to expense update/delete (matrix C·R are
+  unqualified). Repo factories (`get_user_repo`/`get_permission_repo`) are
+  the dependency_overrides seam that keeps the unit tests hermetic.
 - D18 (U1.1, environment gotcha, not fixed): `alembic upgrade head` fails
   locally on this machine (macOS arm64) with
   `ValueError: the greenlet library is required...` — `uv.lock`'s
@@ -481,9 +511,35 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   green (9 non-integration tests); full integration suite (54 tests total: 9 unit + 45
   integration, this unit's 7) run and confirmed green against a throwaway local Docker
   Postgres (D18 workaround).
-- Next: M1 complete — proceed to M2, starting with U2.1 (deps.py: get_current_user +
-  PermissionChecker, MOST COMPLEX LOGIC IN PROJECT, /effort high, reviewer subagent, human
-  reads the diff).
+- Done: U2.1 (api/deps.py — `verify_internal_token`, `get_current_user`,
+  `get_user_repo`/`get_permission_repo` factories, pure `resolve_permission`
+  (steps 2–5) + `PermissionDecision(allowed, own_only)`, `enforce_ownership`
+  (step 6), `PermissionChecker` returning the user per the route-pattern
+  contract and exposing the decision on `request.state.permission_decision`
+  (D25, D26); api/__init__.py added per D7; api/CLAUDE.md rule line
+  clarified (D25). tests/test_deps.py — hermetic (fake repos via
+  dependency_overrides, no DB): explicit 48-cell default-matrix grid,
+  override-row widen/narrow/own_only cases, admin-ignores-row,
+  viewer-cannot-be-overridden(+row-can-restrict-viewer-read), step-6
+  ownership cases, and HTTP-level 401/403 cases through ASGITransport
+  incl. missing/wrong token, missing/malformed/unknown tg_id.
+  tests/README.md gained the new section). Reviewed by the reviewer subagent
+  same session (APPROVE; WARNs fixed same session: `resolve_permission` now
+  fails closed on an unrecognized role instead of falling through to allow —
+  `users.role` has no DB CHECK; admin-ignores-row test asserts full decision
+  equality so a leaked `own_only` can't slip past; async-fixture NIT fixed).
+  verify.sh green (76 non-integration tests). Human still to read the diff
+  per plan (MOST COMPLEX LOGIC IN PROJECT).
+- Next: U2.2 (users: service + API, admin-only CRUD). Notes for U2.2+:
+  (1) repos raise raw `asyncpg.UniqueViolationError` (D23/D24) — the M2
+  service layer owns translating those to domain errors. (2) `Resource` has
+  only the 4 data resources — no `users`/`permissions` members — so
+  `PermissionChecker("users", ...)` would raise `ValueError`; U2.2 needs
+  either new enum members (contract change → Decision log) or a separate
+  admin-gate dependency in deps.py. (3) Step 6 is opt-in by design (D26):
+  when wiring U2.4, the route reads `request.state.permission_decision` and
+  passes it into the service (services never touch `Request`); U2.4's review
+  must confirm every own_only-capable route calls `enforce_ownership`.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
