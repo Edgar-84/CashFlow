@@ -77,7 +77,7 @@ Model for M1: sonnet throughout.
       cases + viewer-cannot-be-overridden case + missing/bad token → 401.
       MOST COMPLEX LOGIC IN PROJECT → /effort high, reviewer subagent,
       human reads the diff.
-- [ ] **U2.2 users: service + API** (admin-only CRUD).
+- [x] **U2.2 users: service + API** (admin-only CRUD).
       AC: route tests incl. member/viewer → 403.
 - [ ] **U2.3 categories + tags: services + API**.
       AC: HTTP CRUD tests; RESTRICT delete returns clean 409 with message.
@@ -403,6 +403,68 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   defaults `own_only` applies only to expense update/delete (matrix C·R are
   unqualified). Repo factories (`get_user_repo`/`get_permission_repo`) are
   the dependency_overrides seam that keeps the unit tests hermetic.
+- D27 (U2.2): `users`/`permissions` are admin-only CRUD with no override-row or
+  `own_only` semantics in the matrix, and aren't in the `Resource` enum. Rather
+  than extend that enum (a contract change to U0.2/U2.1's reviewed matrix
+  types) or force them through `PermissionChecker`, `api/deps.py` gained a
+  standalone `require_admin` dependency: authenticate via `get_current_user`,
+  then a plain `role is Role.ADMIN` check, 403 otherwise. Resolves the open
+  question left in U2.1's handoff note. `PermissionChecker`/`Resource` are
+  unchanged.
+- D28 (U2.2): added `ConflictError(DomainError)` to `models/errors.py` — no
+  existing domain error fit "operation violates a uniqueness constraint".
+  Anticipated by D23/D24 (repos raise raw `asyncpg.UniqueViolationError`,
+  M2 services own translating it). `UserService.create` catches
+  `asyncpg.UniqueViolationError` (duplicate `tg_id`, `users.tg_id UNIQUE`) and
+  raises `ConflictError`; `main.py` gained its first domain-exception→HTTP
+  mapping (`NotFoundError`→404, `ConflictError`→409, `PermissionDeniedError`→403,
+  via `@app.exception_handler`, per api/CLAUDE.md's "global handler in
+  main.py" option) since no route needed one before this unit.
+- D29 (U2.2): `UserService.create`/`update`/`delete`/`get` take an explicit
+  `account_id` param (the calling admin's own, from `require_admin`'s
+  returned user) and ignore/override `UserCreate.account_id` even though
+  that field is part of the U0.2 contract — root CLAUDE.md's "never trust
+  client-supplied UUIDs" applies regardless of what the model shape allows;
+  not a model change, just a service-layer rule. `get`/`update`/`delete`
+  404 (not 403) when a `user_id` exists but belongs to a different account,
+  so admins can't probe for other accounts' user ids. `UserService` depends
+  on a `UserRepositoryProtocol` (structural, tests/CLAUDE.md's "repository
+  interfaces are protocols/duck-typed"), not the concrete `UserRepository`,
+  so `tests/test_user_service.py` passes an in-memory `FakeUserRepo` with no
+  DB.
+- D30 (U2.2 review fix): `UserService.update` filters explicit `None` values
+  out of the `UserUpdate.model_dump(exclude_unset=True)` payload before
+  calling the repo. Without this, `PATCH /users/{id}` with `{"name": null}` or
+  `{"role": null}` reached `UserRepository.update` as `SET name = NULL`
+  against `users.name`/`users.role`, both `NOT NULL` columns — an uncaught
+  `asyncpg.NotNullViolationError` surfacing as an unhandled 500. Since
+  neither field has a legitimate null state at the DB level, an explicit
+  null is now treated the same as an omitted field (silently ignored, not a
+  422) rather than adding a new domain error type for this one case. Covered
+  by `test_update_explicit_null_fields_are_ignored_not_nulled`,
+  `test_update_mixes_real_value_with_ignored_null` (service level) and
+  `test_update_user_explicit_null_is_ignored_not_500` (API level). Found by
+  a review pass on this unit's diff.
+- D31 (post-U2.2 architecture review): no Unit-of-Work / request-wide
+  transaction layer in V1 — evaluated and deliberately deferred. Rationale:
+  (1) UoW buys atomicity, not performance — asyncpg's pool already covers
+  connection reuse, and a request-wide BEGIN/COMMIT would only hold
+  connections in a transaction longer on read-only routes; (2) V1 has no
+  cross-repo multi-write anywhere in the plan: multi-statement writes inside
+  one repo are already wrapped in `conn.transaction()` per
+  repositories/CLAUDE.md, and the one cross-service flow (expense →
+  notification, U3.1) is explicitly anti-transactional (a failed send must
+  NOT roll back the expense); (3) the retrofit is cheap because the
+  architecture is already UoW-shaped — `database.get_connection` is a
+  per-request dependency and FastAPI caches it, so all repos in one request
+  already share a single connection. ADD IT WHEN the first cross-repo
+  atomic write appears — expected first case: V2 bot self-registration
+  (account + user + seeded "General" category + permission row must commit
+  together). Implementation then: a small UoW class (connection +
+  `conn.transaction()` + repo accessors) or a transactional variant of
+  `get_connection`, wired in `api/deps.py`; no repo/service rewrites
+  required. Current session/transaction model is documented in
+  repositories/CLAUDE.md ("Connection & transaction model").
 - D18 (U1.1, environment gotcha, not fixed): `alembic upgrade head` fails
   locally on this machine (macOS arm64) with
   `ValueError: the greenlet library is required...` — `uv.lock`'s
@@ -530,13 +592,34 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   equality so a leaked `own_only` can't slip past; async-fixture NIT fixed).
   verify.sh green (76 non-integration tests). Human still to read the diff
   per plan (MOST COMPLEX LOGIC IN PROJECT).
-- Next: U2.2 (users: service + API, admin-only CRUD). Notes for U2.2+:
-  (1) repos raise raw `asyncpg.UniqueViolationError` (D23/D24) — the M2
-  service layer owns translating those to domain errors. (2) `Resource` has
-  only the 4 data resources — no `users`/`permissions` members — so
-  `PermissionChecker("users", ...)` would raise `ValueError`; U2.2 needs
-  either new enum members (contract change → Decision log) or a separate
-  admin-gate dependency in deps.py. (3) Step 6 is opt-in by design (D26):
+- Done: U2.2 (services/user_service.py — `UserService`, DI'd via a structural
+  `UserRepositoryProtocol` (D29); `list`/`get`/`create`/`update`/`delete` all
+  scoped to an explicit `account_id` param (the admin's own, never the
+  client-supplied `UserCreate.account_id`, D29); `create` translates
+  `asyncpg.UniqueViolationError` (duplicate `tg_id`) to `ConflictError` (D28).
+  api/deps.py — `require_admin` (D27), `get_user_service` factory. api/users.py
+  — `GET/POST /users`, `GET/PATCH/DELETE /users/{id}`, all gated by
+  `require_admin`. main.py — registers the router and the project's first
+  domain-exception→HTTP handlers (`NotFoundError`→404, `ConflictError`→409,
+  `PermissionDeniedError`→403, D28). models/errors.py — `ConflictError` added
+  (D28). services/__init__.py added per D7.
+  tests/test_user_service.py — hermetic, `FakeUserRepo`, account-scoping,
+  account_id-override, duplicate-tg_id→`ConflictError`, not-found cases.
+  tests/test_users_api.py — hermetic HTTP tests via the real app +
+  `app.dependency_overrides`, admin/member/viewer 200-vs-403 per route,
+  404/409 mapping, spoofed-account_id-ignored case. tests/README.md gained
+  both new sections). Review fix (D30): `UserService.update` drops explicit
+  `None` values from the update payload — an unfiltered `{"name": null}` was
+  reaching the DB as `SET name = NULL` against a `NOT NULL` column and
+  surfacing as an unhandled 500; 3 tests added for this. verify.sh green
+  (102 non-integration tests: 76 + 23 new + 3 review-fix).
+- Next: U2.3 (categories + tags: services + API). Notes for U2.3+:
+  (1) `require_admin` (D27) is specific to `users`/`permissions` — categories/
+  tags/budget_plans/expenses stay on `PermissionChecker` + the `Resource`
+  enum, unchanged. (2) `ConflictError` (D28) is now available for any future
+  service that needs to translate a unique-violation (e.g. `budget_plans`'
+  `UNIQUE(category_id, account_id, period)`, D23) — reuse it rather than
+  inventing another domain error. (3) Step 6 is opt-in by design (D26):
   when wiring U2.4, the route reads `request.state.permission_decision` and
   passes it into the service (services never touch `Request`); U2.4's review
   must confirm every own_only-capable route calls `enforce_ownership`.

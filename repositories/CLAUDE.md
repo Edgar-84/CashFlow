@@ -23,13 +23,36 @@ constructor injection.
   no notion of the family's local timezone.
 - `permission_repo`: fetch per-(user, resource) row for the auth pipeline.
 
+## Connection & transaction model (how it works today)
+- One `asyncpg.Pool` for the whole app, created in `main.py`'s lifespan via
+  `database.init_pool(...)` and closed on shutdown. `database.get_pool()`
+  raises if called before init (e.g. in unit tests that never touch the DB).
+- Per HTTP request: `database.get_connection` is a FastAPI generator
+  dependency — it acquires one connection from the pool, yields it, and
+  releases it back when the response is done. FastAPI caches dependency
+  results per request, so **every repository built for one request (in
+  `api/deps.py`) shares the same connection**.
+- There is **no request-wide transaction and no Unit-of-Work layer** (plan
+  Decision log D31): each statement autocommits. Atomicity is a repository-
+  level concern — any repo method with more than one write wraps them in
+  `async with self._conn.transaction():` (see Rules below).
+- Cross-service flows are deliberately non-atomic: a failed notification
+  must never roll back the expense that triggered it (root CLAUDE.md
+  invariant).
+- If a genuinely atomic cross-repo write appears (expected first: V2 bot
+  self-registration), introduce a small UoW or a transactional variant of
+  `get_connection` then — see D31. Do not add request-wide transactions
+  preemptively.
+
 ## Rules
 - **Raw SQL only.** No ORM, no query builder. Prepared statements via
   `conn.fetch(...)`, `conn.fetchrow(...)`, `conn.execute(...)` with `$1`, `$2`
   placeholders.
 - **All I/O is async.** `async def`, `await`, no blocking calls.
-- Connection is passed in via a context manager (`async with pool.acquire() as conn`).
-  Repositories accept the pool or a connection — never both, pick one and stick to it.
+- Repositories take a **live `asyncpg.Connection`** in the constructor (the
+  choice made in U1.1's `BaseRepository`), never the pool — acquiring from
+  the pool is the caller's job (`database.get_connection` in production,
+  fixtures in tests).
 - **Never call another repository from a repository.** No cross-repo coupling —
   services orchestrate multi-repo work.
 - Return typed Pydantic response models (e.g. `ExpenseResponse`), never raw

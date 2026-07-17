@@ -29,6 +29,7 @@ from models.permission import PermissionResponse
 from models.user import UserResponse
 from repositories.permission_repo import PermissionRepository
 from repositories.user_repo import UserRepository
+from services.user_service import UserService
 
 
 def get_user_repo(
@@ -41,6 +42,12 @@ def get_permission_repo(
     conn: Annotated[asyncpg.Connection, Depends(database.get_connection)],
 ) -> PermissionRepository:
     return PermissionRepository(conn)
+
+
+def get_user_service(
+    user_repo: Annotated[UserRepository, Depends(get_user_repo)],
+) -> UserService:
+    return UserService(user_repo)
 
 
 def _unauthorized(detail: str) -> HTTPException:
@@ -78,6 +85,21 @@ async def get_current_user(
     if not users:
         raise _unauthorized("Unknown user")
     return users[0]
+
+
+async def require_admin(
+    user: Annotated[UserResponse, Depends(get_current_user)],
+) -> UserResponse:
+    """Admin-only gate for the ``users``/``permissions`` resources (D27).
+
+    Those two resources have no override-row semantics in the matrix (admin:
+    CRUD, everyone else: none) and aren't in the ``Resource`` enum, so
+    :class:`PermissionChecker` doesn't apply here — this is a plain role
+    check instead of extending that contract.
+    """
+    if user.role is not Role.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return user
 
 
 @dataclass(frozen=True, slots=True)

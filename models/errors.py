@@ -10,6 +10,10 @@ class PermissionDeniedError(DomainError):
     """Raised when a user attempts an action they are not permitted to perform."""
 
 
+class ConflictError(DomainError):
+    """Raised when an operation would violate a uniqueness constraint."""
+
+
 class LimitExceededWarning(DomainError):
     """Raised to signal a budget threshold has been crossed.
 
