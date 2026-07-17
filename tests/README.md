@@ -124,6 +124,45 @@ Hermetic — repositories replaced with in-memory fakes via
 | `test_checker_consults_permission_row` | `PermissionChecker` fetches the (user, resource) row and applies its flags (step 4) |
 | `test_permission_checker_accepts_enum_and_string_forms` | `PermissionChecker("expenses", "create")` (route-pattern contract) equals the enum form |
 
+## Service tests (`test_user_service.py`) → [`services/user_service.py`](../services/user_service.py)
+Hermetic — `UserRepositoryProtocol` replaced with an in-memory `FakeUserRepo`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_list_scopes_by_account` | `list()` excludes another account's users |
+| `test_get_returns_user_in_account` | `get()` returns a user belonging to the given account |
+| `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
+| `test_get_foreign_account_raises_not_found` | `get()` on a user from another account raises `NotFoundError` (no cross-account leak) |
+| `test_create_forces_account_id_from_caller` | `create()` ignores `UserCreate.account_id` and uses the caller's `account_id` instead (root CLAUDE.md: never trust client-supplied UUIDs) |
+| `test_create_duplicate_tg_id_raises_conflict` | A duplicate `tg_id` (`asyncpg.UniqueViolationError` from the repo) is translated to `ConflictError` |
+| `test_update_changes_fields` | `update()` applies a partial `UserUpdate` |
+| `test_update_explicit_null_fields_are_ignored_not_nulled` | An explicit `{"name": null, "role": null}` is ignored, not sent to the repo as `SET ... = NULL` against a `NOT NULL` column (review fix) |
+| `test_update_mixes_real_value_with_ignored_null` | A real value alongside an explicit null updates only the real field |
+| `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
+| `test_delete_removes_user` | `delete()` removes the row via the repo |
+| `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
+
+## API/route tests (`test_users_api.py`) → [`api/users.py`](../api/users.py)
+Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replaced by
+`TgLookupFakeUserRepo` via `app.dependency_overrides`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_list_users_as_admin_returns_account_users` | Admin `GET /users` returns the account's users |
+| `test_list_users_as_member_is_403` | Member `GET /users` → 403 (`require_admin` gate, D27) |
+| `test_list_users_as_viewer_is_403` | Viewer `GET /users` → 403 |
+| `test_get_user_as_admin` | Admin `GET /users/{id}` returns the user |
+| `test_get_missing_user_as_admin_is_404` | Unknown id → 404 (`NotFoundError` mapped by `main.py`'s handler) |
+| `test_get_user_as_member_is_403` | Member `GET /users/{id}` → 403 |
+| `test_create_user_as_admin` | `POST /users` → 201; response `account_id` is the admin's own, not the (spoofed) body value |
+| `test_create_user_duplicate_tg_id_is_409` | Duplicate `tg_id` → 409 (`ConflictError` mapped by `main.py`'s handler) |
+| `test_create_user_as_member_is_403` | Member `POST /users` → 403 |
+| `test_update_user_as_admin` | `PATCH /users/{id}` applies a partial update |
+| `test_update_user_explicit_null_is_ignored_not_500` | `PATCH` with `{"name": null}` returns 200 unchanged, not a 500 from an uncaught `NotNullViolationError` (review fix) |
+| `test_update_user_as_viewer_is_403` | Viewer `PATCH /users/{id}` → 403 |
+| `test_delete_user_as_admin` | `DELETE /users/{id}` → 204, row removed |
+| `test_delete_user_as_member_is_403` | Member `DELETE /users/{id}` → 403 |
+
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)
 | Test | Checks | Target |
 |---|---|---|
@@ -132,8 +171,8 @@ Hermetic — repositories replaced with in-memory fakes via
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Service tests (M2: users/categories/tags/expenses/budgets/statistics services)
-- API/route tests (M2)
+- Service tests (M2: categories/tags/expenses/budgets/statistics services)
+- API/route tests (M2: categories/tags/expenses/budgets/statistics)
 - Notification service tests (M3)
 - Bot tests (M4: client, middlewares, handlers)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)

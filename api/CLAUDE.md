@@ -7,7 +7,8 @@ HTTP surface. Routes are thin: parse input → call service → return response
 model. Business logic and DB access are forbidden here.
 
 ## Structure
-- `deps.py` — `get_current_user`, `PermissionChecker`, DB pool / service factories.
+- `deps.py` — `get_current_user`, `PermissionChecker`, `require_admin`, DB pool /
+  service factories.
 - One router module per resource: `expenses.py`, `categories.py`, `tags.py`,
   `budgets.py`, `statistics.py`, `users.py`.
 
@@ -29,6 +30,18 @@ async def create_expense(
     return await service.create(data, user)
 ```
 
+## Choosing an auth dependency
+Three tiers, pick the narrowest that fits the route:
+
+| Dependency | Who gets through | Use for |
+|---|---|---|
+| `Depends(get_current_user)` | Any authenticated user (any row in `users`, any role) | Endpoints with no role/resource restriction — auth only |
+| `Depends(PermissionChecker(resource, action))` | Role defaults + per-user `permissions` override, per the matrix below | The 4 data resources: `expenses`, `categories`, `tags`, `budget_plans` |
+| `Depends(require_admin)` | `role == admin` only, 403 otherwise | `users`, `permissions` — no override-row/own_only concept, not in the `Resource` enum, so `PermissionChecker` doesn't apply to them |
+
+"Authenticated" always means: valid `X-Internal-Token` **and** an `X-Telegram-User-Id`
+that resolves to a row in `users` — there is no public/unauthenticated route.
+
 ## Permissions — two-level model
 Level 1 (**role**): coarse-grained system access.
 Level 2 (**permission row**): per-resource CRUD flags that override role defaults.
@@ -49,6 +62,9 @@ Level 2 (**permission row**): per-resource CRUD flags that override role default
 | budget_plans  | CRUD  | R                               | R      |
 | users         | CRUD  | —                               | —      |
 | permissions   | CRUD  | —                               | —      |
+
+`users`/`permissions` rows are enforced by `require_admin`, not `PermissionChecker`
+— see "Choosing an auth dependency" above.
 
 ### PermissionChecker enforcement order
 1. User authenticated and linked to an account? No → **401**.
