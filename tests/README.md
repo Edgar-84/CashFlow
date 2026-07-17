@@ -175,6 +175,55 @@ Hermetic — `TagRepositoryProtocol` replaced with an in-memory `FakeTagRepo`. N
 | `test_delete_removes_tag` | `delete()` removes the row via the repo |
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
 
+## Service tests (`test_expense_service.py`) → [`services/expense_service.py`](../services/expense_service.py)
+Hermetic — `ExpenseRepositoryProtocol` replaced with an in-memory `FakeExpenseRepo`. No DB.
+The service has no notion of permissions/`own_only` — that's enforced by the route
+(see `test_expenses_api.py` below).
+
+| Test | Checks |
+|---|---|
+| `test_list_scopes_by_account` | `list()` excludes another account's expenses |
+| `test_get_returns_expense_in_account` | `get()` returns an expense belonging to the given account |
+| `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
+| `test_get_foreign_account_raises_not_found` | `get()` on an expense from another account raises `NotFoundError` |
+| `test_create_sets_account_and_user_id_from_caller` | `create()` stamps the caller's `account_id`/`user_id`, never client-supplied |
+| `test_create_attaches_tags` | `create()` with `tag_ids` returns the expense with tags attached |
+| `test_update_changes_amount` | `update()` applies a partial `ExpenseUpdate` |
+| `test_update_explicit_null_amount_is_ignored_not_nulled` | An explicit `{"amount": null}` is ignored — `amount` is `NOT NULL` (D30/D32 pattern) |
+| `test_update_explicit_null_category_id_is_ignored_not_nulled` | Same, for `category_id` (`NOT NULL`) |
+| `test_update_explicit_null_comment_clears_it` | An explicit `{"comment": null}` DOES clear it — `comment` is nullable (`docs/SCHEMA.sql`), unlike `amount`/`category_id` |
+| `test_update_tag_ids_replaces_tags` | `update()` with `tag_ids` replaces the attached tags |
+| `test_update_tag_ids_empty_list_clears_tags` | `update()` with `tag_ids=[]` clears all tags |
+| `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
+| `test_update_foreign_account_raises_not_found` | `update()` on an expense from another account raises `NotFoundError` |
+| `test_delete_removes_expense` | `delete()` removes the row via the repo |
+| `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
+| `test_delete_foreign_account_raises_not_found` | `delete()` on an expense from another account raises `NotFoundError` |
+
+## API/route tests (`test_expenses_api.py`) → [`api/expenses.py`](../api/expenses.py)
+Hermetic — the real app with `ExpenseRepository`/`UserRepository`/`PermissionRepository`
+replaced by in-memory fakes via `app.dependency_overrides`. No DB. First resource with
+real `own_only` semantics: the route fetches the record, then calls `api.deps.enforce_ownership`
+with `request.state.permission_decision` before mutating (U2.1's step 6, wired here for the
+first time — plan Decision log handoff note).
+
+| Test | Checks |
+|---|---|
+| `test_list_expenses_as_member_returns_account_expenses` | Member `GET /expenses` returns ALL account expenses, including other users' (default matrix: read is unqualified, not `own_only`) |
+| `test_list_expenses_with_own_only_override_filters_to_own` | An override permission row with `own_only=True` on `read` filters `GET /expenses` down to the caller's own expenses (review fix — the default matrix never sets `own_only` on read, but an override row can) |
+| `test_get_expense_as_viewer` | Viewer `GET /expenses/{id}` returns the expense |
+| `test_get_missing_expense_is_404` | Unknown id → 404 |
+| `test_create_expense_as_member` | Member `POST /expenses` → 201; response `account_id`/`user_id` are server-derived |
+| `test_create_expense_with_tags` | `POST /expenses` with `tag_ids` returns the expense with tags attached |
+| `test_create_expense_as_viewer_is_403` | Viewer `POST /expenses` → 403 |
+| `test_update_own_expense_as_member` | Member `PATCH /expenses/{id}` on their own expense → 200 |
+| `test_update_other_members_expense_is_403` | Member `PATCH /expenses/{id}` on another user's expense → 403 (`own_only`) |
+| `test_update_any_expense_as_admin` | Admin `PATCH /expenses/{id}` on another user's expense → 200 (admin is never `own_only`-restricted) |
+| `test_update_expense_tags_replaces_them` | `PATCH /expenses/{id}` with `tag_ids` replaces attached tags |
+| `test_delete_own_expense_as_member` | Member `DELETE /expenses/{id}` on their own expense → 204, row removed |
+| `test_delete_other_members_expense_is_403` | Member `DELETE /expenses/{id}` on another user's expense → 403 (`own_only`) |
+| `test_delete_expense_as_viewer_is_403` | Viewer `DELETE /expenses/{id}` → 403 |
+
 ## API/route tests (`test_categories_api.py`) → [`api/categories.py`](../api/categories.py)
 Hermetic — the real app with `CategoryRepository`/`UserRepository`/`PermissionRepository`
 replaced by in-memory fakes via `app.dependency_overrides`. No DB.
