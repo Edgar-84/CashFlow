@@ -27,11 +27,13 @@ from config import get_settings
 from models.enums import Action, Resource, Role
 from models.permission import PermissionResponse
 from models.user import UserResponse
+from repositories.budget_plan_repo import BudgetPlanRepository
 from repositories.category_repo import CategoryRepository
 from repositories.expense_repo import ExpenseRepository
 from repositories.permission_repo import PermissionRepository
 from repositories.tag_repo import TagRepository
 from repositories.user_repo import UserRepository
+from services.budget_service import BudgetService
 from services.category_service import CategoryService
 from services.expense_service import ExpenseService
 from services.tag_service import TagService
@@ -68,6 +70,12 @@ def get_expense_repo(
     return ExpenseRepository(conn)
 
 
+def get_budget_plan_repo(
+    conn: Annotated[asyncpg.Connection, Depends(database.get_connection)],
+) -> BudgetPlanRepository:
+    return BudgetPlanRepository(conn)
+
+
 def get_user_service(
     user_repo: Annotated[UserRepository, Depends(get_user_repo)],
 ) -> UserService:
@@ -90,6 +98,13 @@ def get_expense_service(
     expense_repo: Annotated[ExpenseRepository, Depends(get_expense_repo)],
 ) -> ExpenseService:
     return ExpenseService(expense_repo)
+
+
+def get_budget_service(
+    budget_plan_repo: Annotated[BudgetPlanRepository, Depends(get_budget_plan_repo)],
+    expense_repo: Annotated[ExpenseRepository, Depends(get_expense_repo)],
+) -> BudgetService:
+    return BudgetService(budget_plan_repo, expense_repo)
 
 
 def _unauthorized(detail: str) -> HTTPException:
