@@ -200,6 +200,33 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
 | `test_delete_foreign_account_raises_not_found` | `delete()` on an expense from another account raises `NotFoundError` |
 
+## Service tests (`test_budget_service.py`) → [`services/budget_service.py`](../services/budget_service.py)
+Hermetic — `BudgetPlanRepositoryProtocol`/`ExpenseSumRepositoryProtocol` replaced
+with in-memory fakes. No DB. `calculate_progress` is pure (no fakes needed).
+
+| Test | Checks |
+|---|---|
+| `test_calculate_progress_parametrized` | Parametrized: 0% spent, exactly at `notify_threshold`, mid-range, >100%, exactly 100% — `fill_pct`/`is_over_threshold`/`is_exceeded`/`remaining` (asserted `int`, not `Decimal`/float) |
+| `test_calculate_progress_zero_limit_returns_none_pct` | `limit=0` → `fill_pct=None`, not `ZeroDivisionError` (mirrors `check_limit`'s D23 guard) |
+| `test_calculate_progress_negative_limit_returns_none_pct` | Same guard for a negative `limit` |
+| `test_current_month_bounds` | Parametrized: mid-year `now` and a December→January year rollover both produce the correct `[start, end)` month bounds |
+| `test_list_scopes_by_account` | `list()` excludes another account's plans |
+| `test_get_returns_plan_in_account` | `get()` returns a plan belonging to the given account |
+| `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
+| `test_get_foreign_account_raises_not_found` | `get()` on a plan from another account raises `NotFoundError` |
+| `test_create_forces_account_id_from_caller` | `create()` stamps the caller's `account_id` |
+| `test_create_duplicate_raises_conflict` | `UNIQUE(category_id, account_id, period)` violation (`asyncpg.UniqueViolationError` from the repo) is translated to `ConflictError` (closes the D23/D24-flagged gap) |
+| `test_update_changes_fields` | `update()` applies a partial `BudgetPlanUpdate` |
+| `test_update_explicit_null_amount_is_ignored_not_nulled` | An explicit `{"amount": null}` is ignored, same D30/D32 precedent (`amount`/`period`/`notify_threshold` all `NOT NULL`) |
+| `test_update_explicit_null_period_is_ignored_not_nulled` | Same, for `period` |
+| `test_update_explicit_null_notify_threshold_is_ignored_not_nulled` | Same, for `notify_threshold` |
+| `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
+| `test_delete_removes_plan` | `delete()` removes the row via the repo |
+| `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
+| `test_get_progress_combines_plan_and_spent` | `get_progress()` combines `budget_plan_repo.get()` + `expense_repo.sum_by_category_month()` into a `BudgetProgress` with real `int` spent/remaining; also asserts the exact `[start, end)` month bounds passed to the repo match `_current_month_bounds()` (review fix — the fake previously ignored these args) |
+| `test_get_progress_no_expenses_this_month_is_zero_spent` | No matching sum → `spent=0`, not a `KeyError` |
+| `test_get_progress_missing_plan_raises_not_found` | `get_progress()` on an unknown plan id raises `NotFoundError` |
+
 ## API/route tests (`test_expenses_api.py`) → [`api/expenses.py`](../api/expenses.py)
 Hermetic — the real app with `ExpenseRepository`/`UserRepository`/`PermissionRepository`
 replaced by in-memory fakes via `app.dependency_overrides`. No DB. First resource with
@@ -259,6 +286,24 @@ replaced by in-memory fakes via `app.dependency_overrides`. No DB.
 | `test_delete_tag_as_admin` | Admin `DELETE /tags/{id}` → 204, row removed |
 | `test_delete_tag_as_member_is_403` | Member `DELETE /tags/{id}` → 403 |
 
+## API/route tests (`test_budgets_api.py`) → [`api/budgets.py`](../api/budgets.py)
+Hermetic — the real app with `BudgetPlanRepository`/`ExpenseRepository`/`UserRepository`/
+`PermissionRepository` replaced by in-memory fakes via `app.dependency_overrides`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_list_budget_plans_as_member` | Member `GET /budgets` returns the account's plans (default matrix: read-only) |
+| `test_get_budget_plan_as_viewer` | Viewer `GET /budgets/{id}` returns the plan |
+| `test_get_missing_budget_plan_is_404` | Unknown id → 404 |
+| `test_get_budget_plan_progress` | `GET /budgets/{id}/progress` returns `spent`/`amount`/`remaining`/`fill_pct`/`is_over_threshold` computed from the fake `expense_repo`'s monthly sums |
+| `test_create_budget_plan_as_admin` | Admin `POST /budgets` → 201 |
+| `test_create_budget_plan_as_member_is_403` | Member `POST /budgets` → 403 (default matrix: no create) |
+| `test_create_duplicate_budget_plan_as_admin_is_409` | Duplicate `(category_id, account_id, period)` → 409 (`ConflictError` mapped by `main.py`'s handler) |
+| `test_update_budget_plan_as_admin` | Admin `PATCH /budgets/{id}` applies a partial update |
+| `test_update_budget_plan_as_member_is_403` | Member `PATCH /budgets/{id}` → 403 |
+| `test_delete_budget_plan_as_admin` | Admin `DELETE /budgets/{id}` → 204, row removed |
+| `test_delete_budget_plan_as_member_is_403` | Member `DELETE /budgets/{id}` → 403 |
+
 ## API/route tests (`test_users_api.py`) → [`api/users.py`](../api/users.py)
 Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replaced by
 `TgLookupFakeUserRepo` via `app.dependency_overrides`. No DB.
@@ -288,8 +333,8 @@ Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replac
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Service tests (M2: expenses/budgets/statistics services)
-- API/route tests (M2: expenses/budgets/statistics)
+- Service tests (M2: statistics service)
+- API/route tests (M2: statistics)
 - Notification service tests (M3)
 - Bot tests (M4: client, middlewares, handlers)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)

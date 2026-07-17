@@ -84,7 +84,7 @@ Model for M1: sonnet throughout.
 - [x] **U2.4 expenses: service (CRUD only, no notification yet) + API**.
       AC: create/list/update/delete via HTTP; own_only enforced (member
       can't update someone else's expense); tag attach/detach works.
-- [ ] **U2.5 budgets: budget_service (progress calc — pure logic) + API**.
+- [x] **U2.5 budgets: budget_service (progress calc — pure logic) + API**.
       AC: progress/summary math in parametrized unit tests (int math only).
 - [ ] **U2.6 statistics_service + API**.
       AC: by-period / by-category / by-tag aggregates match seeded data.
@@ -552,6 +552,34 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   it's beyond this unit's AC (create/list/update/delete + own_only + tag
   attach/detach) and would be a genuinely new validation decision.
 
+- D34 (U2.5): `BudgetService.get_progress` computes its own spent/limit percentage
+  from two *existing* repo methods — `budget_plan_repo.get(id)` (limit, as `int`)
+  and `expense_repo.sum_by_category_month(account_id, start, end)` (spent per
+  category, as `int`, D20's `Decimal`-leak fix already applied) — rather than
+  reusing `BudgetPlanRepository.check_limit` (U1.4, D23), per the plan's own
+  U2.5 handoff note ("no new repo method expected"). Rejected: delegating to
+  `check_limit`, whose float-only return can't power `remaining`/`spent` as
+  real `int` money for the API/bot (U4.5 AC needs "totals formatted from minor
+  units"), and whose `None`-for-no-plan case doesn't apply here anyway (the
+  service already 404s via `get()` before computing progress). The pure
+  `calculate_progress(spent, limit, notify_threshold)` function mirrors
+  `check_limit`'s zero/negative-`limit` guard (`fill_pct=None`, not a
+  `ZeroDivisionError`) and is fully unit-testable without a DB — this is the
+  AC's "progress calc — pure logic, int math only" (parametrized in
+  `tests/test_budget_service.py`: 0%, exactly at threshold, >100%, zero/negative
+  limit). `get_progress`'s "current month" bounds default to UTC (`datetime.now(UTC)`,
+  overridable via a `now` kwarg for tests) since `config.py` has no family-timezone
+  setting yet — same gap D20/D23 already left for `expense_repo`'s period methods'
+  callers; flag again if/when a family timezone is added to config.
+  `BudgetService.create` also translates the real `UNIQUE(category_id, account_id,
+  period)` violation to `ConflictError` (closing the D23/D24-flagged gap, following
+  the D28/D32 translation pattern). `models/budget_plan.py` gained an additive
+  `BudgetProgress` model (not one of the four-schema-pattern entities — a computed
+  summary built directly by the service, never `from_attributes`). `api/budgets.py`
+  routes are `PermissionChecker(Resource.BUDGET_PLANS, ...)`-gated with no
+  `enforce_ownership` call, matching D32's categories/tags pattern — `budget_plans`
+  has no `user_id` column and no `own_only` concept in the matrix.
+
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
   tests/test_health.py). U0.2 (models/enums.py, models/errors.py,
@@ -749,20 +777,52 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   full integration suite (45 tests, all pre-existing — this unit touches no
   repository code) run and confirmed green against a throwaway local Docker
   Postgres (D18 workaround).
-- Next: U2.5 (budgets: budget_service (progress calc — pure logic) + API).
-  Notes for U2.5: (1) `BudgetPlanRepository.check_limit` (U1.4, D23) already
-  returns the fill percentage as `float | None` — `budget_service`'s "progress
-  calc" AC is pure arithmetic/formatting on top of that, no new repo method
-  expected. (2) `budget_plans` has no override-row/`own_only` concept in the
-  matrix (api/CLAUDE.md: member/viewer are read-only, admin CRUD) — expect a
-  `CategoryService`-shaped service (D32 pattern), not an `ExpenseService`-shaped
-  one (D33's own_only wiring doesn't apply here). (3) `budget_plans`' real
-  `UNIQUE(category_id, account_id, period)` constraint still raises a raw
-  `asyncpg.UniqueViolationError` untranslated (D23/D24) — this is likely the
-  next service to apply the `ConflictError` translation pattern (D28/D32) if
-  `create` is in scope. (4) `models/budget_plan.py`'s `amount` has no
-  positivity constraint (flagged since D23) — flag again if `budget_service`
-  does math that assumes `amount > 0`.
+- Done: U2.5 (services/budget_service.py — `BudgetService`, DI'd via
+  `BudgetPlanRepositoryProtocol` + a narrow `ExpenseSumRepositoryProtocol`
+  (just `sum_by_category_month`); `list`/`get`/`create`/`update`/`delete`
+  follow the D32 account-scoping pattern (no own_only concept, `budget_plans`
+  has no `user_id`); `create` translates `asyncpg.UniqueViolationError`
+  (`UNIQUE(category_id, account_id, period)`) to `ConflictError`, closing the
+  D23/D24-flagged gap; `update` drops explicit `None` for all three fields
+  (`amount`/`period`/`notify_threshold`, all `NOT NULL`, D30/D32 pattern).
+  Module-level pure `calculate_progress(spent, limit, notify_threshold) ->
+  BudgetProgress` (zero/negative `limit` guard mirrors `check_limit`'s, D23)
+  and `get_progress()` orchestrating `budget_plan_repo.get` +
+  `expense_repo.sum_by_category_month` (both pre-existing — no new repo
+  method, D34). models/budget_plan.py — additive `BudgetProgress` model (not
+  a four-schema entity). api/deps.py — `get_budget_plan_repo`/
+  `get_budget_service` factories. api/budgets.py — full CRUD router +
+  `GET /budgets/{id}/progress`, all `PermissionChecker(Resource.BUDGET_PLANS,
+  ...)`-gated, no `enforce_ownership` call (D34). main.py — registers the
+  router (no new exception handler needed, reuses the existing
+  `ConflictError`→409/`NotFoundError`→404 mappings).
+  tests/test_budget_service.py — hermetic, `FakeBudgetPlanRepo` +
+  `FakeExpenseSumRepo`, parametrized `calculate_progress` cases (0%, exactly
+  at threshold, >100%, zero/negative limit, `int`-typed `remaining`), CRUD
+  account-scoping/explicit-null/not-found/conflict cases, `get_progress`
+  orchestration cases. tests/test_budgets_api.py — hermetic HTTP tests via
+  the real app + `app.dependency_overrides`, admin/member/viewer 200-vs-403
+  per route, progress endpoint, duplicate-create→409, not-found→404.
+  tests/README.md gained both new sections). Reviewed by the reviewer
+  subagent same session (APPROVE with WARNs, fixed same session:
+  `_current_month_bounds` had no direct test coverage and `FakeExpenseSumRepo`
+  ignored its `start`/`end` args, so no test could catch a wrong-month-bounds
+  bug — added `test_current_month_bounds` [mid-year + December→January
+  rollover] and made the fake record its call args, asserted in
+  `test_get_progress_combines_plan_and_spent`; the null-drop test only
+  covered `amount`, not `period`/`notify_threshold` — added the two missing
+  cases). verify.sh green (211 non-integration tests: 175 + 36 new); full
+  integration suite (45 tests, all pre-existing — this unit touches no
+  repository code) run and confirmed green against a throwaway local Docker
+  Postgres (D18 workaround).
+- Next: U2.6 (statistics_service + API). AC: by-period / by-category / by-tag
+  aggregates match seeded data. `expense_repo` already has `get_by_period`,
+  `get_by_category`, `sum_by_category_month` (U1.3) — likely enough for the
+  by-period/by-category aggregates with no new repo method; a by-tag
+  aggregate may need one (no existing `expense_repo` method groups by tag).
+  `models/budget_plan.py`'s `amount` still has no positivity constraint
+  (flagged since D23, not touched by U2.5) — flag again if statistics math
+  assumes `amount > 0`.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly

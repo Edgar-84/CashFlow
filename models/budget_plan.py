@@ -30,3 +30,19 @@ class BudgetPlanResponse(BudgetPlanBase):
     created_at: datetime
     updated_at: datetime  # DB-trigger-maintained (set_updated_at) — never set by app code
     model_config = ConfigDict(from_attributes=True)
+
+
+class BudgetProgress(BaseModel):
+    """Computed summary for one budget plan's current period — not a DB entity,
+    so it sits outside the four-schema pattern (built directly by budget_service,
+    never from_attributes)."""
+
+    budget_plan_id: UUID
+    category_id: UUID
+    amount: int  # limit, minor units
+    spent: int  # minor units
+    remaining: int  # minor units; negative once spent exceeds amount
+    fill_pct: float | None  # None when amount <= 0 (no meaningful limit)
+    notify_threshold: int
+    is_over_threshold: bool
+    is_exceeded: bool  # spent has reached/crossed 100% of amount

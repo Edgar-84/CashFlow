@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 import database
+from api.budgets import router as budgets_router
 from api.categories import router as categories_router
 from api.expenses import router as expenses_router
 from api.tags import router as tags_router
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(categories_router)
     app.include_router(tags_router)
     app.include_router(expenses_router)
+    app.include_router(budgets_router)
 
     return app
 
