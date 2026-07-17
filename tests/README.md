@@ -325,6 +325,39 @@ Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replac
 | `test_delete_user_as_admin` | `DELETE /users/{id}` → 204, row removed |
 | `test_delete_user_as_member_is_403` | Member `DELETE /users/{id}` → 403 |
 
+## Service tests (`test_statistics_service.py`) → [`services/statistics_service.py`](../services/statistics_service.py)
+Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeExpensePeriodRepo`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_current_month_bounds_mid_year` | `_current_month_bounds()` for a mid-year `now` |
+| `test_current_month_bounds_december_rollover` | December → January year rollover |
+| `test_by_period_sums_current_month_expenses` | `by_period()` sums all expenses in the current month; `total` is `int` |
+| `test_by_period_excludes_expenses_outside_current_month` | Expenses outside `[start, end)` are excluded |
+| `test_by_period_no_expenses_is_zero` | No expenses → `total=0`, not an error |
+| `test_by_period_own_user_id_filters_to_own_expenses` | `user_id` filter restricts the sum to that user's expenses |
+| `test_by_period_scopes_by_account` | Excludes another account's expenses |
+| `test_by_category_groups_totals_by_category` | `by_category()` groups totals per `category_id`; each `total` is `int` |
+| `test_by_category_own_user_id_filters_to_own_expenses` | `user_id` filter applies before aggregation |
+| `test_by_tag_groups_totals_by_tag` | `by_tag()` groups totals per `tag_id`, incl. an expense tagged with two tags contributing to both |
+| `test_by_tag_expense_with_no_tags_is_excluded` | An untagged expense contributes to no `TagTotal` row |
+| `test_by_tag_own_user_id_filters_to_own_expenses` | `user_id` filter applies before aggregation |
+
+## API/route tests (`test_statistics_api.py`) → [`api/statistics.py`](../api/statistics.py)
+Hermetic — the real app with `ExpenseRepository`/`UserRepository`/`PermissionRepository`
+replaced by in-memory fakes via `app.dependency_overrides`. No DB. `PermissionChecker(Resource.EXPENSES,
+Action.READ)`-gated — statistics has no `Resource` enum entry of its own (plan Decision log D35).
+
+| Test | Checks |
+|---|---|
+| `test_by_period_as_member` | Member `GET /statistics/by-period` returns the account's total |
+| `test_by_period_as_viewer` | Viewer `GET /statistics/by-period` returns the total |
+| `test_by_period_default_matrix_is_not_own_only` | Default matrix: expense read is unqualified — a member's total includes another user's expenses |
+| `test_by_period_own_only_override_filters_to_own` | An override permission row with `own_only=True` on read restricts the aggregate to the caller's own expenses (D35) |
+| `test_by_category_as_member` | `GET /statistics/by-category` groups totals by category |
+| `test_by_tag_as_member` | `GET /statistics/by-tag` groups totals by tag |
+| `test_statistics_without_auth_is_401` | Missing auth headers → 401 |
+
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)
 | Test | Checks | Target |
 |---|---|---|
@@ -333,8 +366,6 @@ Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replac
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Service tests (M2: statistics service)
-- API/route tests (M2: statistics)
 - Notification service tests (M3)
 - Bot tests (M4: client, middlewares, handlers)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)

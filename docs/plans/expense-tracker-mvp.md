@@ -86,7 +86,7 @@ Model for M1: sonnet throughout.
       can't update someone else's expense); tag attach/detach works.
 - [x] **U2.5 budgets: budget_service (progress calc — pure logic) + API**.
       AC: progress/summary math in parametrized unit tests (int math only).
-- [ ] **U2.6 statistics_service + API**.
+- [x] **U2.6 statistics_service + API**.
       AC: by-period / by-category / by-tag aggregates match seeded data.
 Model for M2: sonnet; U2.1 with /effort high.
 
@@ -580,6 +580,29 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `enforce_ownership` call, matching D32's categories/tags pattern — `budget_plans`
   has no `user_id` column and no `own_only` concept in the matrix.
 
+- D35 (U2.6): `StatisticsService` (by_period/by_category/by_tag, current-month only,
+  `_current_month_bounds` helper duplicated from `budget_service.py` — same
+  small pure function, D34 precedent, not promoted to a shared module since
+  that would touch `budget_service.py` outside this unit's scope) is built on
+  a single existing repo method, `expense_repo.get_by_period` (already attaches
+  tags per D21) — no new repo method needed for by-tag after all, contrary to
+  the U2.5 handoff note's guess. All three aggregates are computed in Python
+  from that one fetched list rather than reusing `sum_by_category_month` for
+  by-category, so `own_only` filtering (see below) can apply uniformly before
+  aggregation. Statistics has no `Resource` enum entry of its own — routes are
+  gated by `PermissionChecker(Resource.EXPENSES, Action.READ)` since it's a
+  derived read-only view over expense data, not a new resource (no `Resource`/
+  matrix contract change). `StatisticsService` methods take an optional
+  `user_id` filter, applied before aggregation; `api/statistics.py`'s routes
+  pass `user.id` when `request.state.permission_decision.own_only` is set,
+  mirroring D33's `list_expenses` own_only handling. This is a deliberate,
+  narrow divergence from D33's "services have no notion of permissions" rule:
+  `user_id` here is a plain data filter (like `account_id`), not a
+  `PermissionDecision`/`request` object, so it doesn't reintroduce the
+  circular-import or service-raises-HTTPException problems D33 rejected — and
+  D33's own alternative (filter the route's returned list post-hoc) doesn't
+  work here since these methods return aggregates, not raw records.
+
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
   tests/test_health.py). U0.2 (models/enums.py, models/errors.py,
@@ -815,14 +838,34 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   integration suite (45 tests, all pre-existing — this unit touches no
   repository code) run and confirmed green against a throwaway local Docker
   Postgres (D18 workaround).
-- Next: U2.6 (statistics_service + API). AC: by-period / by-category / by-tag
-  aggregates match seeded data. `expense_repo` already has `get_by_period`,
-  `get_by_category`, `sum_by_category_month` (U1.3) — likely enough for the
-  by-period/by-category aggregates with no new repo method; a by-tag
-  aggregate may need one (no existing `expense_repo` method groups by tag).
+- Done: U2.6 (models/statistics.py — additive `PeriodTotal`/`CategoryTotal`/
+  `TagTotal` models, same non-four-schema-entity precedent as `BudgetProgress`
+  (D34). services/statistics_service.py — `StatisticsService`, DI'd via a
+  narrow `ExpensePeriodRepositoryProtocol` (just `get_by_period`); `by_period`/
+  `by_category`/`by_tag` all aggregate the current month's expenses in Python
+  from that one fetch (no new repo method — D35); `_current_month_bounds`
+  duplicated from `budget_service.py` (D34/D35). api/deps.py —
+  `get_statistics_service` factory. api/statistics.py — `GET /statistics/
+  by-period`, `/by-category`, `/by-tag`, all `PermissionChecker(Resource.EXPENSES,
+  Action.READ)`-gated (statistics has no `Resource` entry of its own, D35);
+  routes pass `user_id` to the service when the resolved permission decision
+  has `own_only` set, mirroring D33's `list_expenses` handling (D35). main.py
+  — registers the router.
+  tests/test_statistics_service.py — hermetic, `FakeExpensePeriodRepo`,
+  `_current_month_bounds` cases (mid-year, December rollover), by_period/
+  by_category/by_tag aggregation (incl. multi-tag expenses, untagged expenses
+  excluded, `int`-typed totals), own_only user_id filtering per aggregate,
+  account-scoping. tests/test_statistics_api.py — hermetic HTTP tests via the
+  real app + `app.dependency_overrides`, member/viewer 200s, default-matrix
+  (not own_only) case, override-row own_only-filters-to-own case, missing-auth
+  → 401. tests/README.md gained both new sections). verify.sh green (230
+  non-integration tests: 211 + 19 new); full integration suite (45 tests, all
+  pre-existing — this unit touches no repository code) run and confirmed
+  green against a throwaway local Docker Postgres (D18 workaround).
+- Next: U3.1 (notification_service + trigger in ExpenseService.create).
   `models/budget_plan.py`'s `amount` still has no positivity constraint
-  (flagged since D23, not touched by U2.5) — flag again if statistics math
-  assumes `amount > 0`.
+  (flagged since D23, not touched by U2.5/U2.6) — flag again if notification
+  threshold math assumes `amount > 0`.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly

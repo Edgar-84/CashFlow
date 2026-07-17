@@ -36,6 +36,7 @@ from repositories.user_repo import UserRepository
 from services.budget_service import BudgetService
 from services.category_service import CategoryService
 from services.expense_service import ExpenseService
+from services.statistics_service import StatisticsService
 from services.tag_service import TagService
 from services.user_service import UserService
 
@@ -105,6 +106,12 @@ def get_budget_service(
     expense_repo: Annotated[ExpenseRepository, Depends(get_expense_repo)],
 ) -> BudgetService:
     return BudgetService(budget_plan_repo, expense_repo)
+
+
+def get_statistics_service(
+    expense_repo: Annotated[ExpenseRepository, Depends(get_expense_repo)],
+) -> StatisticsService:
+    return StatisticsService(expense_repo)
 
 
 def _unauthorized(detail: str) -> HTTPException:
