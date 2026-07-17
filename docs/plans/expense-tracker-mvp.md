@@ -81,7 +81,7 @@ Model for M1: sonnet throughout.
       AC: route tests incl. member/viewer → 403.
 - [x] **U2.3 categories + tags: services + API**.
       AC: HTTP CRUD tests; RESTRICT delete returns clean 409 with message.
-- [ ] **U2.4 expenses: service (CRUD only, no notification yet) + API**.
+- [x] **U2.4 expenses: service (CRUD only, no notification yet) + API**.
       AC: create/list/update/delete via HTTP; own_only enforced (member
       can't update someone else's expense); tag attach/detach works.
 - [ ] **U2.5 budgets: budget_service (progress calc — pure logic) + API**.
@@ -502,6 +502,55 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   directly via `psql` (bypassing Alembic) to get a real schema to run the
   new integration tests against; container removed after. Flag before
   relying on local `alembic upgrade head` again.
+- D33 (U2.4): `ExpenseService` has no notion of permissions/`own_only` at all —
+  unlike the U2.4 handoff note's literal wording ("the route... passes it into
+  the service"), ownership enforcement (step 6) is done entirely in
+  `api/expenses.py`, not the service: the route calls `service.get(...)` first
+  (404 + fetches `owner_id`), then `api.deps.enforce_ownership(request.state.
+  permission_decision, user, expense.user_id)` directly, then calls
+  `service.update`/`service.delete`. Rejected: passing `PermissionDecision` (or
+  `request`) into `ExpenseService` — `api/deps.py` imports service classes for
+  its factories (`get_expense_service`), so a service importing anything from
+  `api.deps` would be a circular import; passing a bare `own_only: bool` was
+  also considered but decided against since `enforce_ownership` already exists,
+  is unit-tested (U2.1), and raises `HTTPException` directly, which services
+  must not do (services/CLAUDE.md: only domain exceptions). Net effect for
+  `own_only`-gated routes (update/delete, plus the single-record `GET`): the
+  target record is fetched twice (once by the route for the ownership check,
+  once more inside `service.get`/`update`/`delete`) — acceptable per D31 (no
+  request-wide transaction/UoW in V1, extra reads have no atomicity cost).
+  `enforce_ownership` is also called on single-record `GET`, not just
+  update/delete: api/CLAUDE.md's step 6 says "target record belongs to another
+  user", not "only on write" — this matters if a future per-user `permissions`
+  override row sets `own_only=true` for `read` (the *default* matrix only sets
+  `own_only` for expense update/delete, per D26, but an override row could
+  still do it for read). Review fix (same session): `GET /expenses` (list)
+  initially had no ownership filtering at all — a BLOCKER, since an override
+  row's `own_only` applies per (user, resource), not per action, and
+  `permissions.own_only` defaults to `true` (`models/permission.py`), so any
+  admin granting a member, say, `can_delete=true` on expenses without
+  explicitly setting `own_only=false` would silently leave `GET /expenses`
+  showing every account expense while `GET /expenses/{id}` on someone else's
+  403s. Fixed: `list_expenses` reads `request.state.permission_decision` and
+  filters to `user.id` when `decision.own_only` is set — `enforce_ownership`
+  itself isn't reused here (it 403s against one `owner_id`; a list has no
+  single target record to 403 against), so this is a plain filter, not a call
+  to that function. Covered by
+  `test_list_expenses_with_own_only_override_filters_to_own`.
+  `ExpenseService.update` also has a
+  finer-grained null-handling rule than `CategoryService`/`TagService`'s D30/
+  D32 precedent: `amount`/`category_id` are `NOT NULL` (explicit null dropped,
+  same as D30), but `comment` IS nullable (`docs/SCHEMA.sql`) — an explicit
+  `{"comment": null}` is a real "clear the comment" and is NOT dropped, unlike
+  the single-mutable-field categories/tags case where every field was
+  `NOT NULL`. `tag_ids` needs no special-casing here — `ExpenseRepository`
+  (U1.3, D21) already treats an explicit `null`/absent `tag_ids` identically
+  ("don't touch tags"), only an explicit `[]` clears them. No new category/
+  account-scoping validation added for `category_id`/`tag_ids` on create/
+  update (categories/tags belonging to a foreign account are accepted without
+  error, same latent gap as `budget_plans` in D23) — flagged, not fixed, since
+  it's beyond this unit's AC (create/list/update/delete + own_only + tag
+  attach/detach) and would be a genuinely new validation decision.
 
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
@@ -659,17 +708,61 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   200-vs-403 per route, 404 mapping, category RESTRICT-delete→409 case.
   tests/README.md gained all four new sections). verify.sh green
   (144 non-integration tests: 102 + 42 new).
-- Next: U2.4 (expenses: service (CRUD only, no notification yet) + API).
-  Notes for U2.4: (1) `ConflictError` (D28) is now available for any future
-  service that needs to translate a unique-violation (e.g. `budget_plans`'
-  `UNIQUE(category_id, account_id, period)`, D23) — reuse it rather than
-  inventing another domain error, same as `CategoryService`'s
-  FK-violation→`ConflictError` translation (D32). (2) Step 6 is opt-in by
-  design (D26): when wiring U2.4, the route reads
-  `request.state.permission_decision` and passes it into the service
-  (services never touch `Request`); U2.4's review must confirm every
-  own_only-capable route calls `enforce_ownership` — expenses is the first
-  resource with real `own_only` semantics (member update/delete own only).
+- Done: U2.4 (services/expense_service.py — `ExpenseService`, DI'd via a
+  structural `ExpenseRepositoryProtocol`; no permissions/`own_only` knowledge
+  in the service at all — ownership enforcement lives entirely in the route
+  (D33). `list`/`get`/`create`/`delete` follow the D29/D32 account-scoping
+  pattern (`account_id` always the caller's own); `create` also stamps
+  `user_id` from the caller (never client-supplied). `update` drops explicit
+  `None` for `amount`/`category_id` (`NOT NULL`, D30/D32 pattern) but NOT for
+  `comment` (nullable — explicit null really clears it, D33) or `tag_ids`
+  (`ExpenseRepository` already handles absent-vs-null-vs-empty-list, D21).
+  api/deps.py — `get_expense_repo`/`get_expense_service` factories. api/expenses.py
+  — full CRUD router gated by `PermissionChecker(Resource.EXPENSES, Action...)`;
+  update/delete/single-`GET` routes fetch the record via the service then call
+  `enforce_ownership(request.state.permission_decision, user, expense.user_id)`
+  before mutating — the first real wiring of U2.1's step 6 (D33). main.py —
+  registers the router (no new exception handler needed, reuses the existing
+  `NotFoundError`→404 mapping; `PermissionDeniedError`→403 isn't even hit by
+  this unit since `enforce_ownership` raises `HTTPException` directly, not a
+  domain error). `list_expenses` also filters to `user.id` when
+  `request.state.permission_decision.own_only` is set (review fix, D33 —
+  BLOCKER: list had no ownership filtering at all, reachable the moment an
+  override permission row sets `own_only=true` on read).
+  tests/test_expense_service.py — hermetic, `FakeExpenseRepo`, account-scoping,
+  tag attach/replace/clear, the three-way null-handling split (amount/
+  category_id dropped, comment cleared), not-found cases incl. update on a
+  foreign-account expense (review NIT — symmetry with get/delete).
+  tests/test_expenses_api.py — hermetic HTTP tests via the real app +
+  `app.dependency_overrides`, admin/member/viewer 200-vs-403 per route, the
+  own_only grid (member own vs. another member's expense on update/delete,
+  admin bypass), unqualified list/read, an override-row own_only-on-read case
+  for list (review fix), tag attach/replace via HTTP.
+  tests/README.md gained both new sections). Reviewed by the reviewer
+  subagent same session (REQUEST_CHANGES — BLOCKER: list own_only gap, fixed
+  same session; WARNs: `category_id`/`tag_ids` accepted without an
+  account-scoping check — same latent gap as `budget_plans`, D23 — flagged
+  in D33, not fixed, beyond this unit's AC; double-fetch per own_only-gated
+  request — accepted per D31; NIT: pre-existing TOCTOU-to-`AssertionError`
+  path inherited from `category_service.py`'s pattern, not introduced here,
+  not fixed). verify.sh green (175 non-integration tests: 144 + 31 new);
+  full integration suite (45 tests, all pre-existing — this unit touches no
+  repository code) run and confirmed green against a throwaway local Docker
+  Postgres (D18 workaround).
+- Next: U2.5 (budgets: budget_service (progress calc — pure logic) + API).
+  Notes for U2.5: (1) `BudgetPlanRepository.check_limit` (U1.4, D23) already
+  returns the fill percentage as `float | None` — `budget_service`'s "progress
+  calc" AC is pure arithmetic/formatting on top of that, no new repo method
+  expected. (2) `budget_plans` has no override-row/`own_only` concept in the
+  matrix (api/CLAUDE.md: member/viewer are read-only, admin CRUD) — expect a
+  `CategoryService`-shaped service (D32 pattern), not an `ExpenseService`-shaped
+  one (D33's own_only wiring doesn't apply here). (3) `budget_plans`' real
+  `UNIQUE(category_id, account_id, period)` constraint still raises a raw
+  `asyncpg.UniqueViolationError` untranslated (D23/D24) — this is likely the
+  next service to apply the `ConflictError` translation pattern (D28/D32) if
+  `create` is in scope. (4) `models/budget_plan.py`'s `amount` has no
+  positivity constraint (flagged since D23) — flag again if `budget_service`
+  does math that assumes `amount > 0`.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
