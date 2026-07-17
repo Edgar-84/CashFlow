@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Annotated
 from uuid import UUID
 
 import asyncpg
+import httpx
 from fastapi import Depends, Header, HTTPException, Request, status
 
 import database
@@ -36,6 +38,7 @@ from repositories.user_repo import UserRepository
 from services.budget_service import BudgetService
 from services.category_service import CategoryService
 from services.expense_service import ExpenseService
+from services.notification_service import NotificationService
 from services.statistics_service import StatisticsService
 from services.tag_service import TagService
 from services.user_service import UserService
@@ -95,10 +98,31 @@ def get_tag_service(
     return TagService(tag_repo)
 
 
+@lru_cache
+def _http_client() -> httpx.AsyncClient:
+    """One shared client for the process lifetime (mirrors config.get_settings'
+    lru_cache singleton pattern). Closed via close_http_client() in main.py's
+    lifespan, same as database.py's pool."""
+    return httpx.AsyncClient()
+
+
+async def close_http_client() -> None:
+    if _http_client.cache_info().currsize:
+        await _http_client().aclose()
+        _http_client.cache_clear()
+
+
+def get_notification_service() -> NotificationService:
+    return NotificationService(get_settings().bot_token, _http_client())
+
+
 def get_expense_service(
     expense_repo: Annotated[ExpenseRepository, Depends(get_expense_repo)],
+    budget_plan_repo: Annotated[BudgetPlanRepository, Depends(get_budget_plan_repo)],
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repo)],
+    notification_service: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> ExpenseService:
-    return ExpenseService(expense_repo)
+    return ExpenseService(expense_repo, budget_plan_repo, category_repo, notification_service)
 
 
 def get_budget_service(
