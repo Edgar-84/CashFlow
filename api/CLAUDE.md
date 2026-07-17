@@ -73,6 +73,8 @@ the permission logic stays identical.
 
 ## Rules
 - Routes return Pydantic response models — never raw dicts.
-- Never `await asyncpg` here. Never import from `repositories/` here.
+- Never `await asyncpg` here. Never import from `repositories/` in router
+  modules — `deps.py` is the composition root and the one exception (it holds
+  the repo/service factories, per Structure above).
 - Domain exceptions from services map to HTTP status via router error handlers
   (or a global handler in `main.py`).

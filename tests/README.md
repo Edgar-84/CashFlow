@@ -97,6 +97,33 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 | `test_get_by_user_and_resource_returns_none_when_no_row` | Returns `None` when no permission row exists for that (user, resource) |
 | `test_get_by_user_and_resource_scopes_by_user` | Excludes another user's permission row for the same resource |
 
+## API dependency tests (`test_deps.py`) → [`api/deps.py`](../api/deps.py)
+Hermetic — repositories replaced with in-memory fakes via
+`app.dependency_overrides`; HTTP cases go through `ASGITransport`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_default_matrix` | Parametrized over all 48 cells (3 roles × 4 resources × 4 actions) of the default permission matrix — every cell written out explicitly, incl. `own_only` on member's expense update/delete |
+| `test_override_row_widens_member_defaults` | A permission row can grant a member CRUD beyond the defaults (step 4) |
+| `test_override_row_narrows_member_defaults` | A row replaces defaults entirely — member can lose default expense create |
+| `test_override_row_own_only_flag_carries_into_decision` | Row's `own_only=True` lands on the `PermissionDecision` |
+| `test_admin_ignores_override_row` | Step 2 precedes step 4 — an all-False row cannot restrict an admin |
+| `test_viewer_cannot_be_overridden_to_write` | Step 3 precedes step 4 — an all-True row never grants a viewer writes; reads stay allowed |
+| `test_viewer_read_can_be_restricted_by_row` | A row's `can_read=False` still applies to a viewer (step 3 only blocks writes) |
+| `test_enforce_ownership_denies_foreign_record_when_own_only` | Step 6: `own_only` decision + foreign `owner_id` → 403 |
+| `test_enforce_ownership_allows_own_record_when_own_only` | Step 6: own record passes |
+| `test_enforce_ownership_allows_foreign_record_when_not_own_only` | Step 6: no `own_only` restriction → foreign record passes |
+| `test_missing_internal_token_is_401` | No `X-Internal-Token` → 401 (D1) |
+| `test_wrong_internal_token_is_401` | Wrong `X-Internal-Token` → 401 (D1) |
+| `test_missing_tg_id_header_is_401` | No `X-Telegram-User-Id` → 401 |
+| `test_malformed_tg_id_header_is_401` | Non-numeric `X-Telegram-User-Id` → 401 (not 422) |
+| `test_unknown_tg_id_is_401` | tg_id not in `users` → 401 |
+| `test_member_can_read_expenses` | Full dependency chain allows a member's default read, returns the resolved user |
+| `test_viewer_create_is_403` | Full dependency chain denies a viewer's write with 403 |
+| `test_checker_exposes_own_only_decision_on_request_state` | `PermissionChecker` stores the `PermissionDecision` on `request.state` for step-6 consumers (U2.4) |
+| `test_checker_consults_permission_row` | `PermissionChecker` fetches the (user, resource) row and applies its flags (step 4) |
+| `test_permission_checker_accepts_enum_and_string_forms` | `PermissionChecker("expenses", "create")` (route-pattern contract) equals the enum form |
+
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)
 | Test | Checks | Target |
 |---|---|---|
