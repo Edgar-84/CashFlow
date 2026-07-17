@@ -102,7 +102,7 @@ Model for M2: sonnet; U2.1 with /effort high.
 
 ## Milestone M4 — Bot
 
-- [ ] **U4.1 client.py + middlewares**: httpx wrapper (all API calls),
+- [x] **U4.1 client.py + middlewares**: httpx wrapper (all API calls),
       allowlist middleware, header injection (tg_id + internal token).
       AC: unit tests with mocked transport (respx); non-allowlisted tg_id
       is dropped before any API call.
@@ -943,8 +943,44 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   15 new); full integration suite (45 tests, all pre-existing — this unit
   touches no repository code) run and confirmed green against a throwaway
   local Docker Postgres (D18 workaround).
-- Next: U4.1 (client.py + middlewares — bot's httpx wrapper, allowlist
-  middleware, header injection). `models/budget_plan.py`'s `amount` still has
+- Done: U4.1 (bot/client.py — `BackendClient`, one method per endpoint the
+  bot milestone drives: expenses/categories/tags/budget_plans (incl.
+  `get_budget_plan_progress`)/statistics (by-period/category/tag) CRUD+reads;
+  `users` intentionally not wrapped, no admin UI planned (D37). Every request
+  goes through a shared `_request()` helper that attaches
+  `X-Telegram-User-Id`/`X-Internal-Token` headers and calls
+  `response.raise_for_status()` — non-2xx surfaces as `httpx.HTTPStatusError`
+  for handlers (U4.3+) to translate into user-facing messages. bot/middlewares.py
+  — `AllowlistMiddleware`, an aiogram outer middleware: reads
+  `data["event_from_user"]` (populated by aiogram's built-in
+  `UserContextMiddleware`), drops the update (returns `None`, handler never
+  runs) if the tg_id is `None` or not in the configured allowlist, otherwise
+  constructs a `BackendClient` with that tg_id's headers and injects it as
+  `data["client"]` (D37). tests/test_bot_client.py — hermetic,
+  `httpx.MockTransport` (D37 — respx not a dependency), one fixture per
+  response-model JSON shape, header-injection assertion, per-resource
+  CRUD/progress/statistics round trips, non-2xx → `HTTPStatusError`.
+  tests/test_bot_middlewares.py — non-allowlisted tg_id dropped before
+  handler runs (AC), missing `event_from_user` dropped, allowlisted tg_id
+  reaches handler with an injected `BackendClient`, injected client's
+  requests carry the right headers, drop is logged. tests/README.md gained
+  a Bot section for both files. Reviewed by the reviewer subagent same
+  session (APPROVE — two WARNs fixed same session: `bot/middlewares.py`
+  now reads `aiogram.dispatcher.middlewares.user_context.EVENT_FROM_USER_KEY`
+  instead of a bare `"event_from_user"` string literal, and its docstring
+  now states the registration-order requirement (must be added via
+  `dp.update.outer_middleware(...)` after `Dispatcher()` construction so
+  `UserContextMiddleware` populates `event_from_user` first); `bot/client.py`'s
+  `_request()` gained a comment warning future callers never to log
+  `exc.request`/`exc.request.headers` on a caught `httpx.HTTPStatusError`,
+  since httpx only auto-redacts `Authorization`, not `X-Internal-Token`
+  [same class of bug as the U3.1 bot-token leak]; two NITs, both folded into
+  the same fixes). verify.sh green (261 non-integration tests:
+  245 + 16 new); this unit touches no repository/DB code, so the pre-existing
+  integration suite wasn't re-run.
+- Next: U4.2 (Bot skeleton — bot.py dispatcher registering
+  `AllowlistMiddleware` as an outer middleware on `dp.update`, states.py,
+  keyboards.py). `models/budget_plan.py`'s `amount` still has
   no positivity constraint (flagged since D23, not touched by U2.5/U2.6/U3.1)
   — flag again if any future unit's math assumes `amount > 0`. `budget_plan_repo`'s
   two-round-trip notification check (D36) is a candidate for a follow-up
@@ -972,6 +1008,21 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   constraint (no `Field(gt=0)`, no DB `CHECK`) — `check_limit` guards against
   it (returns `None`), but `create`/`update` still accept `amount <= 0`
   silently; flag if a future unit tightens the model/schema.
+- D37 (U4.1): `bot/client.py`'s `BackendClient` wraps only expenses/
+  categories/tags/budget_plans/statistics — no `users` methods, since the
+  bot has no user-management UI planned (admin panel is V2, root CLAUDE.md
+  "Out of scope") and nothing in M4's units calls it. `bot/middlewares.py`'s
+  `AllowlistMiddleware` realizes bot/CLAUDE.md's "injects X-Telegram-User-Id
+  header into every outgoing API call" by constructing a per-update
+  `BackendClient` (headers baked in at construction) and putting it on
+  `data["client"]` for the handler to use, rather than the middleware
+  touching httpx calls directly — handlers (U4.2+) call backend endpoints
+  only through that injected client, so no call site can omit or forge the
+  header. Non-allowlisted tg_ids are dropped before the handler (and thus
+  before any possible API call) runs at all. Test transport: AC text says
+  "respx", but respx isn't a project dependency; used `httpx.MockTransport`
+  instead, matching the existing `tests/test_notification_service.py`
+  precedent. Not a contract change.
 
 
 ## Deferred decisions (tracked, not forgotten)
