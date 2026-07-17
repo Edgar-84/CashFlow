@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 import database
 from api.budgets import router as budgets_router
 from api.categories import router as categories_router
+from api.deps import close_http_client
 from api.expenses import router as expenses_router
 from api.statistics import router as statistics_router
 from api.tags import router as tags_router
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await close_http_client()
         await database.close_pool()
 
 

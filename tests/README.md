@@ -199,6 +199,26 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | `test_delete_removes_expense` | `delete()` removes the row via the repo |
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
 | `test_delete_foreign_account_raises_not_found` | `delete()` on an expense from another account raises `NotFoundError` |
+| `test_create_notifies_when_threshold_crossed` | U3.1 notification-flow invariant: `fill_pct >= notify_threshold` → `notification_service.send(user, category, fill_pct)` called exactly once with the right args |
+| `test_create_notifies_exactly_once_at_threshold` | `fill_pct == notify_threshold` (boundary) still notifies (`>=`, not `>`) |
+| `test_create_does_not_notify_below_threshold` | `fill_pct < notify_threshold` → no notification |
+| `test_create_does_not_notify_when_no_budget_plan` | `check_limit()` returns `None` (no plan for the category) → no notification, no crash |
+| `test_create_still_succeeds_when_notification_send_raises` | `notification_service.send()` raising is swallowed — expense creation still returns the created expense (root CLAUDE.md D3, second line of defense beyond `NotificationService`'s own try/except) |
+| `test_create_still_succeeds_when_budget_check_raises` | A `budget_plan_repo` error (DB hiccup) during the notification check doesn't fail expense creation |
+| `test_create_passes_account_scoped_bounds_to_check_limit` | `check_limit()` is called with the caller's `account_id`/the expense's `category_id` |
+| `test_current_month_bounds_mid_year` | `_current_month_bounds()` for a mid-year `now` |
+| `test_current_month_bounds_december_rollover` | December → January year rollover |
+
+## Service tests (`test_notification_service.py`) → [`services/notification_service.py`](../services/notification_service.py)
+Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`. No real network (U3.1 AC).
+
+| Test | Checks |
+|---|---|
+| `test_send_posts_to_telegram_bot_api_with_chat_id_and_text` | `send()` POSTs to `/bot{token}/sendMessage` with `chat_id=user.tg_id` and a text body containing the category name and fill percentage |
+| `test_send_swallows_connection_error_without_raising` | A transport-level error (e.g. `httpx.ConnectError`) is caught, not raised (D3) |
+| `test_send_swallows_http_status_error_without_raising` | A non-2xx response (`raise_for_status()`) is caught, not raised (D3) |
+| `test_send_logs_on_failure` | A failed send logs an `ERROR`-level record |
+| `test_send_on_http_status_error_never_logs_the_bot_token` | Regression: `httpx.HTTPStatusError`'s message embeds the full request URL (bot token included) — the log record must never contain the token (review fix) |
 
 ## Service tests (`test_budget_service.py`) → [`services/budget_service.py`](../services/budget_service.py)
 Hermetic — `BudgetPlanRepositoryProtocol`/`ExpenseSumRepositoryProtocol` replaced
@@ -243,6 +263,7 @@ first time — plan Decision log handoff note).
 | `test_create_expense_as_member` | Member `POST /expenses` → 201; response `account_id`/`user_id` are server-derived |
 | `test_create_expense_with_tags` | `POST /expenses` with `tag_ids` returns the expense with tags attached |
 | `test_create_expense_as_viewer_is_403` | Viewer `POST /expenses` → 403 |
+| `test_create_expense_triggers_notification_when_threshold_crossed` | End-to-end U3.1 wiring through the real `get_expense_service` factory: crossing the threshold on `POST /expenses` calls the (faked) `notification_service.send()` exactly once |
 | `test_update_own_expense_as_member` | Member `PATCH /expenses/{id}` on their own expense → 200 |
 | `test_update_other_members_expense_is_403` | Member `PATCH /expenses/{id}` on another user's expense → 403 (`own_only`) |
 | `test_update_any_expense_as_admin` | Admin `PATCH /expenses/{id}` on another user's expense → 200 (admin is never `own_only`-restricted) |
@@ -366,6 +387,5 @@ Action.READ)`-gated — statistics has no `Resource` enum entry of its own (plan
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Notification service tests (M3)
 - Bot tests (M4: client, middlewares, handlers)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)

@@ -12,10 +12,17 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from test_deps import FakePermissionRepo
-from test_expense_service import FakeExpenseRepo, make_expense
+from test_expense_service import (
+    FakeBudgetPlanRepo,
+    FakeCategoryRepo,
+    FakeExpenseRepo,
+    FakeNotificationService,
+    make_expense,
+)
 from test_users_api import TgLookupFakeUserRepo, auth_headers
 
 from api import deps
+from models.category import CategoryResponse
 from models.enums import Resource, Role
 from models.expense import ExpenseResponse
 from models.permission import PermissionResponse
@@ -93,6 +100,13 @@ def override_repos(
         app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo([])
         repo = FakeExpenseRepo(expenses)
         app.dependency_overrides[deps.get_expense_repo] = lambda: repo
+        # get_expense_service also wires budget_plan_repo/category_repo (for
+        # the notification check) and notification_service (U3.1) — default
+        # to "no budget plan" fakes so routes that never exercise create()
+        # don't need real DB/network dependencies resolved.
+        app.dependency_overrides[deps.get_budget_plan_repo] = lambda: FakeBudgetPlanRepo()
+        app.dependency_overrides[deps.get_category_repo] = lambda: FakeCategoryRepo()
+        app.dependency_overrides[deps.get_notification_service] = lambda: FakeNotificationService()
         return repo
 
     return _apply
@@ -216,6 +230,37 @@ async def test_create_expense_as_viewer_is_403(
     )
 
     assert response.status_code == 403
+
+
+async def test_create_expense_triggers_notification_when_threshold_crossed(
+    client: AsyncClient,
+    app: FastAPI,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    # U3.1: end-to-end wiring of the notification-flow invariant
+    # (services/CLAUDE.md) through the real get_expense_service factory.
+    override_repos([])
+    category_id = uuid4()
+    category = CategoryResponse(
+        id=category_id, name="Groceries", account_id=account_id, created_at=datetime.now(UTC)
+    )
+    notification_service = FakeNotificationService()
+    app.dependency_overrides[deps.get_budget_plan_repo] = lambda: FakeBudgetPlanRepo(
+        fill_pct=90.0, notify_threshold=80
+    )
+    app.dependency_overrides[deps.get_category_repo] = lambda: FakeCategoryRepo([category])
+    app.dependency_overrides[deps.get_notification_service] = lambda: notification_service
+
+    response = await client.post(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        json={"amount": 1500, "category_id": str(category_id)},
+    )
+
+    assert response.status_code == 201
+    assert len(notification_service.sent) == 1
 
 
 async def test_update_own_expense_as_member(

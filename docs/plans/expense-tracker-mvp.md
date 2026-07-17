@@ -92,7 +92,7 @@ Model for M2: sonnet; U2.1 with /effort high.
 
 ## Milestone M3 — Business logic wiring
 
-- [ ] **U3.1 notification_service + trigger in ExpenseService.create**.
+- [x] **U3.1 notification_service + trigger in ExpenseService.create**.
       Send via httpx to Bot API; failure MUST NOT fail expense creation
       (decision D3): wrap in try/except with logged error.
       AC: fake transport tests — threshold crossed → message sent exactly
@@ -603,6 +603,50 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   D33's own alternative (filter the route's returned list post-hoc) doesn't
   work here since these methods return aggregates, not raw records.
 
+- D36 (U3.1): `NotificationService.send(user, category, fill_pct)` (services/CLAUDE.md's
+  literal invariant signature) POSTs directly to the Telegram Bot API
+  (`https://api.telegram.org/bot{token}/sendMessage`) via an injected
+  `httpx.AsyncClient`, `chat_id=user.tg_id` — the expense creator, not every
+  account member (simplest reading of "user" in the invariant; no AC calls
+  for a fan-out to all admins). `ExpenseService.create` gained three new
+  constructor deps (`budget_plan_repo`, `category_repo`, `notification_service`,
+  all narrow Protocols per the existing pattern) and a `_check_budget_and_notify`
+  step: `check_limit()` for `fill_pct`, then a second `budget_plan_repo.list(
+  account_id=, category_id=)` call to recover the plan's `notify_threshold`
+  (`check_limit` itself only returns the percentage, not the plan row — no
+  new repo method needed, same "no new repo method expected" precedent as
+  D34/D35), then `category_repo.get()` for the display name. The whole check
+  (not just the HTTP send) is wrapped in `try/except Exception` — root
+  CLAUDE.md's best-effort rule is applied to the entire notification path,
+  not only `NotificationService.send`'s own internal try/except, so a DB
+  hiccup on the budget/category lookup can't undo an already-committed
+  expense either. `api/deps.py` gained an `lru_cache`d module-level
+  `httpx.AsyncClient` singleton (`_http_client()`, mirrors `config.
+  get_settings()`'s pattern) plus `close_http_client()`, called from `main.py`'s
+  lifespan `finally` alongside `database.close_pool()` — a full
+  lifespan-managed client (like `database.py`'s pool) was initially skipped
+  as unnecessary for V1's request volume, then added back in review to avoid
+  an unclosed client at process shutdown.
+  Reviewed by the reviewer subagent same session (REQUEST_CHANGES — BLOCKER:
+  `httpx.HTTPStatusError`'s own message embeds the full request URL, which
+  contains the live bot token (`/bot{token}/sendMessage`); the original
+  `logger.exception(...)` logged that message verbatim, leaking the token to
+  wherever logs ship. Fixed same session: `NotificationService.send` now
+  catches `HTTPStatusError` separately and logs only `response.status_code`
+  plus structured `extra={tg_id, category_id, fill_pct}` — never `exc`/`str(exc)`
+  — with a regression test (`test_send_on_http_status_error_never_logs_the_bot_token`)
+  asserting a planted secret token never appears in any log record. WARNs
+  fixed same session: the `_http_client()` singleton is now closed via
+  `close_http_client()`; `plans[0]`/`category_repo.get()`'s reliance on
+  `check_limit`'s prior account+category scoping is now commented in place;
+  logging switched to `extra={...}` per services/CLAUDE.md's structured-fields
+  convention. WARN not fixed, flagged for a future unit: `check_limit()` +
+  `list()` are two separate `budget_plan_repo` round trips per expense create
+  to recover `notify_threshold` — harmless today [worst case: a skipped or
+  stale-threshold notification, never a money-correctness bug] but an
+  avoidable extra query on the hot `POST /expenses` path; consider folding
+  `notify_threshold` into `check_limit`'s return in a later unit).
+
 ## STATE (handoff)
 - Done: U0.1 (config.py, database.py, main.py app factory + /health,
   tests/test_health.py). U0.2 (models/enums.py, models/errors.py,
@@ -862,10 +906,49 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   non-integration tests: 211 + 19 new); full integration suite (45 tests, all
   pre-existing — this unit touches no repository code) run and confirmed
   green against a throwaway local Docker Postgres (D18 workaround).
-- Next: U3.1 (notification_service + trigger in ExpenseService.create).
-  `models/budget_plan.py`'s `amount` still has no positivity constraint
-  (flagged since D23, not touched by U2.5/U2.6) — flag again if notification
-  threshold math assumes `amount > 0`.
+- Done: U3.1 (services/notification_service.py — `NotificationService.send(user,
+  category, fill_pct)`, POSTs to the Telegram Bot API via an injected
+  `httpx.AsyncClient`, catches `httpx.HTTPStatusError`/`httpx.HTTPError`
+  separately and logs only safe structured fields, never the exception itself
+  (D36 — token-leak review fix). services/expense_service.py —
+  `ExpenseService` gained `budget_plan_repo`/`category_repo`/
+  `notification_service` deps (all narrow Protocols); `create()` now calls
+  `_check_budget_and_notify()` after persisting the expense — `check_limit()`
+  for `fill_pct`, `budget_plan_repo.list()` for `notify_threshold`,
+  `category_repo.get()` for the display name, `notification_service.send()`
+  if `fill_pct >= notify_threshold`; the whole check wrapped in a blanket
+  `try/except Exception` so a DB hiccup here can't undo an already-committed
+  expense either (D36). api/deps.py — `_http_client()` `lru_cache`d
+  `httpx.AsyncClient` singleton + `close_http_client()`, `get_notification_service`
+  factory, `get_expense_service` now wires all three new deps. main.py —
+  lifespan closes the http client (`close_http_client()`) alongside the DB
+  pool. tests/test_notification_service.py — hermetic, `httpx.MockTransport`,
+  send happy path, transport-error/HTTP-status-error swallowed not raised,
+  ERROR-level log on failure, and a regression test proving a planted secret
+  token never appears in any log record (review fix). tests/test_expense_service.py
+  — `FakeBudgetPlanRepo`/`FakeCategoryRepo`/`FakeNotificationService`/
+  `RaisingNotificationService`/`RaisingBudgetPlanRepo`, threshold-crossed/
+  at-threshold/below-threshold/no-plan cases, both try/except layers proven
+  independently, `_current_month_bounds` cases. tests/test_expenses_api.py —
+  `override_repos` fixture now also fakes the three new deps (all pre-existing
+  non-create-flow tests still pass with no real budget plan); one new
+  end-to-end HTTP test through the real `get_expense_service` factory.
+  tests/README.md gained all new sections/rows). Reviewed by the reviewer
+  subagent same session (REQUEST_CHANGES — BLOCKER: bot-token log leak via
+  `httpx.HTTPStatusError`'s message, fixed same session with a regression
+  test; three WARNs fixed same session [unclosed http client, `plans[0]`/
+  `category_repo.get()` scoping-reliance comments, logging `extra={}`
+  convention]; one WARN flagged not fixed [two `budget_plan_repo` round trips
+  per create — see D36]). verify.sh green (245 non-integration tests: 230 +
+  15 new); full integration suite (45 tests, all pre-existing — this unit
+  touches no repository code) run and confirmed green against a throwaway
+  local Docker Postgres (D18 workaround).
+- Next: U4.1 (client.py + middlewares — bot's httpx wrapper, allowlist
+  middleware, header injection). `models/budget_plan.py`'s `amount` still has
+  no positivity constraint (flagged since D23, not touched by U2.5/U2.6/U3.1)
+  — flag again if any future unit's math assumes `amount > 0`. `budget_plan_repo`'s
+  two-round-trip notification check (D36) is a candidate for a follow-up
+  optimization, not urgent.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
