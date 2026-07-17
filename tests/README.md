@@ -386,6 +386,39 @@ Action.READ)`-gated — statistics has no `Resource` enum entry of its own (plan
 
 ---
 
+## Bot tests (`test_bot_client.py`) → [`bot/client.py`](../bot/client.py)
+Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`, no real network
+(respx isn't a project dependency; `httpx.MockTransport` matches the
+`test_notification_service.py` precedent, U4.1 AC/D37).
+
+| Test | Checks |
+|---|---|
+| `test_every_request_carries_tg_id_and_internal_token_headers` | Every request carries `X-Telegram-User-Id`/`X-Internal-Token` from construction, not from call-site args |
+| `test_list_expenses_parses_response_into_models` | `GET /expenses` response JSON parses into `ExpenseResponse` objects |
+| `test_create_expense_sends_json_body_and_returns_parsed_model` | `POST /expenses` sends the `ExpenseCreate` body as JSON and returns the parsed `ExpenseResponse` |
+| `test_update_expense_excludes_unset_fields` | `PATCH /expenses/{id}` body only includes fields explicitly set on `ExpenseUpdate` (`exclude_unset`) |
+| `test_delete_expense_returns_none_on_204` | `DELETE /expenses/{id}` succeeds on 204, no return value |
+| `test_non_2xx_response_raises_http_status_error` | A non-2xx response raises `httpx.HTTPStatusError` (`raise_for_status`), not swallowed |
+| `test_list_categories_and_create_category` | Categories list/create round trip |
+| `test_update_category_and_delete_category` | Categories update/delete round trip |
+| `test_tags_crud` | Tags list/get/create/update/delete round trip |
+| `test_budget_plans_crud_and_progress` | Budget plans list/get/create/update/delete plus `get_budget_plan_progress` round trip |
+| `test_statistics_endpoints` | `statistics_by_period`/`statistics_by_category`/`statistics_by_tag` parse into their respective models |
+
+## Bot tests (`test_bot_middlewares.py`) → [`bot/middlewares.py`](../bot/middlewares.py)
+Hermetic — no real Telegram/network; middleware called directly with a fake
+`handler`/`data` dict (U4.1 AC).
+
+| Test | Checks |
+|---|---|
+| `test_non_allowlisted_tg_id_is_dropped_before_any_api_call` | A tg_id outside the allowlist never reaches the handler (AC) |
+| `test_missing_event_from_user_is_dropped` | No `event_from_user` in middleware data → dropped, not a crash |
+| `test_allowlisted_tg_id_calls_handler_with_injected_client` | An allowlisted tg_id's handler runs and receives a `BackendClient` via `data["client"]` |
+| `test_injected_client_carries_headers_for_the_calling_tg_id` | The injected `BackendClient`'s requests carry that tg_id's `X-Telegram-User-Id` and the configured `X-Internal-Token` |
+| `test_dropped_update_is_logged` | Dropping a non-allowlisted update logs a `WARNING` record naming the tg_id |
+
+---
+
 Sections not yet populated — add as the corresponding units land:
-- Bot tests (M4: client, middlewares, handlers)
+- Bot handler tests (M4: handlers/expenses, categories, tags, budgets, statistics)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)
