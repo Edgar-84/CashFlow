@@ -27,8 +27,12 @@ from config import get_settings
 from models.enums import Action, Resource, Role
 from models.permission import PermissionResponse
 from models.user import UserResponse
+from repositories.category_repo import CategoryRepository
 from repositories.permission_repo import PermissionRepository
+from repositories.tag_repo import TagRepository
 from repositories.user_repo import UserRepository
+from services.category_service import CategoryService
+from services.tag_service import TagService
 from services.user_service import UserService
 
 
@@ -44,10 +48,34 @@ def get_permission_repo(
     return PermissionRepository(conn)
 
 
+def get_category_repo(
+    conn: Annotated[asyncpg.Connection, Depends(database.get_connection)],
+) -> CategoryRepository:
+    return CategoryRepository(conn)
+
+
+def get_tag_repo(
+    conn: Annotated[asyncpg.Connection, Depends(database.get_connection)],
+) -> TagRepository:
+    return TagRepository(conn)
+
+
 def get_user_service(
     user_repo: Annotated[UserRepository, Depends(get_user_repo)],
 ) -> UserService:
     return UserService(user_repo)
+
+
+def get_category_service(
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repo)],
+) -> CategoryService:
+    return CategoryService(category_repo)
+
+
+def get_tag_service(
+    tag_repo: Annotated[TagRepository, Depends(get_tag_repo)],
+) -> TagService:
+    return TagService(tag_repo)
 
 
 def _unauthorized(detail: str) -> HTTPException:
