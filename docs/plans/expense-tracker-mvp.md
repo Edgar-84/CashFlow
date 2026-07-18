@@ -109,12 +109,17 @@ Model for M2: sonnet; U2.1 with /effort high.
 - [x] **U4.2 Bot skeleton**: bot.py dispatcher, states.py, keyboards.py.
       AC: dispatcher builds; keyboards render expected callback_data.
       Model: haiku-friendly (boilerplate).
-- [ ] **U4.3 handlers/expenses — FSM add-expense flow**
+- [x] **U4.3 handlers/expenses — FSM add-expense flow**
       (category → amount → optional comment/tag → confirm) + list view.
       AC: FSM walkthrough test with fake API client: happy path, cancel
       mid-flow, invalid amount input re-prompts. Amount parsed to minor
       units in ONE helper with its own tests (comma/dot, "1 234,56").
       Largest bot unit — split list view into U4.3b if diff exceeds budget.
+- [ ] **U4.3b handlers/expenses — list view** (split from U4.3, D39):
+      `/expenses` command rendering the account's expenses from
+      `client.list_expenses()`, minor-units formatted for display.
+      AC: rendering tests against a fake API client — non-empty list,
+      empty list, comment shown when present.
 - [ ] **U4.4 handlers/categories + tags**.
       AC: CRUD flows against fake API; permission-denied from API rendered
       as a human message, not a stack trace.
@@ -999,14 +1004,33 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   both new sections). verify.sh green (271 non-integration tests: 261 + 10
   new); this unit touches no repository/DB code, so the pre-existing
   integration suite wasn't re-run.
-- Next: U4.3 (handlers/expenses — FSM add-expense flow + list view; use
-  `bot/states.py`'s `AddExpense`, `bot/keyboards.py`'s builders/callback
-  factories, register the router at the marked point in
-  `bot.create_dispatcher`). `models/budget_plan.py`'s `amount` still has
-  no positivity constraint (flagged since D23, not touched by U2.5/U2.6/U3.1)
-  — flag again if any future unit's math assumes `amount > 0`. `budget_plan_repo`'s
-  two-round-trip notification check (D36) is a candidate for a follow-up
-  optimization, not urgent.
+- Done: U4.3 (bot/handlers/__init__.py added per D7; bot/handlers/expenses.py —
+  FSM add-expense flow (category → amount → [comment] → [tags] → confirm),
+  `parse_amount_to_minor_units` helper (`Decimal`-based, comma/dot/thousands-
+  separator parsing, D39), `ExpenseBackendClient` Protocol (structural subset
+  of `BackendClient`, D39), `create_router() -> Router` factory (not a module
+  singleton, D39). bot/bot.py — wires `create_expenses_router()` into
+  `create_dispatcher` at the marked point. tests/test_bot_handlers_expenses.py
+  — amount-parsing parametrized cases, full happy-path walkthrough (handler
+  functions called directly against a real `FSMContext`/`MemoryStorage`),
+  no-categories/no-tags branches, invalid-amount reprompt, cancel from two
+  states, create-expense/list-categories/list-tags backend-error paths, plus
+  two real-`Dispatcher` dispatch tests locking in the D39 cancel-ordering fix.
+  tests/README.md gained the new section). Reviewed by the reviewer subagent
+  same session (REQUEST_CHANGES — BLOCKER: `/cancel` shadowed by catch-all
+  amount/comment handlers due to registration order, fixed same session, D39;
+  two WARNs fixed same session: missing error handling on `list_categories`/
+  `list_tags`, `on_confirm`'s catch widened to `httpx.HTTPError`; two NITs
+  flagged, not fixed, see D39). verify.sh green (295 non-integration tests:
+  271 + 24 new). List view split to **U4.3b** (plan contingency note, D39) —
+  not yet implemented.
+- Next: U4.3b (handlers/expenses — list view: `/expenses` command via
+  `client.list_expenses()`, reuse `_format_amount` from `bot/handlers/
+  expenses.py`; register in the same `create_router()`). `models/budget_plan.py`'s
+  `amount` still has no positivity constraint (flagged since D23, not touched
+  by U2.5/U2.6/U3.1) — flag again if any future unit's math assumes
+  `amount > 0`. `budget_plan_repo`'s two-round-trip notification check (D36)
+  is a candidate for a follow-up optimization, not urgent.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. No `.env` file exists yet — tests set env vars directly
@@ -1059,6 +1083,63 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   groups when their flows need multi-step state, not before. No handlers in
   this unit (skeleton only, per the plan's unit list — `bot/handlers/` starts
   at U4.3).
+
+- D39 (U4.3): list view split out of this unit into U4.3b — the FSM flow alone
+  (implementation + the test coverage its AC requires: happy path, cancel
+  mid-flow from two different states, invalid-amount reprompt, backend-error
+  paths) already ran ~500 diff lines across 2 files, over the ~300-line unit
+  budget; the plan's own contingency note authorized this split. `bot/handlers/
+  expenses.py` exposes `create_router() -> Router` (not a module-level `Router()`
+  singleton) because a `Router` can only ever attach to one parent `Dispatcher`
+  — `tests/test_bot_bot.py` calls `create_dispatcher()` fresh per test, which
+  would otherwise raise `RuntimeError` on the second call. Handlers are plain
+  module-level functions registered functionally (`router.message.register(fn,
+  *filters)`) rather than via `@router.message(...)` decorators, so they stay
+  directly importable/callable for unit tests. FSM state stores fetched
+  `CategoryResponse`/`TagResponse` objects directly (not just ids), safe only
+  because `bot/bot.py`'s `Dispatcher()` uses aiogram's default `MemoryStorage`
+  (shallow `dict.copy()`, no serialization) — flag if V1 ever adds a persistent
+  FSM storage backend (e.g. Redis), which would need JSON-safe state instead.
+  `parse_amount_to_minor_units` uses `Decimal` (not the illustrative
+  `int(round(value * 100))` float snippet in `bot/CLAUDE.md`) for exact
+  comma/dot/thousands-separator parsing with no float rounding risk; accepts
+  `.`/`,` as the decimal separator and space/`\xa0` as a thousands separator,
+  rejects non-positive and multi-separator input.
+  Reviewed by the reviewer subagent same session (REQUEST_CHANGES — BLOCKER:
+  `create_router()`'s registration order let `on_amount_entered`/
+  `on_comment_entered` (catch-all per-state text handlers, no command
+  exclusion) shadow `/cancel` during the `amount`/comment` states — aiogram
+  dispatches to the first handler whose filters match in registration order,
+  so `/cancel` was either stored as the literal comment or rejected as an
+  invalid amount instead of cancelling. The unit's own tests couldn't catch
+  this because they call handler functions directly, bypassing the router
+  entirely. Fixed same session by registering `on_cancel_command` immediately
+  after `cmd_add_expense`, before the catch-all handlers; two new tests
+  dispatch through a real `Dispatcher` + `create_router()` (Telegram network
+  mocked via `Message.answer` patched to an `AsyncMock`) to lock this in.
+  Two WARNs also fixed same session: `cmd_add_expense`'s `list_categories()`
+  and `_prompt_tags_or_confirm`'s `list_tags()` calls had no error handling
+  [violated bot/CLAUDE.md's "errors surface as human messages, never raw
+  tracebacks" for any path but `create_expense`] — both now catch
+  `httpx.HTTPError` and show a friendly message; `on_confirm` widened its
+  catch from `httpx.HTTPStatusError` to `httpx.HTTPError` so a connection/
+  timeout failure (not just a non-2xx response) also degrades gracefully
+  instead of crashing the handler. Two NITs flagged, not fixed [stale FSM
+  data merged rather than reset on `/add` restart — currently harmless, every
+  field consumed before use is overwritten by a later step; `_confirm_summary`
+  uses bare `dict` subscript access rather than `.get()` with a fallback —
+  low risk now that the registration-order bug is fixed, but would raise a
+  raw `KeyError` instead of a friendly message if state were ever entered
+  incomplete]. A second reviewer pass on the same diff independently re-verified
+  the BLOCKER/WARN fixes above and returned APPROVE, re-confirming the two NITs
+  and adding one more, also flagged not fixed as out of this unit's AC:
+  `on_confirm` (`bot/handlers/expenses.py`) has no guard against a double-tap
+  on the Confirm button (e.g. under network lag) — `callback.answer()` fires
+  immediately but nothing disables/removes the keyboard before the
+  `create_expense` call completes, so two taps in quick succession could both
+  reach `client.create_expense` and create a duplicate expense. Flag for a
+  future unit (e.g. clearing state/disabling the keyboard optimistically
+  before the API call, or an idempotency key if the backend gains one).
 
 
 ## Deferred decisions (tracked, not forgotten)
