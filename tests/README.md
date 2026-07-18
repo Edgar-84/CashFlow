@@ -443,8 +443,35 @@ match on).
 | `test_tag_callback_round_trips_the_uuid` | `TagCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` |
 
+## Bot tests (`test_bot_handlers_expenses.py`) → [`bot/handlers/expenses.py`](../bot/handlers/expenses.py)
+Hermetic — a `FakeBackendClient` stands in for `bot/client.py`'s `BackendClient`
+(no real backend HTTP); most handlers are called directly with mock
+Message/CallbackQuery objects and a real `FSMContext` over aiogram's
+`MemoryStorage`. A second group dispatches through a real `Dispatcher` +
+`create_router()` (Telegram network mocked via `Message.answer` patched to an
+`AsyncMock`) specifically to catch router-registration-order bugs that direct
+handler calls can't see (U4.3 AC: FSM walkthrough — happy path, cancel
+mid-flow, invalid amount input re-prompts; amount parsed to minor units in one
+helper with its own tests). List view is a separate unit (U4.3b).
+
+| Test | Checks |
+|---|---|
+| `test_parse_amount_to_minor_units_valid` | `"12.50"`/`"12,50"`/`"1 234,56"`/`"1\xa0234.00"`/plain-integer/whitespace inputs all parse to the correct minor-units `int` (AC) |
+| `test_parse_amount_to_minor_units_invalid` | Non-numeric, negative, zero, multi-separator, empty/blank input all raise `ValueError` |
+| `test_happy_path_full_flow_creates_expense` | Full walkthrough (category → amount → comment → tags → confirm) ends in a `create_expense` call with the right `ExpenseCreate` and state cleared (AC) |
+| `test_no_categories_never_starts_flow` | `/add` with no categories shows a message and never enters the FSM |
+| `test_no_tags_skips_tag_step_straight_to_confirm` | No tags on the account → flow goes straight from comment to confirm |
+| `test_invalid_amount_reprompts_and_stays_in_amount_state` | Unparseable amount text re-prompts and stays in `AddExpense.amount` (AC) |
+| `test_cancel_command_clears_state_mid_flow` | `on_cancel_command` clears FSM state and data |
+| `test_cancel_callback_clears_state_from_confirm` | The Cancel button's callback clears FSM state from the confirm step |
+| `test_create_expense_failure_clears_state_and_shows_friendly_message` | A `create_expense` HTTP failure clears state and shows a human message, never a traceback |
+| `test_add_expense_backend_error_shows_friendly_message` | A `list_categories` transport failure shows a human message instead of raising |
+| `test_prompt_tags_backend_error_shows_friendly_message_and_keeps_state` | A `list_tags` transport failure shows a human message and leaves state in place (retryable) |
+| `test_cancel_command_reaches_cancel_handler_not_amount_catchall` | Through a real `Dispatcher`: `/cancel` while in `AddExpense.amount` reaches `on_cancel_command`, not the catch-all `on_amount_entered` (AC: cancel mid-flow) |
+| `test_cancel_command_reaches_cancel_handler_not_comment_catchall` | Same, for `AddExpense.comment` — regression test for a router-registration-order bug found in review |
+
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Bot handler tests (M4: handlers/expenses, categories, tags, budgets, statistics)
+- Bot handler tests (M4: handlers/expenses list view (U4.3b), categories, tags, budgets, statistics)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)
