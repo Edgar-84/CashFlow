@@ -106,7 +106,7 @@ Model for M2: sonnet; U2.1 with /effort high.
       allowlist middleware, header injection (tg_id + internal token).
       AC: unit tests with mocked transport (respx); non-allowlisted tg_id
       is dropped before any API call.
-- [ ] **U4.2 Bot skeleton**: bot.py dispatcher, states.py, keyboards.py.
+- [x] **U4.2 Bot skeleton**: bot.py dispatcher, states.py, keyboards.py.
       AC: dispatcher builds; keyboards render expected callback_data.
       Model: haiku-friendly (boilerplate).
 - [ ] **U4.3 handlers/expenses — FSM add-expense flow**
@@ -978,9 +978,31 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   the same fixes). verify.sh green (261 non-integration tests:
   245 + 16 new); this unit touches no repository/DB code, so the pre-existing
   integration suite wasn't re-run.
-- Next: U4.2 (Bot skeleton — bot.py dispatcher registering
-  `AllowlistMiddleware` as an outer middleware on `dp.update`, states.py,
-  keyboards.py). `models/budget_plan.py`'s `amount` still has
+- Done: U4.2 (bot/bot.py — `create_dispatcher(http_client, allowed_tg_ids,
+  internal_token)` factory registering `AllowlistMiddleware` via
+  `dp.update.outer_middleware(...)` after `Dispatcher()` construction
+  (satisfies U4.1's registration-order requirement — aiogram pre-registers
+  `UserContextMiddleware` inside `Dispatcher.__init__`), with a marked
+  router-registration point for U4.3+; `main()` polling entrypoint
+  (`python -m bot.bot`) wiring settings → `Bot`/`httpx.AsyncClient`/dispatcher,
+  closing the http client on shutdown (`start_polling` closes the bot session
+  itself). bot/states.py — `AddExpense` StatesGroup (category → amount →
+  comment → tags → confirm, the bot/CLAUDE.md canonical flow). bot/keyboards.py
+  — pure builders `categories_keyboard`/`tags_keyboard` (multi-select with ✅
+  prefix + Done button)/`confirm_keyboard`, callback wire formats via
+  `CallbackData` factories + string constants (D38). tests/test_bot_bot.py —
+  dispatcher builds (AC), middleware-order assertion, and two full-stack
+  `dp.feed_update` cases (allowlisted update reaches a handler with the
+  injected `BackendClient`; non-allowlisted never reaches it).
+  tests/test_bot_keyboards.py — expected callback_data per keyboard (AC),
+  pack/unpack UUID round trips, selected-tag labels. tests/README.md gained
+  both new sections). verify.sh green (271 non-integration tests: 261 + 10
+  new); this unit touches no repository/DB code, so the pre-existing
+  integration suite wasn't re-run.
+- Next: U4.3 (handlers/expenses — FSM add-expense flow + list view; use
+  `bot/states.py`'s `AddExpense`, `bot/keyboards.py`'s builders/callback
+  factories, register the router at the marked point in
+  `bot.create_dispatcher`). `models/budget_plan.py`'s `amount` still has
   no positivity constraint (flagged since D23, not touched by U2.5/U2.6/U3.1)
   — flag again if any future unit's math assumes `amount > 0`. `budget_plan_repo`'s
   two-round-trip notification check (D36) is a candidate for a follow-up
@@ -1023,6 +1045,20 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   "respx", but respx isn't a project dependency; used `httpx.MockTransport`
   instead, matching the existing `tests/test_notification_service.py`
   precedent. Not a contract change.
+- D38 (U4.2): callback-data wire formats live in `bot/keyboards.py` as aiogram
+  `CallbackData` factories for id-carrying buttons (`CategoryCallback` →
+  `"category:<uuid>"`, `TagCallback` → `"tag:<uuid>"` — aiogram packs UUIDs as
+  dashless hex) and plain string constants for static buttons
+  (`tags:done`, `expense:confirm`, `expense:cancel`); U4.3+ handler filters
+  must match on these (e.g. `CategoryCallback.filter()`), and the formats are
+  locked in by tests/test_bot_keyboards.py. `create_dispatcher` takes its
+  deps (`http_client`, `allowed_tg_ids`, `internal_token`) explicitly rather
+  than reading `get_settings()` so tests build a fully hermetic dispatcher
+  (MockTransport http client, no env); only `main()` touches settings.
+  `bot/states.py` ships only the `AddExpense` group — U4.4/U4.5 add their own
+  groups when their flows need multi-step state, not before. No handlers in
+  this unit (skeleton only, per the plan's unit list — `bot/handlers/` starts
+  at U4.3).
 
 
 ## Deferred decisions (tracked, not forgotten)

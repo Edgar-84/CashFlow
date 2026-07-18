@@ -417,6 +417,32 @@ Hermetic — no real Telegram/network; middleware called directly with a fake
 | `test_injected_client_carries_headers_for_the_calling_tg_id` | The injected `BackendClient`'s requests carry that tg_id's `X-Telegram-User-Id` and the configured `X-Internal-Token` |
 | `test_dropped_update_is_logged` | Dropping a non-allowlisted update logs a `WARNING` record naming the tg_id |
 
+## Bot tests (`test_bot_bot.py`) → [`bot/bot.py`](../bot/bot.py)
+Hermetic — no real Telegram/network; updates fed through the full dispatcher
+stack via `dp.feed_update` with a `MockTransport`-backed http client (U4.2 AC:
+dispatcher builds).
+
+| Test | Checks |
+|---|---|
+| `test_dispatcher_builds` | `create_dispatcher()` returns a `Dispatcher` (AC) |
+| `test_allowlist_registered_as_outer_update_middleware_after_user_context` | `AllowlistMiddleware` sits on `dp.update.outer_middleware` after aiogram's built-in `UserContextMiddleware` (the registration-order requirement from `bot/middlewares.py`'s docstring) |
+| `test_allowlisted_update_reaches_handler_with_injected_client` | A real `Update` from an allowlisted tg_id, fed through `dp.feed_update`, reaches a message handler with `client: BackendClient` injected |
+| `test_non_allowlisted_update_never_reaches_handler` | A real `Update` from a non-allowlisted tg_id is dropped by the full dispatcher stack — the handler never runs |
+
+## Bot tests (`test_bot_keyboards.py`) → [`bot/keyboards.py`](../bot/keyboards.py)
+Pure functions — no fakes needed (U4.2 AC: keyboards render expected
+callback_data; these tests lock the callback wire formats handler filters
+match on).
+
+| Test | Checks |
+|---|---|
+| `test_categories_keyboard_renders_one_button_per_category_with_packed_id` | One button per category, text = name, callback_data = `category:<uuid hex>` (AC) |
+| `test_category_callback_round_trips_the_uuid` | `CategoryCallback.pack()`/`unpack()` round-trips the UUID |
+| `test_tags_keyboard_renders_toggle_buttons_and_done` | One toggle button per tag (`tag:<uuid hex>`) plus a final "Done" button (`tags:done`) |
+| `test_tags_keyboard_marks_selected_tags` | Selected tags get the ✅ label prefix; callback_data stays stable so tapping toggles |
+| `test_tag_callback_round_trips_the_uuid` | `TagCallback.pack()`/`unpack()` round-trips the UUID |
+| `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` |
+
 ---
 
 Sections not yet populated — add as the corresponding units land:
