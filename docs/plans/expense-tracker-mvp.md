@@ -157,7 +157,7 @@ Model for M2: sonnet; U2.1 with /effort high.
 - [x] **U4.4 handlers/categories** (split from "categories + tags", D43):
       list/add/rename/delete flows against fake API; permission-denied from
       API rendered as a human message, not a stack trace.
-- [ ] **U4.4b handlers/tags** (split from U4.4, D43): mechanical mirror of
+- [x] **U4.4b handlers/tags** (split from U4.4, D43): mechanical mirror of
       U4.4 for tags — list/add/rename/delete against fake API,
       permission-denied rendered as a human message.
 - [ ] **U4.5 handlers/budgets + statistics rendering**.
@@ -1154,7 +1154,22 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   same session). verify.sh green (316 non-integration tests: 301 + 15 new);
   this unit touches no repository/DB code, so the pre-existing integration
   suite wasn't re-run.
-- Next: U4.4b (handlers/tags, split from U4.4, D43). `models/budget_plan.py`'s
+- Done: U4.4b (bot/states.py — `TagManage` StatesGroup, same four states as
+  `CategoryManage`. bot/handlers/tags.py — mechanical mirror of
+  bot/handlers/categories.py: `cmd_list_tags` (plain, no FSM); add/rename
+  single-field "enter a name" forms; rename/delete reuse `tags_keyboard`/
+  `TagCallback` from bot/keyboards.py; `TagBackendClient` Protocol; `create_router()`
+  registers `/cancel` before the per-state catch-alls (D39/D40/D43 precedent).
+  bot/bot.py wires `create_tags_router()`. tests/test_bot_handlers_tags.py —
+  same shape as tests/test_bot_handlers_categories.py plus a real-`Dispatcher`
+  registration-order regression test. tests/README.md gained the new section.
+  See D44 for the one deliberate deviation from the U4.4 mirror (no 409 case
+  — tags are `ON DELETE CASCADE` with no unique constraint, D19) and the
+  three pre-existing gaps carried over unflagged (same as D43's NITs).
+  verify.sh green (331 non-integration tests: 316 + 15 new); this unit
+  touches no repository/DB code, so the pre-existing integration suite
+  wasn't re-run. Not yet reviewed by the reviewer subagent — pending.
+- Next: U4.5 (handlers/budgets + statistics rendering). `models/budget_plan.py`'s
   `amount` still has no positivity constraint (flagged since D23, not touched
   by U2.5/U2.6/U3.1) — flag again if any future unit's math assumes
   `amount > 0`. `budget_plan_repo`'s two-round-trip notification check (D36)
@@ -1413,6 +1428,21 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   beforehand; (3) `cmd_rename_category`/`cmd_delete_category` don't call
   `state.clear()` on a `list_categories()` failure — harmless today since
   no new state has been set yet at that point.
+- D44 (U4.4b): mechanical mirror of U4.4/D43 for tags, one deliberate
+  deviation: `_error_message()` has no 409 "still in use" branch. Category
+  delete is `ON DELETE RESTRICT` (D5) so a 409 is reachable; tag delete is
+  `ON DELETE CASCADE` and tag names have no per-account unique constraint
+  (D19, services/tag_service.py docstring), so the backend can never return
+  409 for tag create/delete — a 409 branch would be dead code. Added a
+  `test_delete_tag_permission_denied_shows_friendly_message` case instead
+  (categories' equivalent unit had no delete-permission test, only
+  delete-conflict; tags needed delete error coverage from somewhere since
+  conflict isn't reachable). Not a contract change — same three same-shape
+  gaps as D43's NITs apply here too (no `StateFilter` on the `cmd_add_tag`/
+  `cmd_rename_tag`/`cmd_delete_tag` entry points, no key-guard on
+  `UUID(data["rename_target_id"])`, no `state.clear()` on a `list_tags()`
+  failure) — not re-flagging individually, same pre-existing pattern,
+  fix once for both resources if ever addressed.
 
 
 ## Deferred decisions (tracked, not forgotten)
