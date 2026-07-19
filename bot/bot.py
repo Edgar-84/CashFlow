@@ -6,8 +6,10 @@ import logging
 import httpx
 from aiogram import Bot, Dispatcher
 
+from bot.handlers.budgets import create_router as create_budgets_router
 from bot.handlers.categories import create_router as create_categories_router
 from bot.handlers.expenses import create_router as create_expenses_router
+from bot.handlers.statistics import create_router as create_statistics_router
 from bot.handlers.tags import create_router as create_tags_router
 from bot.middlewares import AllowlistMiddleware
 from config import get_settings
@@ -29,6 +31,8 @@ def create_dispatcher(
     dp.include_router(create_expenses_router())
     dp.include_router(create_categories_router())
     dp.include_router(create_tags_router())
+    dp.include_router(create_budgets_router())
+    dp.include_router(create_statistics_router())
     return dp
 
 

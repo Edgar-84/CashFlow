@@ -535,8 +535,42 @@ never returns 409 for tags.
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `TagManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_tag_name_entered` |
 
+## Bot tests (`test_bot_handlers_budgets.py`) → [`bot/handlers/budgets.py`](../bot/handlers/budgets.py)
+Hermetic — a `FakeBudgetBackendClient` stands in for `bot/client.py`'s
+`BackendClient`; handlers are called directly with mock `Message` objects. No
+FSM: U4.5 AC scopes this module to read-only rendering (see plan Decision log
+D45) — `/budgets` lists each plan with a progress bar built from
+`GET /budgets/{id}/progress`.
+
+| Test | Checks |
+|---|---|
+| `test_render_progress_bar_at_zero` | 0% renders an all-empty bar |
+| `test_render_progress_bar_at_half` | 50% renders a half-filled bar |
+| `test_render_progress_bar_over_100_caps_at_full_bar` | >100% still renders a fully-filled bar, not an overflow/crash (AC) |
+| `test_render_progress_bar_none_shows_no_limit` | `fill_pct=None` (zero/negative limit, D34) renders "no limit set" instead of dividing by zero |
+| `test_list_budgets_renders_progress_and_amounts_from_minor_units` | `/budgets` renders the category name, spent/limit formatted from minor units, and the matching bar (AC) |
+| `test_list_budgets_flags_exceeded_budget` | `is_exceeded=True` adds a "Budget exceeded" warning line |
+| `test_list_budgets_renders_empty_list` | `/budgets` with none shows "No budget plans yet." |
+| `test_list_budgets_backend_error_on_list_shows_friendly_message` | A `list_budget_plans` transport failure shows a human message instead of raising |
+| `test_list_budgets_unknown_category_falls_back_to_placeholder` | A plan whose category isn't in the fetched category list still renders, as "Unknown" |
+| `test_list_budgets_progress_fetch_error_shows_inline_message_and_continues` | A `get_budget_plan_progress` failure for one plan shows an inline error for that plan without failing the whole list |
+
+## Bot tests (`test_bot_handlers_statistics.py`) → [`bot/handlers/statistics.py`](../bot/handlers/statistics.py)
+Hermetic — a `FakeStatisticsBackendClient` stands in for `bot/client.py`'s
+`BackendClient`; handlers are called directly with mock `Message` objects. No
+FSM, no input: `/statistics` is a single command rendering the current-month
+period total plus category/tag breakdowns (U4.5 AC).
+
+| Test | Checks |
+|---|---|
+| `test_statistics_renders_period_total_from_minor_units` | `/statistics` renders the period bounds and total formatted from minor units (AC) |
+| `test_statistics_renders_category_breakdown_sorted_by_total_desc` | Category breakdown is sorted highest-spend first, amounts formatted from minor units |
+| `test_statistics_renders_tag_breakdown` | Tag breakdown renders name + amount formatted from minor units |
+| `test_statistics_omits_breakdown_sections_when_empty` | No "By category:"/"By tag:" headers when either list is empty |
+| `test_statistics_unknown_category_falls_back_to_placeholder` | A category id absent from the fetched category list still renders, as "Unknown" |
+| `test_statistics_backend_error_shows_friendly_message` | A transport failure on any of the three statistics calls shows a human message instead of raising |
+
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Bot handler tests (M4: handlers/tags, budgets, statistics)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)
