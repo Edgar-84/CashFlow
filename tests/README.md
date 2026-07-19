@@ -505,6 +505,36 @@ a stack trace.
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `CategoryManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_category_name_entered` |
 
+## Bot tests (`test_bot_handlers_tags.py`) → [`bot/handlers/tags.py`](../bot/handlers/tags.py)
+Hermetic — a `FakeTagBackendClient` stands in for `bot/client.py`'s
+`BackendClient`; handlers are called directly with mock Message/CallbackQuery
+objects and a real `FSMContext` over aiogram's `MemoryStorage`. One real-
+`Dispatcher` test guards the same registration-order class of bug as
+`test_bot_handlers_categories.py` (D39/D40 precedent). U4.4b AC: mechanical
+mirror of U4.4 for tags — CRUD flows against a fake API; permission-denied
+(403) rendered as a human message, not a stack trace. Unlike categories,
+there is no 409 case: tag deletion is `ON DELETE CASCADE`, not `RESTRICT`,
+and tag names have no per-account unique constraint (D19), so the backend
+never returns 409 for tags.
+
+| Test | Checks |
+|---|---|
+| `test_list_tags_renders_non_empty_list` | `/tags` with data lists each tag's name |
+| `test_list_tags_renders_empty_list` | `/tags` with none shows "No tags yet." |
+| `test_list_tags_backend_error_shows_friendly_message` | A `list_tags` transport failure shows a human message instead of raising |
+| `test_add_tag_happy_path` | `/addtag` → name reply ends in a `create_tag` call and cleared state (AC) |
+| `test_add_tag_empty_name_reprompts` | Blank/whitespace-only name re-prompts and stays in `TagManage.add_name` |
+| `test_add_tag_permission_denied_shows_friendly_message` | A 403 from `create_tag` shows a permission message, not a traceback (AC) |
+| `test_add_tag_backend_error_shows_friendly_message` | A `create_tag` transport failure shows a human message |
+| `test_rename_tag_happy_path` | `/renametag` → select → new name ends in an `update_tag` call for the selected id (AC) |
+| `test_rename_tag_no_tags` | `/renametag` with none shows a message and never enters the FSM |
+| `test_rename_tag_permission_denied_shows_friendly_message` | A 403 from `update_tag` shows a permission message, not a traceback (AC) |
+| `test_delete_tag_happy_path` | `/deletetag` → select ends in a `delete_tag` call for the selected id (AC) |
+| `test_delete_tag_no_tags` | `/deletetag` with none shows a message and never enters the FSM |
+| `test_delete_tag_permission_denied_shows_friendly_message` | A 403 from `delete_tag` shows a permission message, not a traceback (AC) |
+| `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
+| `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `TagManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_tag_name_entered` |
+
 ---
 
 Sections not yet populated — add as the corresponding units land:

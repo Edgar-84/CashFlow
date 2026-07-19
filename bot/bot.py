@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher
 
 from bot.handlers.categories import create_router as create_categories_router
 from bot.handlers.expenses import create_router as create_expenses_router
+from bot.handlers.tags import create_router as create_tags_router
 from bot.middlewares import AllowlistMiddleware
 from config import get_settings
 
@@ -27,6 +28,7 @@ def create_dispatcher(
     # Feature routers (bot/handlers/) are registered here as M4 units land (U4.3+).
     dp.include_router(create_expenses_router())
     dp.include_router(create_categories_router())
+    dp.include_router(create_tags_router())
     return dp
 
 
