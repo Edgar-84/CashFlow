@@ -160,7 +160,7 @@ Model for M2: sonnet; U2.1 with /effort high.
 - [x] **U4.4b handlers/tags** (split from U4.4, D43): mechanical mirror of
       U4.4 for tags — list/add/rename/delete against fake API,
       permission-denied rendered as a human message.
-- [ ] **U4.5 handlers/budgets + statistics rendering**.
+- [x] **U4.5 handlers/budgets + statistics rendering**.
       AC: rendering tests on fixed API responses (progress bars, totals
       formatted from minor units).
 Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
@@ -1169,13 +1169,37 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   verify.sh green (331 non-integration tests: 316 + 15 new); this unit
   touches no repository/DB code, so the pre-existing integration suite
   wasn't re-run. Not yet reviewed by the reviewer subagent — pending.
-- Next: U4.5 (handlers/budgets + statistics rendering). `models/budget_plan.py`'s
+- Done: U4.5 (bot/handlers/budgets.py — `cmd_list_budgets` (`/budgets`, plain,
+  no FSM): lists budget plans with a 10-cell text progress bar + spent/limit
+  formatted from minor units + exceeded/over-threshold warning, category
+  names resolved via `list_categories()` (D45). bot/handlers/statistics.py —
+  `cmd_statistics` (`/statistics`, plain, no FSM): current-month period total
+  + category/tag breakdowns sorted by total descending. Both scoped to
+  read-only rendering only, no budget-plan CRUD commands (D45 — contrast
+  D43's categories+tags split). bot/bot.py wires both new routers.
+  tests/test_bot_handlers_budgets.py, tests/test_bot_handlers_statistics.py —
+  hermetic fake-client tests covering empty lists, unknown-category fallback,
+  exceeded/threshold flags, partial-failure continuation on the N+1 progress
+  fetch, `fill_pct=None` no-limit case, breakdown sort order, empty-breakdown
+  omission. tests/README.md gained both sections; removed the stale "not yet
+  populated: handlers/tags, budgets, statistics" bullet (tags had already
+  landed in U4.4b without this cleanup). Reviewed by the reviewer subagent
+  same session (APPROVE — one WARN + three NITs, all flagged not fixed, see
+  D45). verify.sh green (347 non-integration tests: 331 + 16 new); this unit
+  touches no repository/DB code, so the pre-existing integration suite
+  wasn't re-run.
+- Next: U5.1 (e2e smoke @integration: bot client → real API → test DB — add
+  expense → appears in list → budget threshold notification fired). This is
+  M4's last unit landing; M4 (Bot) is now fully done. `models/budget_plan.py`'s
   `amount` still has no positivity constraint (flagged since D23, not touched
-  by U2.5/U2.6/U3.1) — flag again if any future unit's math assumes
+  by U2.5/U2.6/U3.1/U4.5) — flag again if any future unit's math assumes
   `amount > 0`. `budget_plan_repo`'s two-round-trip notification check (D36)
-  is a candidate for a follow-up optimization, not urgent. `repositories/base.py`'s
-  `list()` has no `ORDER BY` (D40, U4.3b) — flag if `/expenses` or any future
-  list view needs a defined display order.
+  and `cmd_list_budgets`'s per-plan progress-fetch N+1 (D45) are both
+  candidates for a follow-up `with_progress` backend optimization, not
+  urgent. `repositories/base.py`'s `list()` has no `ORDER BY` (D40, U4.3b) —
+  flag if `/expenses` or any future list view needs a defined display order.
+  U4.4b (bot/handlers/tags.py) is still not yet reviewed by the reviewer
+  subagent — pending from a prior session, unrelated to U4.5.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. A real `.env` now exists on this machine (used live by
@@ -1443,6 +1467,41 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   `UUID(data["rename_target_id"])`, no `state.clear()` on a `list_tags()`
   failure) — not re-flagging individually, same pre-existing pattern,
   fix once for both resources if ever addressed.
+
+- D45 (U4.5): "handlers/budgets + statistics rendering" scoped to read-only
+  rendering only, no FSM, no budget-plan CRUD commands in the bot — unlike
+  D43's "categories + tags" split, this unit's own AC only ever said
+  "rendering tests on fixed API responses (progress bars, totals formatted
+  from minor units)", never "add/rename/delete" (contrast U4.4's AC wording).
+  Budget-plan create/update/delete stay reachable via the API only for V1
+  (and thus by a future Mini App unchanged, per root CLAUDE.md's HTTP-only
+  bot rule) — reasonable given budget plans are low-frequency, set-up-once
+  data, unlike categories/tags. `bot/handlers/budgets.py` — `cmd_list_budgets`
+  (`/budgets`): fetches `list_budget_plans()` + `list_categories()` (for
+  name resolution — `BudgetPlanResponse`/`BudgetProgress` only carry
+  `category_id`, D34), then one `get_budget_plan_progress()` call per plan
+  to render a 10-cell text progress bar + spent/limit formatted from minor
+  units + an exceeded/over-threshold warning line. `bot/handlers/statistics.py`
+  — `cmd_statistics` (`/statistics`): single command rendering
+  `statistics_by_period`/`by_category`/`by_tag` totals (current-month only,
+  D35), category/tag names resolved the same way, breakdowns sorted by total
+  descending, sections omitted when empty. Both modules duplicate a private
+  `_format_amount`/`_BACKEND_UNREACHABLE` (now a 3rd/4th copy) rather than
+  extracting a shared `bot/formatting.py` — same deliberate small-duplication
+  precedent as D34/D35's `_current_month_bounds`, flagged not fixed by the
+  reviewer subagent (APPROVE). Reviewer also flagged, not fixed: (1) the
+  per-plan `get_budget_plan_progress` N+1 pattern in `cmd_list_budgets` —
+  same class of accepted tradeoff as D36's two extra `budget_plan_repo` round
+  trips per expense-create, a candidate for a `GET /budgets?with_progress=true`
+  backend endpoint if the plan list ever grows large; (2) `_render_progress_bar`'s
+  `round()` uses Python's banker's-rounding, giving a cosmetic asymmetric bias
+  exactly at a bar cell's .5 boundary (e.g. `fill_pct=25.0` rounds its 2.5-cell
+  fill down to 2, `75.0` rounds 7.5 up to 8) — the adjacent `{fill_pct:.0f}%`
+  text label is unaffected and stays numerically correct. `bot/bot.py` wires
+  both new routers (mechanical, no `StateFilter`/catch-all ordering concerns
+  since neither router registers per-state text handlers). verify.sh green
+  (347 non-integration tests: 331 + 16 new); this unit touches no
+  repository/DB code, so the pre-existing integration suite wasn't re-run.
 
 
 ## Deferred decisions (tracked, not forgotten)
