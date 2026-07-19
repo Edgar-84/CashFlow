@@ -452,7 +452,8 @@ Message/CallbackQuery objects and a real `FSMContext` over aiogram's
 `AsyncMock`) specifically to catch router-registration-order bugs that direct
 handler calls can't see (U4.3 AC: FSM walkthrough — happy path, cancel
 mid-flow, invalid amount input re-prompts; amount parsed to minor units in one
-helper with its own tests). List view is a separate unit (U4.3b).
+helper with its own tests). Also covers the `/expenses` list view (U4.3b) —
+a plain command handler, no FSM/real-dispatch tests needed.
 
 | Test | Checks |
 |---|---|
@@ -469,9 +470,15 @@ helper with its own tests). List view is a separate unit (U4.3b).
 | `test_prompt_tags_backend_error_shows_friendly_message_and_keeps_state` | A `list_tags` transport failure shows a human message and leaves state in place (retryable) |
 | `test_cancel_command_reaches_cancel_handler_not_amount_catchall` | Through a real `Dispatcher`: `/cancel` while in `AddExpense.amount` reaches `on_cancel_command`, not the catch-all `on_amount_entered` (AC: cancel mid-flow) |
 | `test_cancel_command_reaches_cancel_handler_not_comment_catchall` | Same, for `AddExpense.comment` — regression test for a router-registration-order bug found in review |
+| `test_list_expenses_renders_non_empty_list` | `/expenses` with data shows each expense's date and minor-units-formatted amount (AC) |
+| `test_list_expenses_renders_empty_list` | `/expenses` with no expenses shows "No expenses yet." instead of an empty message (AC) |
+| `test_list_expenses_shows_comment_when_present` | Comment is rendered for expenses that have one, omitted for those that don't (AC) |
+| `test_list_expenses_backend_error_shows_friendly_message` | A `list_expenses` transport failure shows a human message instead of raising |
+| `test_list_expenses_truncates_long_list_and_long_comments` | Long lists/comments are truncated so the rendered message stays under Telegram's 4096-char limit (review fix) |
+| `test_expenses_command_reaches_list_handler_not_amount_catchall` | Through a real `Dispatcher`: `/expenses` while in `AddExpense.amount` reaches `cmd_list_expenses`, not the catch-all `on_amount_entered` (review fix, D39-precedent registration-order regression test) |
 
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Bot handler tests (M4: handlers/expenses list view (U4.3b), categories, tags, budgets, statistics)
+- Bot handler tests (M4: handlers/categories, tags, budgets, statistics)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)

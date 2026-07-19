@@ -69,9 +69,11 @@ class FakeBackendClient:
         self,
         categories: list[CategoryResponse] | None = None,
         tags: list[TagResponse] | None = None,
+        expenses: list[ExpenseResponse] | None = None,
     ) -> None:
         self.categories = categories if categories is not None else [make_category()]
         self.tags = tags if tags is not None else [make_tag()]
+        self.expenses = expenses if expenses is not None else []
         self.created: list[ExpenseCreate] = []
 
     async def list_categories(self) -> list[CategoryResponse]:
@@ -83,6 +85,9 @@ class FakeBackendClient:
     async def create_expense(self, data: ExpenseCreate) -> ExpenseResponse:
         self.created.append(data)
         return make_expense(amount=data.amount, comment=data.comment, category_id=data.category_id)
+
+    async def list_expenses(self) -> list[ExpenseResponse]:
+        return self.expenses
 
 
 class FailingBackendClient(FakeBackendClient):
@@ -301,6 +306,74 @@ async def test_prompt_tags_backend_error_shows_friendly_message_and_keeps_state(
     assert await state.get_state() == AddExpense.comment.state
 
 
+# -- list view ----------------------------------------------------------
+
+
+async def test_list_expenses_renders_non_empty_list() -> None:
+    expense = make_expense(amount=1250, comment=None, created_at=datetime(2026, 7, 18, tzinfo=UTC))
+    client = FakeBackendClient(expenses=[expense])
+    message = make_message("/expenses")
+
+    await h.cmd_list_expenses(message, client)
+
+    message.answer.assert_awaited_once()
+    text = message.answer.await_args.args[0]
+    assert "12.50" in text
+    assert "2026-07-18" in text
+
+
+async def test_list_expenses_renders_empty_list() -> None:
+    client = FakeBackendClient(expenses=[])
+    message = make_message("/expenses")
+
+    await h.cmd_list_expenses(message, client)
+
+    message.answer.assert_awaited_once_with("No expenses yet.")
+
+
+async def test_list_expenses_shows_comment_when_present() -> None:
+    with_comment = make_expense(amount=500, comment="lunch")
+    without_comment = make_expense(amount=1000, comment=None)
+    client = FakeBackendClient(expenses=[with_comment, without_comment])
+    message = make_message("/expenses")
+
+    await h.cmd_list_expenses(message, client)
+
+    text = message.answer.await_args.args[0]
+    assert "lunch" in text
+    assert "12.50" not in text  # sanity: not the add-expense summary format
+    assert "5.00" in text
+    assert "10.00" in text
+
+
+async def test_list_expenses_backend_error_shows_friendly_message() -> None:
+    class FailingListExpensesClient(FakeBackendClient):
+        async def list_expenses(self) -> list[ExpenseResponse]:
+            request = httpx.Request("GET", "http://test/expenses")
+            raise httpx.ConnectError("boom", request=request)
+
+    message = make_message("/expenses")
+
+    await h.cmd_list_expenses(message, FailingListExpensesClient())
+
+    message.answer.assert_awaited_once()
+    assert "couldn't reach" in message.answer.await_args.args[0].lower()
+
+
+async def test_list_expenses_truncates_long_list_and_long_comments() -> None:
+    many = [make_expense() for _ in range(h._MAX_EXPENSES_SHOWN + 5)]
+    long_comment = make_expense(comment="x" * 500)
+    client = FakeBackendClient(expenses=[*many, long_comment])
+    message = make_message("/expenses")
+
+    await h.cmd_list_expenses(message, client)
+
+    text = message.answer.await_args.args[0]
+    assert len(text) < 4096
+    assert "and 6 more not shown" in text
+    assert "x" * 500 not in text
+
+
 # -- real-dispatch regression tests: catch router-registration-order bugs ---
 
 
@@ -350,3 +423,19 @@ async def test_cancel_command_reaches_cancel_handler_not_comment_catchall() -> N
 
     assert await context.get_state() is None
     mocked_answer.assert_awaited_once_with("Cancelled.")
+
+
+async def test_expenses_command_reaches_list_handler_not_amount_catchall() -> None:
+    dp = make_router_dispatcher()
+    bot = Bot(token="42:TEST-token")
+    tg_id = 555
+    context = dp.fsm.resolve_context(bot, chat_id=tg_id, user_id=tg_id)
+    assert context is not None
+    await context.set_state(AddExpense.amount)
+
+    with patch.object(Message, "answer", new=AsyncMock()) as mocked_answer:
+        await dp.feed_update(
+            bot, make_text_update(1, tg_id, "/expenses"), client=FakeBackendClient()
+        )
+
+    mocked_answer.assert_awaited_once_with("No expenses yet.")

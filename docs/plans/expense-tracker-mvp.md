@@ -115,7 +115,7 @@ Model for M2: sonnet; U2.1 with /effort high.
       mid-flow, invalid amount input re-prompts. Amount parsed to minor
       units in ONE helper with its own tests (comma/dot, "1 234,56").
       Largest bot unit — split list view into U4.3b if diff exceeds budget.
-- [ ] **U4.3b handlers/expenses — list view** (split from U4.3, D39):
+- [x] **U4.3b handlers/expenses — list view** (split from U4.3, D39):
       `/expenses` command rendering the account's expenses from
       `client.list_expenses()`, minor-units formatted for display.
       AC: rendering tests against a fake API client — non-empty list,
@@ -1116,6 +1116,28 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   do not pick it up before U5.1 unless the human reorders; README gained
   the "Environments & .env" section (one `.env` per machine, dev bot token
   vs prod bot token) that U6.1's README Deployment section will build on.
+  271 + 24 new). List view split to **U4.3b** (plan contingency note, D39).
+- Done: U4.3b (bot/handlers/expenses.py — `cmd_list_expenses` (plain
+  `Command("expenses")` handler, no FSM), `_format_expenses_list`/
+  `_format_amount` reuse (D39), `ExpenseBackendClient` Protocol gained
+  `list_expenses`; registered in `create_router()` before the per-state
+  catch-alls (D40). tests/test_bot_handlers_expenses.py — `FakeBackendClient`
+  gained an `expenses` param + `list_expenses()`; AC cases (non-empty render,
+  empty → "No expenses yet.", comment shown-vs-omitted) plus a backend-error
+  case and a real-`Dispatcher` registration-order regression test (D40).
+  tests/README.md gained the new rows). Reviewed by the reviewer subagent
+  same session (APPROVE; two WARNs fixed same session — unbounded list could
+  exceed Telegram's 4096-char limit [`_MAX_EXPENSES_SHOWN`/`_MAX_COMMENT_CHARS`
+  truncation added], missing registration-order regression test [added]; two
+  NITs flagged not fixed — see D40). verify.sh green (301 non-integration
+  tests: 295 + 6 new).
+- Next: U4.4 (handlers/categories + tags). `models/budget_plan.py`'s
+  `amount` still has no positivity constraint (flagged since D23, not touched
+  by U2.5/U2.6/U3.1) — flag again if any future unit's math assumes
+  `amount > 0`. `budget_plan_repo`'s two-round-trip notification check (D36)
+  is a candidate for a follow-up optimization, not urgent. `repositories/base.py`'s
+  `list()` has no `ORDER BY` (D40) — flag if `/expenses` or any future list
+  view needs a defined display order.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. A real `.env` now exists on this machine (used live by
@@ -1306,6 +1328,38 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   (`cashflow:local` / `cashflow:prod`) — bare `build: .` made compose tag
   three per-service images from the one build, contradicting D40's
   one-image design; with the shared tag one image is built and reused.
+- D40 (U4.3b): `cmd_list_expenses` is a plain `Command("expenses")` handler with
+  no FSM state at all — `client.list_expenses()` already returns only the
+  caller's account's expenses (backend-side scoping, `api/expenses.py`,
+  unchanged), so the bot side needs no own_only/account filtering, matching
+  bot/CLAUDE.md's "zero business logic" rule. `_format_expenses_list` reuses
+  `_format_amount` (D39) rather than introducing new money-formatting code.
+  Registered in `create_router()` right after `cmd_add_expense`/before the
+  per-state catch-alls (`on_amount_entered`/`on_comment_entered`), the same
+  position that kept `/cancel` reachable in D39 — `/expenses` has no
+  `StateFilter`, so it matches regardless of FSM state and is dispatched
+  before those catch-alls can shadow it (locked in by a new real-`Dispatcher`
+  regression test, `test_expenses_command_reaches_list_handler_not_amount_catchall`,
+  same pattern as D39's two `/cancel` tests).
+  Reviewed by the reviewer subagent same session (APPROVE — no BLOCKERs).
+  Two WARNs fixed same session: (1) an unbounded expense list could produce a
+  message over Telegram's 4096-char limit and raise an uncaught
+  `TelegramBadRequest`, violating bot/CLAUDE.md's "never a raw traceback" rule
+  — fixed with `_MAX_EXPENSES_SHOWN = 30` (list truncated, "...and N more not
+  shown." appended) and `_MAX_COMMENT_CHARS = 100` (long comments truncated
+  with "…"), covered by `test_list_expenses_truncates_long_list_and_long_comments`;
+  (2) no real-dispatch regression test existed proving `/expenses` isn't
+  shadowed the way `/cancel` was in D39 — added, see above. Two items flagged,
+  not fixed (out of this unit's AC, pre-existing/backend-side): `/expenses`
+  (like pre-existing `/add`) has no `StateFilter`, so sending it mid-FSM
+  doesn't clear state — the FSM stays parked and the user's next plain-text
+  message gets misinterpreted by whatever catch-all handler owns that state;
+  same pre-existing pattern as `/add`, not newly introduced by this unit.
+  `repositories/base.py`'s generic `list()` has no `ORDER BY`, so `/expenses`
+  display order is whatever Postgres/asyncpg returns — no bot-side or
+  backend-side sort exists yet; flag for a future unit if newest-first display
+  is wanted (would need a repo-level change, out of bot/ scope).
+
 
 ## Deferred decisions (tracked, not forgotten)
 - Account Pydantic model: intentionally absent in V1. Accounts are seeded

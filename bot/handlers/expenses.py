@@ -1,7 +1,7 @@
 """Expense-creation FSM (bot/CLAUDE.md canonical flow):
 category -> amount -> [comment] -> [tags] -> confirm.
-List view is a separate unit (U4.3b, plan Decision log) — kept out of this
-module to stay inside this unit's diff budget.
+Also hosts the `/expenses` list view (U4.3b, plan Decision log D39) — a
+plain command handler, no FSM state involved.
 
 FSM state stores fetched CategoryResponse/TagResponse objects directly (not
 just ids) so a callback (category pick, tag toggle) can look up display
@@ -55,6 +55,7 @@ class ExpenseBackendClient(Protocol):
     async def list_categories(self) -> list[CategoryResponse]: ...
     async def list_tags(self) -> list[TagResponse]: ...
     async def create_expense(self, data: ExpenseCreate) -> ExpenseResponse: ...
+    async def list_expenses(self) -> list[ExpenseResponse]: ...
 
 
 def parse_amount_to_minor_units(text: str) -> int:
@@ -239,9 +240,47 @@ async def on_cancel_command(message: Message, state: FSMContext) -> None:
     await message.answer("Cancelled.")
 
 
+# Bounds the rendered message well under Telegram's 4096-char message limit
+# (D39 follow-up review: an unbounded list could otherwise raise
+# TelegramBadRequest, surfacing as a raw error instead of a friendly message).
+_MAX_EXPENSES_SHOWN = 30
+_MAX_COMMENT_CHARS = 100
+
+
+def _format_expenses_list(expenses: list[ExpenseResponse]) -> str:
+    lines = ["Your expenses:"]
+    shown = expenses[:_MAX_EXPENSES_SHOWN]
+    for expense in shown:
+        line = f"{expense.created_at:%Y-%m-%d} — {_format_amount(expense.amount)}"
+        if expense.comment:
+            comment = expense.comment
+            if len(comment) > _MAX_COMMENT_CHARS:
+                comment = comment[:_MAX_COMMENT_CHARS] + "…"
+            line += f" ({comment})"
+        lines.append(line)
+    remaining = len(expenses) - len(shown)
+    if remaining > 0:
+        lines.append(f"...and {remaining} more not shown.")
+    return "\n".join(lines)
+
+
+async def cmd_list_expenses(message: Message, client: ExpenseBackendClient) -> None:
+    try:
+        expenses = await client.list_expenses()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch expenses")
+        await message.answer("Couldn't reach the backend. Please try again in a moment.")
+        return
+    if not expenses:
+        await message.answer("No expenses yet.")
+        return
+    await message.answer(_format_expenses_list(expenses))
+
+
 def create_router() -> Router:
     router = Router(name="expenses")
     router.message.register(cmd_add_expense, Command("add"))
+    router.message.register(cmd_list_expenses, Command("expenses"))
     # /cancel must be registered before the catch-all per-state text handlers
     # below (on_amount_entered, on_comment_entered) — aiogram dispatches to the
     # first handler whose filters match in registration order, and those two
