@@ -120,10 +120,44 @@ Model for M2: sonnet; U2.1 with /effort high.
       `client.list_expenses()`, minor-units formatted for display.
       AC: rendering tests against a fake API client — non-empty list,
       empty list, comment shown when present.
-- [x] **U4.4 handlers/categories** (split from "categories + tags", D41):
+- [x] **U4.3a Docker packaging (local + prod compose)** — infra unit, no
+      Python changes (design locked in D40):
+      1. `Dockerfile` — multi-stage, `python:3.13-slim` + uv (`uv sync
+         --frozen --no-dev` in a builder stage, copy the venv into a slim
+         runtime stage, non-root user). ONE image for both services; the
+         compose files pick the command (`uvicorn main:app` vs
+         `python -m bot.bot`).
+      2. `.dockerignore` — MUST exclude `.env*` (config.py reads `.env`;
+         secrets must never bake into the image), plus `.git`, `.venv`,
+         `__pycache__`, `tests/`, `docs/plans/`.
+      3. `docker-compose.yml` (local laptop testing): `db` (postgres:16,
+         named volume, `pg_isready` healthcheck) → `migrate` (one-shot
+         `alembic upgrade head`, runs to completion) → `api` (port 8000
+         published, `/health` healthcheck) → `bot` (starts after api
+         healthy). `DATABASE_URL`/`BACKEND_BASE_URL` overridden in the
+         compose file (`db`/`api` service hostnames); everything else from
+         `env_file: .env`.
+      4. `docker-compose.prod.yml` (AWS, from master): NO `db` service —
+         `DATABASE_URL` points at Supabase (session pooler, port 5432, NOT
+         the transaction pooler — asyncpg prepared statements, see Risks;
+         if pgbouncer errors appear set `statement_cache_size=0`).
+         `migrate` + `api` + `bot` only, `restart: unless-stopped`,
+         NO published ports (bot long-polls outward; api is reached only
+         via the internal compose network).
+      5. Root `CLAUDE.md` Commands section gains the docker run commands.
+      AC: `docker compose build` clean; `docker compose up` on a clean
+      checkout → migrations apply to fresh Postgres, `curl
+      localhost:8000/health` → 200, bot container logs "Starting bot
+      polling"; `docker compose -f docker-compose.prod.yml config`
+      validates; verify.sh untouched and green (config-only diff).
+      Note: D18's greenlet gap does NOT apply inside Linux containers
+      (`platform_machine` reports `aarch64`/`x86_64`, so greenlet installs
+      and real Alembic migrations work — no `psql SCHEMA.sql` workaround).
+      Model: sonnet.
+- [x] **U4.4 handlers/categories** (split from "categories + tags", D43):
       list/add/rename/delete flows against fake API; permission-denied from
       API rendered as a human message, not a stack trace.
-- [ ] **U4.4b handlers/tags** (split from U4.4, D41): mechanical mirror of
+- [ ] **U4.4b handlers/tags** (split from U4.4, D43): mechanical mirror of
       U4.4 for tags — list/add/rename/delete against fake API,
       permission-denied rendered as a human message.
 - [ ] **U4.5 handlers/budgets + statistics rendering**.
@@ -137,6 +171,36 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
       add expense → appears in list → budget threshold notification fired.
       AC: scenario green on test DB; run excluded from default verify.sh
       (integration marker).
+
+## Milestone M6 — Deployment (CD)
+
+- [ ] **U6.1 CD flow: GitHub Actions → GHCR → EC2** (design locked in D42;
+      only hard prerequisite is U4.3a, but sequenced after M5 so the
+      pipeline only ever auto-deploys a smoke-tested master):
+      1. `docker-compose.prod.yml`: the three services change to
+         `image: ${CASHFLOW_IMAGE:-cashflow:prod}` (keep `build: .` — the
+         laptop prod-config test still builds locally; the server's
+         `/opt/bot/.env` adds `CASHFLOW_IMAGE=ghcr.io/edgar-84/cashflow:latest`
+         — lowercase, GHCR requirement) + a json-file `logging:` rotation
+         block per service (max-size/max-file).
+      2. `.github/workflows/deploy.yml`: on push to master — build and push
+         `ghcr.io/edgar-84/cashflow` tagged `latest` + `<commit sha>` (the
+         sha tag is the rollback path), then SSH (repo secrets `SSH_HOST`/
+         `SSH_USER`/`SSH_PRIVATE_KEY`) → `cd /opt/bot && docker compose
+         pull && docker compose up -d`. Add `platforms: linux/arm64` to the
+         build step if the instance is t4g (ARM).
+      3. README gains a Deployment section: one-time server bootstrap (EC2 +
+         docker install, `/opt/bot/` with a copy of the prod compose file
+         renamed `docker-compose.yml` + hand-written `.env` `chmod 600`,
+         GHCR read-only token `docker login`), and day-2 ops (rollback via
+         sha tag, `.env` edit → `up -d --force-recreate`, logs).
+      AC: `CASHFLOW_IMAGE=ghcr.io/... docker compose -f
+      docker-compose.prod.yml config` resolves to the GHCR image AND the
+      no-var default still resolves to `cashflow:prod`; workflow YAML
+      lint-clean (actionlint or a branch push dry-run); verify.sh green
+      (no Python changes). The server-side bootstrap itself is executed
+      manually by the human per README — not automated by this unit.
+      Model: sonnet.
 
 ---
 
@@ -1025,6 +1089,36 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   two WARNs fixed same session: missing error handling on `list_categories`/
   `list_tags`, `on_confirm`'s catch widened to `httpx.HTTPError`; two NITs
   flagged, not fixed, see D39). verify.sh green (295 non-integration tests:
+  271 + 24 new). List view split to **U4.3b** (plan contingency note, D39) —
+  not yet implemented.
+- Done: U4.3a (Docker packaging, all design pre-locked in D40 + impl notes
+  D41. `Dockerfile` — multi-stage `python:3.13-slim`, uv 0.11.28 builder
+  (`uv sync --frozen --no-dev --no-install-project`), venv copied into the
+  runtime stage, non-root `app` user, default CMD = uvicorn; compose picks
+  the command per service. `.dockerignore` — `.env*`, `.git*`, caches,
+  `tests/`, `scripts/`, `docs/plans/`. `docker-compose.yml` — db (postgres:16,
+  named volume, pg_isready healthcheck) → migrate (one-shot `alembic upgrade
+  head`) → api (:8000 published, urllib `/health` healthcheck) → bot;
+  `DATABASE_URL`/`BACKEND_BASE_URL` pinned to service hostnames, rest from
+  `env_file: .env`. `docker-compose.prod.yml` — no db, no published ports,
+  `restart: unless-stopped`, DATABASE_URL from `.env` → Supabase session
+  pooler. Root CLAUDE.md Commands section gained both run commands. AC
+  verified live this session: `docker compose build` clean; `up --wait` on a
+  fresh volume → alembic ran `-> 1fd1bea5a842`, `/health` 200, bot logged
+  "Starting bot polling" and connected to Telegram; containers run as `app`,
+  zero `.env*` files inside the image; both compose files pass `config`;
+  `down -v` cleaned up. verify.sh green — zero Python changes.)
+- Next: U4.3b (handlers/expenses — list view: `/expenses` command via
+  `client.list_expenses()`, reuse `_format_amount` from `bot/handlers/
+  expenses.py`; register in the same `create_router()`). `models/budget_plan.py`'s
+  `amount` still has no positivity constraint (flagged since D23, not touched
+  by U2.5/U2.6/U3.1) — flag again if any future unit's math assumes
+  `amount > 0`. `budget_plan_repo`'s two-round-trip notification check (D36)
+  is a candidate for a follow-up optimization, not urgent. Plan extended
+  same session as U4.3a: M6/U6.1 (CD flow, design in D42) queued AFTER M5 —
+  do not pick it up before U5.1 unless the human reorders; README gained
+  the "Environments & .env" section (one `.env` per machine, dev bot token
+  vs prod bot token) that U6.1's README Deployment section will build on.
   271 + 24 new). List view split to **U4.3b** (plan contingency note, D39).
 - Done: U4.3b (bot/handlers/expenses.py — `cmd_list_expenses` (plain
   `Command("expenses")` handler, no FSM), `_format_expenses_list`/
@@ -1041,7 +1135,7 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   NITs flagged not fixed — see D40). verify.sh green (301 non-integration
   tests: 295 + 6 new).
 - Done: U4.4 (bot/states.py — `CategoryManage` StatesGroup (`add_name`,
-  `rename_select`, `rename_name`, `delete_select`, D41). bot/handlers/
+  `rename_select`, `rename_name`, `delete_select`, D43). bot/handlers/
   categories.py — `cmd_list_categories` (plain, no FSM); add/rename
   single-field "enter a name" forms; rename/delete reuse `categories_keyboard`/
   `CategoryCallback` from bot/keyboards.py to pick a target by name instead of
@@ -1056,21 +1150,22 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   permission-denied), delete (happy path/no-categories/409-conflict), cancel,
   plus a real-`Dispatcher` registration-order regression test. tests/README.md
   gained the new section). Reviewed by the reviewer subagent same session
-  (APPROVE — see D41 for the one WARN and three NITs, all handled/flagged
+  (APPROVE — see D43 for the one WARN and three NITs, all handled/flagged
   same session). verify.sh green (316 non-integration tests: 301 + 15 new);
   this unit touches no repository/DB code, so the pre-existing integration
   suite wasn't re-run.
-- Next: U4.4b (handlers/tags, split from U4.4, D41). `models/budget_plan.py`'s
+- Next: U4.4b (handlers/tags, split from U4.4, D43). `models/budget_plan.py`'s
   `amount` still has no positivity constraint (flagged since D23, not touched
   by U2.5/U2.6/U3.1) — flag again if any future unit's math assumes
   `amount > 0`. `budget_plan_repo`'s two-round-trip notification check (D36)
   is a candidate for a follow-up optimization, not urgent. `repositories/base.py`'s
-  `list()` has no `ORDER BY` (D40) — flag if `/expenses` or any future list
-  view needs a defined display order.
+  `list()` has no `ORDER BY` (D40, U4.3b) — flag if `/expenses` or any future
+  list view needs a defined display order.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
-  units immediately. No `.env` file exists yet — tests set env vars directly
-  via monkeypatch; real `.env` still needed before running the app/bot for real.
+  units immediately. A real `.env` now exists on this machine (used live by
+  `docker compose up` in U4.3a); tests still set env vars via monkeypatch and
+  never read it.
   New packages under repositories/services/api/bot will need an empty
   `__init__.py` each (see D7) or mypy will fail with duplicate-module errors.
   `docs/seed.sql` now exists (manual account/user onboarding, V1 has no
@@ -1177,6 +1272,85 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   future unit (e.g. clearing state/disabling the keyboard optimistically
   before the API call, or an idempotency key if the backend gains one).
 
+- D40 (plan extension, 2026-07-18): added U4.3a — Docker packaging for local
+  laptop testing and AWS production. Decisions locked in up front so the
+  implementing session only executes:
+  1. ONE image for api + bot (same codebase, same lockfile) — the compose
+     service picks the command. Rejected: two Dockerfiles (double build time
+     and drift risk for zero isolation gain; the bot already imports nothing
+     DB-side by design).
+  2. Local stack runs REAL Alembic migrations via a one-shot `migrate`
+     compose service, not the `psql docs/SCHEMA.sql` shortcut from
+     `scripts/integration_docker.sh` — D18's greenlet/`platform_machine`
+     marker gap is macOS-host-specific and does not exist inside Linux
+     containers, and prod (AWS→Supabase) must use Alembic anyway, so local
+     compose exercising the same path is a feature. `scripts/
+     integration_docker.sh` stays as-is (it serves bare-host `pytest -m
+     integration` runs, a different use case).
+  3. Prod compose has no Postgres container — Supabase is the prod DB (root
+     CLAUDE.md stack). Connection goes through Supabase's session pooler
+     (port 5432); the transaction pooler breaks asyncpg prepared statements
+     (pre-existing Risks entry; `statement_cache_size=0` is the fallback).
+  4. Prod publishes NO ports: the bot long-polls Telegram outbound and is
+     the only client of the api, reached over the internal compose network.
+     `X-Internal-Token` remains the auth layer, but not exposing the api
+     publicly at all is strictly better on a client-serving AWS box.
+  5. Secrets stay runtime-only: `.dockerignore` excludes `.env*`; compose
+     injects env via `env_file: .env` (pydantic-settings reads real env vars
+     before any `.env` file, so the baked-in absence is harmless). `.env*`
+     itself untouched per root CLAUDE.md's do-not-edit list.
+  6. Bot has no healthcheck endpoint (polling process, no server) —
+     `depends_on: api: condition: service_healthy` + `restart:
+     unless-stopped` is the V1 liveness story; a real bot healthcheck is
+     V2 territory.
+- D42 (plan extension, 2026-07-18): added M6/U6.1 — CD flow (GitHub
+  Actions → GHCR → EC2 `docker compose pull && up -d` on merge to master).
+  Decisions locked up front so the implementing session only executes:
+  1. Env contract stays ONE `.env` per machine (laptop project root; server
+     `/opt/bot/.env`, hand-written once, chmod 600). NO `.env.dev`/
+     `.env.prod` files in the repo — the dev/prod split is which compose
+     file runs, plus per-machine `.env` values. Documented for humans in
+     README "Environments & .env" (added same session); root CLAUDE.md
+     Environment section points there.
+  2. TWO Telegram bots (BotFather): dev token in the laptop `.env`, prod
+     token only on the server — Telegram long polling delivers each update
+     to exactly one client per token, so sharing one token between laptop
+     and server makes messages randomly disappear. Rejected: one shared
+     token (the "bot running in two places" pitfall).
+  3. Prod compose image becomes `${CASHFLOW_IMAGE:-cashflow:prod}` with
+     `build: .` kept: laptop default builds locally (U4.3a behavior
+     unchanged), server overrides via one `.env` line to the GHCR image
+     (compose reads `.env` for `${...}` interpolation). Image name must be
+     lowercase (`ghcr.io/edgar-84/cashflow`) — GHCR rejects uppercase.
+  4. Every deploy re-runs the one-shot `migrate` service; `alembic upgrade
+     head` is idempotent, so schema changes merged to master apply
+     automatically — no separate migration step in the pipeline.
+  5. Rollback = image tags: each deploy pushes `:latest` + `:<sha>`; on the
+     server, pin the sha in the compose file (or `git revert` on master and
+     let CD redeploy).
+  6. Server bootstrap (EC2 instance, docker install, GHCR read-only PAT
+     login, `/opt/bot/` layout) is a manual, README-documented one-time
+     procedure — not automated in V1.
+  Sequenced after M5 (U5.1 e2e smoke) although the only hard dependency is
+  U4.3a: the pipeline should only ever auto-deploy a smoke-tested master.
+- D41 (U4.3a): implementation notes on top of D40, no design changes.
+  uv pinned to 0.11.28 in the Dockerfile builder stage (`COPY --from=
+  ghcr.io/astral-sh/uv:0.11.28`, matching the host version) with
+  `UV_PYTHON_DOWNLOADS=0` (use the image's CPython) and `--no-install-project`
+  (flat layout, no build-system — only deps go in the venv; app code is
+  copied separately for layer caching). Compose healthchecks hit `/health`
+  via `python -c "urllib.request.urlopen(...)"` because `python:3.13-slim`
+  ships no curl/wget (and installing one just for a healthcheck bloats the
+  image). Local compose also pins the bot's `DATABASE_URL` to the `db`
+  service: the value is unused (bot has zero DB imports) but required by
+  `config.Settings`, and pinning keeps the local stack independent of
+  whatever `DATABASE_URL` the host `.env` holds. `docs/` (minus
+  `docs/plans/`) is left in the image; `tests/`, `scripts/`, caches and
+  `.git*`/`.env*` are dockerignored. Review follow-up (same session): all
+  `build: .` services now also declare a shared `image:` tag
+  (`cashflow:local` / `cashflow:prod`) — bare `build: .` made compose tag
+  three per-service images from the one build, contradicting D40's
+  one-image design; with the shared tag one image is built and reused.
 - D40 (U4.3b): `cmd_list_expenses` is a plain `Command("expenses")` handler with
   no FSM state at all — `client.list_expenses()` already returns only the
   caller's account's expenses (backend-side scoping, `api/expenses.py`,
@@ -1209,7 +1383,7 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   backend-side sort exists yet; flag for a future unit if newest-first display
   is wanted (would need a repo-level change, out of bot/ scope).
 
-- D41 (U4.4): "handlers/categories + tags" split into U4.4 (categories only)
+- D43 (U4.4): "handlers/categories + tags" split into U4.4 (categories only)
   and U4.4b (tags, deferred), same class of split as D39/D40. Unlike D39's
   list-view split, no contingency note pre-authorized this in the unit list —
   the split was made against task-methodology's hard budget criteria (≤5
@@ -1223,11 +1397,14 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   re-deciding them. Rejected: splitting by CRUD verb (e.g. list+add in one
   unit, rename+delete in another) — would cut across a single resource's
   natural cohesion and double the number of Protocol/router/keyboard-reuse
-  decisions instead of halving them.
+  decisions instead of halving them. Numbered D43, not D41, to avoid
+  colliding with D41 (U4.3a) — this unit's branch diverged from master
+  before U4.3a/U4.3b/D40–D42 landed there; merged back in and renumbered
+  post-hoc rather than re-deriving the ID from a stale branch state.
   Reviewed by the reviewer subagent same session (APPROVE — no BLOCKERs).
-  One WARN fixed same session: this D41 entry was missing (unit checkbox
-  text and STATE referenced D41 before the Decision log entry existed).
-  Three NITs flagged, not fixed (pre-existing pattern, same as D40): (1)
+  One WARN fixed same session: this decision-log entry was missing (unit
+  checkbox text and STATE referenced the decision before the entry existed).
+  Three NITs flagged, not fixed (pre-existing pattern, same as D40/U4.3b): (1)
   `cmd_add_category`/`cmd_rename_category`/`cmd_delete_category` have no
   `StateFilter`, so invoking one mid-flow silently abandons the prior FSM
   state instead of being rejected — same gap as `/add`/`/expenses` (D40); (2)

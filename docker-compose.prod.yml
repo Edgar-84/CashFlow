@@ -1,0 +1,52 @@
+# Production stack (AWS, deployed from master). No db service — DATABASE_URL
+# in `.env` must point at Supabase's SESSION pooler (port 5432). Do NOT use
+# the transaction pooler: it breaks asyncpg prepared statements (see plan
+# Risks; if pgbouncer errors appear, set statement_cache_size=0 in the pool).
+#
+# No published ports on purpose (D40): the bot long-polls Telegram outbound
+# and is the only client of the api, reached over the internal compose
+# network as http://api:8000. X-Internal-Token stays the auth layer.
+#
+# Run: docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  migrate:
+    build: .
+    image: cashflow:prod
+    command: alembic upgrade head
+    env_file: .env
+    restart: "no"
+
+  api:
+    build: .
+    image: cashflow:prod
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  bot:
+    build: .
+    image: cashflow:prod
+    command: python -m bot.bot
+    env_file: .env
+    environment:
+      BACKEND_BASE_URL: http://api:8000
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
