@@ -19,6 +19,11 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 - Alembic: `uv run alembic revision --autogenerate -m "..."` / `alembic upgrade head`
 - Integration tests without a reachable local Postgres: `bash scripts/integration_docker.sh`
   (throwaway Docker Postgres, schema applied via psql — see tests/CLAUDE.md)
+- Docker, local full stack: `docker compose up --build`
+  (db → alembic migrate → api on :8000 → bot; overrides DATABASE_URL/BACKEND_BASE_URL,
+  rest read from `.env`)
+- Docker, production (AWS, from master): `docker compose -f docker-compose.prod.yml up -d --build`
+  (no db container — DATABASE_URL must point at Supabase's session pooler; no published ports)
 
 ## Architecture map (flat layout, no `src/` wrapper)
 - `models/` — Pydantic v2 schemas (Base/Create/Update/Response) — see its CLAUDE.md
@@ -47,6 +52,9 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 
 ## Environment (.env)
 `DATABASE_URL`, `BOT_TOKEN`, `BACKEND_BASE_URL`, `INTERNAL_TOKEN`, `ALLOWED_TG_IDS` (comma-separated tg_ids).
+One `.env` per machine, never committed; no `.env.dev`/`.env.prod` variants —
+dev vs prod values (incl. the separate dev bot token) are documented in
+README "Environments & .env".
 
 ## Out of scope (V2)
 - Voice input · Mini App frontend · Bot self-registration · OAuth/JWT (tg_id + internal token is enough for now) · Scheduled digests/APScheduler (V1 notifies on expense creation only).

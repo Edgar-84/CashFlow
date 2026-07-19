@@ -1,0 +1,18 @@
+# Secrets are runtime-only (compose `env_file: .env`) — never baked into the image.
+.env*
+
+.git
+.github
+.claude
+.idea
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+tests/
+docs/plans/
+scripts/
+.pre-commit-config.yaml
