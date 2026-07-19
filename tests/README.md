@@ -477,8 +477,36 @@ a plain command handler, no FSM/real-dispatch tests needed.
 | `test_list_expenses_truncates_long_list_and_long_comments` | Long lists/comments are truncated so the rendered message stays under Telegram's 4096-char limit (review fix) |
 | `test_expenses_command_reaches_list_handler_not_amount_catchall` | Through a real `Dispatcher`: `/expenses` while in `AddExpense.amount` reaches `cmd_list_expenses`, not the catch-all `on_amount_entered` (review fix, D39-precedent registration-order regression test) |
 
+## Bot tests (`test_bot_handlers_categories.py`) → [`bot/handlers/categories.py`](../bot/handlers/categories.py)
+Hermetic — a `FakeCategoryBackendClient` stands in for `bot/client.py`'s
+`BackendClient`; handlers are called directly with mock Message/CallbackQuery
+objects and a real `FSMContext` over aiogram's `MemoryStorage`. One real-
+`Dispatcher` test guards the same registration-order class of bug as
+`test_bot_handlers_expenses.py` (D39/D40 precedent). U4.4 AC: CRUD flows
+against a fake API; permission-denied (403) and in-use (409, category still
+referenced by expenses/budget plans, plan D5) rendered as human messages, not
+a stack trace.
+
+| Test | Checks |
+|---|---|
+| `test_list_categories_renders_non_empty_list` | `/categories` with data lists each category's name |
+| `test_list_categories_renders_empty_list` | `/categories` with none shows "No categories yet." |
+| `test_list_categories_backend_error_shows_friendly_message` | A `list_categories` transport failure shows a human message instead of raising |
+| `test_add_category_happy_path` | `/addcategory` → name reply ends in a `create_category` call and cleared state (AC) |
+| `test_add_category_empty_name_reprompts` | Blank/whitespace-only name re-prompts and stays in `CategoryManage.add_name` |
+| `test_add_category_permission_denied_shows_friendly_message` | A 403 from `create_category` shows a permission message, not a traceback (AC) |
+| `test_add_category_backend_error_shows_friendly_message` | A `create_category` transport failure shows a human message |
+| `test_rename_category_happy_path` | `/renamecategory` → select → new name ends in an `update_category` call for the selected id (AC) |
+| `test_rename_category_no_categories` | `/renamecategory` with none shows a message and never enters the FSM |
+| `test_rename_category_permission_denied_shows_friendly_message` | A 403 from `update_category` shows a permission message, not a traceback (AC) |
+| `test_delete_category_happy_path` | `/deletecategory` → select ends in a `delete_category` call for the selected id (AC) |
+| `test_delete_category_no_categories` | `/deletecategory` with none shows a message and never enters the FSM |
+| `test_delete_category_conflict_shows_friendly_message` | A 409 from `delete_category` (still referenced by expenses/budget plans) shows a human message, not a traceback (AC) |
+| `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
+| `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `CategoryManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_category_name_entered` |
+
 ---
 
 Sections not yet populated — add as the corresponding units land:
-- Bot handler tests (M4: handlers/categories, tags, budgets, statistics)
+- Bot handler tests (M4: handlers/tags, budgets, statistics)
 - e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)

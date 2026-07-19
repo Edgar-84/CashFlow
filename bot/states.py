@@ -14,3 +14,10 @@ class AddExpense(StatesGroup):
     comment = State()
     tags = State()
     confirm = State()
+
+
+class CategoryManage(StatesGroup):
+    add_name = State()
+    rename_select = State()
+    rename_name = State()
+    delete_select = State()
