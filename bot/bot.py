@@ -6,6 +6,7 @@ import logging
 import httpx
 from aiogram import Bot, Dispatcher
 
+from bot.handlers.categories import create_router as create_categories_router
 from bot.handlers.expenses import create_router as create_expenses_router
 from bot.middlewares import AllowlistMiddleware
 from config import get_settings
@@ -25,6 +26,7 @@ def create_dispatcher(
     dp.update.outer_middleware(AllowlistMiddleware(http_client, allowed_tg_ids, internal_token))
     # Feature routers (bot/handlers/) are registered here as M4 units land (U4.3+).
     dp.include_router(create_expenses_router())
+    dp.include_router(create_categories_router())
     return dp
 
 

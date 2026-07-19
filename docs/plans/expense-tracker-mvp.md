@@ -154,9 +154,12 @@ Model for M2: sonnet; U2.1 with /effort high.
       (`platform_machine` reports `aarch64`/`x86_64`, so greenlet installs
       and real Alembic migrations work — no `psql SCHEMA.sql` workaround).
       Model: sonnet.
-- [ ] **U4.4 handlers/categories + tags**.
-      AC: CRUD flows against fake API; permission-denied from API rendered
-      as a human message, not a stack trace.
+- [x] **U4.4 handlers/categories** (split from "categories + tags", D43):
+      list/add/rename/delete flows against fake API; permission-denied from
+      API rendered as a human message, not a stack trace.
+- [ ] **U4.4b handlers/tags** (split from U4.4, D43): mechanical mirror of
+      U4.4 for tags — list/add/rename/delete against fake API,
+      permission-denied rendered as a human message.
 - [ ] **U4.5 handlers/budgets + statistics rendering**.
       AC: rendering tests on fixed API responses (progress bars, totals
       formatted from minor units).
@@ -1131,13 +1134,33 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   truncation added], missing registration-order regression test [added]; two
   NITs flagged not fixed — see D40). verify.sh green (301 non-integration
   tests: 295 + 6 new).
-- Next: U4.4 (handlers/categories + tags). `models/budget_plan.py`'s
+- Done: U4.4 (bot/states.py — `CategoryManage` StatesGroup (`add_name`,
+  `rename_select`, `rename_name`, `delete_select`, D43). bot/handlers/
+  categories.py — `cmd_list_categories` (plain, no FSM); add/rename
+  single-field "enter a name" forms; rename/delete reuse `categories_keyboard`/
+  `CategoryCallback` from bot/keyboards.py to pick a target by name instead of
+  a typed UUID; `CategoryBackendClient` Protocol (structural subset of
+  `BackendClient`); `_error_message()` maps 403 → permission message, 409 →
+  "still in use" message (category delete is `ON DELETE RESTRICT`, D5),
+  anything else → generic message; `create_router()` registers `/cancel`
+  before the per-state catch-alls (D39/D40 precedent). bot/bot.py wires
+  `create_categories_router()`. tests/test_bot_handlers_categories.py —
+  list (non-empty/empty/backend-error), add (happy path/empty-name reprompt/
+  permission-denied/backend-error), rename (happy path/no-categories/
+  permission-denied), delete (happy path/no-categories/409-conflict), cancel,
+  plus a real-`Dispatcher` registration-order regression test. tests/README.md
+  gained the new section). Reviewed by the reviewer subagent same session
+  (APPROVE — see D43 for the one WARN and three NITs, all handled/flagged
+  same session). verify.sh green (316 non-integration tests: 301 + 15 new);
+  this unit touches no repository/DB code, so the pre-existing integration
+  suite wasn't re-run.
+- Next: U4.4b (handlers/tags, split from U4.4, D43). `models/budget_plan.py`'s
   `amount` still has no positivity constraint (flagged since D23, not touched
   by U2.5/U2.6/U3.1) — flag again if any future unit's math assumes
   `amount > 0`. `budget_plan_repo`'s two-round-trip notification check (D36)
   is a candidate for a follow-up optimization, not urgent. `repositories/base.py`'s
-  `list()` has no `ORDER BY` (D40) — flag if `/expenses` or any future list
-  view needs a defined display order.
+  `list()` has no `ORDER BY` (D40, U4.3b) — flag if `/expenses` or any future
+  list view needs a defined display order.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. A real `.env` now exists on this machine (used live by
@@ -1359,6 +1382,37 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   display order is whatever Postgres/asyncpg returns — no bot-side or
   backend-side sort exists yet; flag for a future unit if newest-first display
   is wanted (would need a repo-level change, out of bot/ scope).
+
+- D43 (U4.4): "handlers/categories + tags" split into U4.4 (categories only)
+  and U4.4b (tags, deferred), same class of split as D39/D40. Unlike D39's
+  list-view split, no contingency note pre-authorized this in the unit list —
+  the split was made against task-methodology's hard budget criteria (≤5
+  changed files, ≤~300 diff lines) directly: full CRUD (list/add/rename/
+  delete) for two resources plus their tests would have touched bot/states.py,
+  two new handler modules, bot/bot.py, two new test files, and tests/README.md
+  in one commit — 7 files, well over budget — for what is a mechanical
+  near-duplicate between categories and tags (same shape: a `name`-only
+  entity). Splitting by resource keeps each unit at 5 files and lets U4.4b
+  reuse this unit's design decisions (states/handler/test shape) without
+  re-deciding them. Rejected: splitting by CRUD verb (e.g. list+add in one
+  unit, rename+delete in another) — would cut across a single resource's
+  natural cohesion and double the number of Protocol/router/keyboard-reuse
+  decisions instead of halving them. Numbered D43, not D41, to avoid
+  colliding with D41 (U4.3a) — this unit's branch diverged from master
+  before U4.3a/U4.3b/D40–D42 landed there; merged back in and renumbered
+  post-hoc rather than re-deriving the ID from a stale branch state.
+  Reviewed by the reviewer subagent same session (APPROVE — no BLOCKERs).
+  One WARN fixed same session: this decision-log entry was missing (unit
+  checkbox text and STATE referenced the decision before the entry existed).
+  Three NITs flagged, not fixed (pre-existing pattern, same as D40/U4.3b): (1)
+  `cmd_add_category`/`cmd_rename_category`/`cmd_delete_category` have no
+  `StateFilter`, so invoking one mid-flow silently abandons the prior FSM
+  state instead of being rejected — same gap as `/add`/`/expenses` (D40); (2)
+  `on_rename_category_name_entered`'s `UUID(data["rename_target_id"])` has no
+  guard for a missing key — low risk, the FSM always sets it immediately
+  beforehand; (3) `cmd_rename_category`/`cmd_delete_category` don't call
+  `state.clear()` on a `list_categories()` failure — harmless today since
+  no new state has been set yet at that point.
 
 
 ## Deferred decisions (tracked, not forgotten)
