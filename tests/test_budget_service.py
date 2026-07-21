@@ -9,7 +9,8 @@ import pytest
 
 from models.budget_plan import BudgetPlanCreate, BudgetPlanResponse, BudgetPlanUpdate
 from models.errors import ConflictError, NotFoundError
-from services.budget_service import BudgetService, _current_month_bounds, calculate_progress
+from services.budget_service import BudgetService, calculate_progress
+from services.period import month_bounds
 
 
 class FakeBudgetPlanRepo:
@@ -145,34 +146,6 @@ def test_calculate_progress_negative_limit_returns_none_pct() -> None:
     )
 
     assert progress.fill_pct is None
-
-
-# --- _current_month_bounds: pure logic ---
-
-
-@pytest.mark.parametrize(
-    "now, expected_start, expected_end",
-    [
-        (
-            datetime(2026, 7, 17, 13, 45, 30, tzinfo=UTC),
-            datetime(2026, 7, 1, 0, 0, 0, tzinfo=UTC),
-            datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC),
-        ),
-        (
-            # December → January year rollover.
-            datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC),
-            datetime(2026, 12, 1, 0, 0, 0, tzinfo=UTC),
-            datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC),
-        ),
-    ],
-)
-def test_current_month_bounds(
-    now: datetime, expected_start: datetime, expected_end: datetime
-) -> None:
-    start, end = _current_month_bounds(now)
-
-    assert start == expected_start
-    assert end == expected_end
 
 
 # --- CRUD ---
@@ -330,7 +303,7 @@ async def test_get_progress_combines_plan_and_spent() -> None:
     # not some other window (D34).
     called_account_id, start, end = expense_repo.calls[0]
     assert called_account_id == account_id
-    assert (start, end) == _current_month_bounds(now)
+    assert (start, end) == month_bounds(now)
     assert start == datetime(2026, 7, 1, tzinfo=UTC)
     assert end == datetime(2026, 8, 1, tzinfo=UTC)
 

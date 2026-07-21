@@ -13,7 +13,7 @@ from models.errors import NotFoundError
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.tag import TagResponse
 from models.user import UserResponse
-from services.expense_service import ExpenseService, _current_month_bounds
+from services.expense_service import ExpenseService
 
 
 def _fake_tag(tag_id: UUID, account_id: UUID) -> TagResponse:
@@ -493,21 +493,3 @@ async def test_create_passes_account_scoped_bounds_to_check_limit() -> None:
     await service.create(data, caller)
 
     assert budget_plan_repo.check_limit_calls == [(account_id, category_id)]
-
-
-def test_current_month_bounds_mid_year() -> None:
-    now = datetime(2026, 7, 17, 15, 30, tzinfo=UTC)
-
-    start, end = _current_month_bounds(now)
-
-    assert start == datetime(2026, 7, 1, tzinfo=UTC)
-    assert end == datetime(2026, 8, 1, tzinfo=UTC)
-
-
-def test_current_month_bounds_december_rollover() -> None:
-    now = datetime(2026, 12, 25, tzinfo=UTC)
-
-    start, end = _current_month_bounds(now)
-
-    assert start == datetime(2026, 12, 1, tzinfo=UTC)
-    assert end == datetime(2027, 1, 1, tzinfo=UTC)

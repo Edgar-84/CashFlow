@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from models.expense import ExpenseResponse
 from models.tag import TagResponse
-from services.statistics_service import StatisticsService, _current_month_bounds
+from services.statistics_service import StatisticsService
 
 
 class FakeExpensePeriodRepo:
@@ -48,27 +48,6 @@ def make_expense(
         updated_at=created_at or datetime.now(UTC),
         tags=[_tag(tag_id, account_id) for tag_id in (tag_ids or [])],
     )
-
-
-# --- _current_month_bounds: pure logic (same convention as budget_service D34) ---
-
-
-def test_current_month_bounds_mid_year() -> None:
-    now = datetime(2026, 7, 17, 13, 45, 30, tzinfo=UTC)
-
-    start, end = _current_month_bounds(now)
-
-    assert start == datetime(2026, 7, 1, tzinfo=UTC)
-    assert end == datetime(2026, 8, 1, tzinfo=UTC)
-
-
-def test_current_month_bounds_december_rollover() -> None:
-    now = datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC)
-
-    start, end = _current_month_bounds(now)
-
-    assert start == datetime(2026, 12, 1, tzinfo=UTC)
-    assert end == datetime(2027, 1, 1, tzinfo=UTC)
 
 
 # --- by_period ---

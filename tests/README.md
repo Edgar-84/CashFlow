@@ -175,6 +175,16 @@ Hermetic — `TagRepositoryProtocol` replaced with an in-memory `FakeTagRepo`. N
 | `test_delete_removes_tag` | `delete()` removes the row via the repo |
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
 
+## Service tests (`test_period.py`) → [`services/period.py`](../services/period.py)
+Pure logic, no DB. `month_bounds()` is the single shared helper replacing the
+three previously-duplicated `_current_month_bounds` (plan Decision log D107).
+
+| Test | Checks |
+|---|---|
+| `test_month_bounds_default_utc` | Parametrized: mid-year `now` and a December→January year rollover, default `tz="UTC"` |
+| `test_month_bounds_family_tz_evening_of_31st_rolls_to_next_month` | A UTC instant still on the 31st already reads as the 1st of the next month in `Europe/Moscow` (UTC+3) — the returned bounds follow the family timezone, not raw UTC |
+| `test_month_bounds_naive_now_rejected` | A naive `now` raises `ValueError` instead of silently assuming a timezone |
+
 ## Service tests (`test_expense_service.py`) → [`services/expense_service.py`](../services/expense_service.py)
 Hermetic — `ExpenseRepositoryProtocol` replaced with an in-memory `FakeExpenseRepo`. No DB.
 The service has no notion of permissions/`own_only` — that's enforced by the route
@@ -206,8 +216,6 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | `test_create_still_succeeds_when_notification_send_raises` | `notification_service.send()` raising is swallowed — expense creation still returns the created expense (root CLAUDE.md D3, second line of defense beyond `NotificationService`'s own try/except) |
 | `test_create_still_succeeds_when_budget_check_raises` | A `budget_plan_repo` error (DB hiccup) during the notification check doesn't fail expense creation |
 | `test_create_passes_account_scoped_bounds_to_check_limit` | `check_limit()` is called with the caller's `account_id`/the expense's `category_id` |
-| `test_current_month_bounds_mid_year` | `_current_month_bounds()` for a mid-year `now` |
-| `test_current_month_bounds_december_rollover` | December → January year rollover |
 
 ## Service tests (`test_notification_service.py`) → [`services/notification_service.py`](../services/notification_service.py)
 Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`. No real network (U3.1 AC).
@@ -229,7 +237,6 @@ with in-memory fakes. No DB. `calculate_progress` is pure (no fakes needed).
 | `test_calculate_progress_parametrized` | Parametrized: 0% spent, exactly at `notify_threshold`, mid-range, >100%, exactly 100% — `fill_pct`/`is_over_threshold`/`is_exceeded`/`remaining` (asserted `int`, not `Decimal`/float) |
 | `test_calculate_progress_zero_limit_returns_none_pct` | `limit=0` → `fill_pct=None`, not `ZeroDivisionError` (mirrors `check_limit`'s D23 guard) |
 | `test_calculate_progress_negative_limit_returns_none_pct` | Same guard for a negative `limit` |
-| `test_current_month_bounds` | Parametrized: mid-year `now` and a December→January year rollover both produce the correct `[start, end)` month bounds |
 | `test_list_scopes_by_account` | `list()` excludes another account's plans |
 | `test_get_returns_plan_in_account` | `get()` returns a plan belonging to the given account |
 | `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
@@ -243,7 +250,7 @@ with in-memory fakes. No DB. `calculate_progress` is pure (no fakes needed).
 | `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
 | `test_delete_removes_plan` | `delete()` removes the row via the repo |
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
-| `test_get_progress_combines_plan_and_spent` | `get_progress()` combines `budget_plan_repo.get()` + `expense_repo.sum_by_category_month()` into a `BudgetProgress` with real `int` spent/remaining; also asserts the exact `[start, end)` month bounds passed to the repo match `_current_month_bounds()` (review fix — the fake previously ignored these args) |
+| `test_get_progress_combines_plan_and_spent` | `get_progress()` combines `budget_plan_repo.get()` + `expense_repo.sum_by_category_month()` into a `BudgetProgress` with real `int` spent/remaining; also asserts the exact `[start, end)` month bounds passed to the repo match `services.period.month_bounds()` (review fix — the fake previously ignored these args) |
 | `test_get_progress_no_expenses_this_month_is_zero_spent` | No matching sum → `spent=0`, not a `KeyError` |
 | `test_get_progress_missing_plan_raises_not_found` | `get_progress()` on an unknown plan id raises `NotFoundError` |
 
@@ -351,8 +358,6 @@ Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeE
 
 | Test | Checks |
 |---|---|
-| `test_current_month_bounds_mid_year` | `_current_month_bounds()` for a mid-year `now` |
-| `test_current_month_bounds_december_rollover` | December → January year rollover |
 | `test_by_period_sums_current_month_expenses` | `by_period()` sums all expenses in the current month; `total` is `int` |
 | `test_by_period_excludes_expenses_outside_current_month` | Expenses outside `[start, end)` are excluded |
 | `test_by_period_no_expenses_is_zero` | No expenses → `total=0`, not an error |
