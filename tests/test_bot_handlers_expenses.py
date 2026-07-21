@@ -171,6 +171,9 @@ async def test_happy_path_full_flow_creates_expense() -> None:
     await h.on_tag_toggled(tag_callback, TagCallback(tag_id=tag.id), state)
     assert (await state.get_data())["selected_tag_ids"] == [str(tag.id)]
     tag_callback.message.edit_reply_markup.assert_awaited_once()
+    redrawn_markup = tag_callback.message.edit_reply_markup.await_args.kwargs["reply_markup"]
+    redrawn_texts = [button.text for row in redrawn_markup.inline_keyboard for button in row]
+    assert any(text.startswith("✅") and "urgent" in text for text in redrawn_texts), redrawn_texts
 
     done_callback = make_callback()
     await h.on_tags_done(done_callback, state)
