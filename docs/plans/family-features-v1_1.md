@@ -1,0 +1,317 @@
+# Plan: Family Features V1.1
+
+Companion plan to docs/plans/expense-tracker-mvp.md (V1 MVP — 18/20 units
+done). Separate file per task-methodology: the MVP plan is ~1500 lines and
+two units from finished; this is a new feature wave, not MVP scope creep.
+Workflow per unit: /clear → /unit <id> docs/plans/family-features-v1_1.md
+→ Stop-gate (verify.sh) → [reviewer for risky units] → human commits.
+
+## Goal
+Close the gaps between the shipped MVP and the family's real usage:
+statistics over a chosen period with category/tag filters and a pie-chart
+image in the bot, expense author visibility, expense edit/delete and
+budget-plan CRUD from the bot, budget notifications to the whole family,
+a permissions-management API, cross-account data validation, and a
+family-timezone-correct "current month".
+
+## Non-goals
+- Mini App frontend, voice input, self-registration (V2, unchanged).
+- Bot UI for permissions/user management (admin panel is V2; this plan
+  adds admin-only API endpoints ONLY — locked by human decision, D103).
+- Scheduled digests (V1 notifies on expense creation only, MVP D4 stands).
+- Migrating the bot allowlist from .env to the users table (still the
+  documented prerequisite for the V2 admin panel, root CLAUDE.md).
+
+## Constraints
+- All root CLAUDE.md rules (layering, async, BIGINT money, HTTP-only bot).
+- MVP plan contracts stay valid; every delta here is additive and listed
+  in Contracts below. MVP Decision log (D1–D45) remains binding — this
+  plan's decisions start at D100 to avoid collisions.
+- Sequencing vs the MVP plan: finish MVP **U5.1** (e2e smoke) BEFORE
+  starting this plan; MVP **U6.1** (CD) stays last overall so the pipeline
+  only ever auto-deploys the finished V1.1 (human may reorder).
+- Two human sign-off gates baked in: U1.6 adds a file under
+  `migrations/versions/` and U2.4 changes `uv.lock` (matplotlib) — both on
+  root CLAUDE.md's do-not-edit-without-asking list. The implementing
+  session STOPS and asks before touching them.
+
+## Contracts (U0) — additive deltas only
+- `config.Settings`: `family_tz: str = "UTC"` (IANA name, e.g.
+  `Europe/Belgrade`; new optional env var `FAMILY_TZ`).
+- New `services/period.py`: `month_bounds(now: datetime | None = None,
+  tz: str = "UTC") -> tuple[datetime, datetime]` — THE single copy
+  replacing the three duplicated `_current_month_bounds` (expense_service,
+  budget_service, statistics_service, MVP D34/D35).
+- `models/expense.py` `ExpenseResponse`: `user_name: str | None = None`
+  (additive, populated by a repo JOIN on `users.name`; None tolerated for
+  old fixtures — D102).
+- `models/budget_plan.py` `BudgetPlanBase.amount`: gains `Field(gt=0)`
+  (closes the gap flagged since MVP D23); DB `CHECK (amount > 0)` on
+  `budget_plans` AND `expenses` arrives in U1.6's migration.
+- `services/statistics_service.py` methods gain optional tz-aware
+  `start`/`end` params (default: family-tz current month); `by_period`
+  additionally gains optional `category_id: UUID | None`,
+  `tag_id: UUID | None` filters. `api/statistics.py` exposes them as
+  optional ISO-8601 `start`/`end` (+ `category_id`/`tag_id` on by-period)
+  query params; `start >= end` → 422.
+- `bot/client.py`: the three `statistics_*` methods gain the same optional
+  params (pass-through as query params). No other client changes — expense
+  update/delete and budget-plan CRUD wrappers already exist (U4.1).
+- `NotificationService.send(user, category, fill_pct)` signature is
+  UNCHANGED; fan-out is the caller's job (`ExpenseService` loops over
+  account members — D104).
+- Permissions API reuses existing `PermissionCreate/Update/Response`
+  (MVP U0.2) — no new models. Admin-only via existing `require_admin`
+  (MVP D27).
+- New `bot/charts.py`: `render_category_pie(totals:
+  list[tuple[str, int]]) -> bytes` (PNG; names + minor-unit sums in,
+  bytes out; pure function, no I/O).
+
+## Units
+
+### M0 — Contracts & foundation
+- [ ] **U0.1 Family timezone + shared period helper**: `family_tz` in
+      config; new `services/period.py` `month_bounds(now, tz)` using
+      `zoneinfo`; the three services import it and their private copies
+      are deleted; existing `now=` test seams preserved.
+      AC: parametrized tests — UTC+3 evening-of-the-31st lands in the
+      right month, December→January rollover, naive-`now` rejected; all
+      pre-existing month-bounds tests keep passing against the shared
+      helper. Files: config.py, services/period.py, 3 service files,
+      tests (yellow-zone file count, but purely mechanical consolidation).
+      Model: sonnet.
+- [ ] **U0.2 Contract deltas**: `ExpenseResponse.user_name` (additive,
+      default None), `BudgetPlanBase.amount Field(gt=0)` (model side only
+      — DB CHECK comes with U1.6), statistics service/client signature
+      stubs per Contracts (params accepted, default behavior unchanged).
+      AC: mypy green; model tests — user_name optional round-trip,
+      amount<=0 → ValidationError (API-level 422 test lands in U1.6).
+      Model: sonnet. ⚠ Human-review — touches reviewed MVP contracts.
+
+### M1 — Backend logic
+- [ ] **U1.1 Cross-account validation** (closes MVP D33/D23 flags):
+      `ExpenseService.create/update` verify `category_id` and every
+      `tag_ids` entry belong to the caller's account (new narrow
+      `TagRepositoryProtocol` dep); `BudgetService.create/update` verify
+      `category_id`. Foreign/nonexistent ids → `NotFoundError` (404, not
+      403 — no cross-account probing, MVP D29 precedent).
+      AC: hermetic service tests — foreign category / foreign tag /
+      mixed own+foreign tags all 404, own ids still pass; API-level test
+      per endpoint. RISKY → reviewer subagent (permissions-adjacent).
+- [ ] **U1.2 Statistics: period params + filters**: implement the U0.2
+      signatures — service filters the `get_by_period` fetch window by
+      caller-supplied bounds (default `month_bounds(family_tz)`), by_period
+      applies optional category/tag filter before aggregation (own_only
+      filter unchanged, MVP D35); routes parse/validate query params.
+      AC: aggregation tests on seeded fake data for a custom 3-month
+      window, last-month window, category filter, tag filter,
+      start>=end → 422; default (no params) still equals current family
+      month.
+- [ ] **U1.3 Expense author**: `ExpenseRepository` `get/list/get_by_period/
+      get_by_category` JOIN `users.name` → `user_name` in the row dicts.
+      AC: @integration tests — user_name populated on all four read paths;
+      unit fixtures updated. Model: sonnet (mechanical SQL).
+- [ ] **U1.4 Notification fan-out to all members** (human decision D104):
+      `ExpenseService` gains a narrow `UserRepositoryProtocol`
+      (`list(account_id=...)`) dep; `_check_budget_and_notify` sends to
+      EVERY account user, each send individually best-effort.
+      AC: fake tests — 2 members → 2 sends; recipient #1 send failure →
+      recipient #2 still notified AND expense still created; single-user
+      account → 1 send (no dupes). RISKY → reviewer subagent
+      (notification path, MVP D3/D36 invariants).
+- [ ] **U1.5 Permissions API** (human decision D103):
+      `services/permission_service.py` (account-scoped: target user must
+      belong to the admin's account, 404 otherwise — D29 pattern;
+      UniqueViolation → `ConflictError`, closes MVP D24's flagged gap) +
+      `api/permissions.py` CRUD gated by `require_admin`; router wired in
+      main.py.
+      AC: HTTP tests — admin 200 grid, member/viewer → 403, duplicate
+      (user, resource) → 409, foreign-account target → 404; a granted
+      override row observably changes a subsequent PermissionChecker
+      decision (end-to-end assert). RISKY → reviewer subagent
+      (permissions). /effort high.
+- [ ] **U1.6 amount > 0 migration** ⚠ STOP-AND-ASK GATE: new Alembic
+      revision adding `CHECK (amount > 0)` to `budget_plans` AND
+      `expenses` — `migrations/versions/` is on the do-not-edit list, the
+      session must get explicit human approval before creating the file.
+      AC: upgrade→downgrade→upgrade round-trip green in CI's integration
+      job; API POST/PATCH with amount<=0 → 422 (model) and the CHECK
+      proven by a direct-SQL @integration test. Model: sonnet.
+
+### M2 — Bot
+- [ ] **U2.1 Expense picker + delete flow**: `/expenses` lines gain
+      author (`user_name`, requirement #7) and category name; new
+      inline-keyboard expense picker (recent N) → detail view →
+      Delete-with-confirm (guard against double-tap: answer + drop
+      keyboard before the API call — same pattern U2.5 retrofits to
+      add-expense confirm).
+      AC: fake-client tests — list shows author+category, picker →
+      detail → delete happy path, 403/404 → human message, double-tap →
+      single API call; real-Dispatcher registration-order test
+      (MVP D39/D40 precedent).
+- [ ] **U2.1b Expense edit flow** (split from U2.1 — same rationale as
+      MVP D43): from the detail view, `EditExpense` FSM: pick field
+      (amount/category/comment/tags) → enter/select new value →
+      `client.update_expense`. `/cancel` registered before per-state
+      catch-alls (MVP D39).
+      AC: fake-client walkthroughs per field, invalid amount re-prompt,
+      cancel mid-flow, backend-error message; registration-order test.
+- [ ] **U2.2 Budget-plan CRUD in bot** (requirement #8; U4.4's shape):
+      `BudgetManage` StatesGroup; `/budgets` keeps the U4.5 rendering,
+      new add flow (category → amount → notify-threshold %) and
+      rename-free update/delete flows via the existing keyboards pattern;
+      409 (duplicate plan) and 403 → human messages.
+      AC: fake-client tests — add/update/delete happy paths, duplicate →
+      "already exists" message, permission-denied message, invalid
+      amount/threshold re-prompts, cancel; registration-order test.
+- [ ] **U2.3 Statistics period picker + drill-down** (requirement #6):
+      `/statistics` gains inline buttons — period presets (this month
+      default / last month / last 3 months) and "by category…"/"by tag…"
+      pickers that re-render the by-period total filtered to the chosen
+      category/tag; client passes start/end/filters (U0.2/U1.2 params).
+      AC: fake-client tests — preset switch re-renders with the right
+      bounds sent, category and tag drill-down send the right filter,
+      empty result message; callback-data formats locked by tests.
+- [ ] **U2.4 Pie chart PNG** ⚠ STOP-AND-ASK GATE (human decision D101):
+      `uv add matplotlib` changes `uv.lock` (do-not-edit list) — get
+      explicit approval first. New `bot/charts.py`
+      `render_category_pie()` (Agg backend, no display); `/chart` command
+      (and a "📊 chart" button on `/statistics`) sends the PNG via
+      `BufferedInputFile` with a period-picker caption reusing U2.3's
+      presets.
+      AC: unit test — returned bytes start with the PNG magic number,
+      one slice per category, zero-total → "nothing to chart" message
+      without rendering; handler test with fake client (no Telegram
+      network); verify.sh green with matplotlib imported nowhere outside
+      `bot/charts.py`.
+- [ ] **U2.5 Bot polish**: `/start` + `/help` (command list per role-
+      agnostic text); `ExpenseRepository.list`/`get_by_period` gain
+      `ORDER BY created_at DESC` (closes MVP D40 flag — repo-level, the
+      one non-bot file); add-expense Confirm double-tap guard (clear
+      state + strip keyboard before `create_expense`, closes MVP D39
+      reviewer NIT).
+      AC: /start and /help render; @integration test proves newest-first
+      order; double-tap test → single create call. Model: haiku-friendly
+      except the repo change.
+
+### M3 — Smoke
+- [ ] **U3.1 e2e smoke extension (@integration)**: extends MVP U5.1's
+      scenario — member A adds expense → member B ALSO receives the
+      threshold notification (fan-out); statistics with explicit
+      start/end match seeded sums; foreign-account category on create →
+      404.
+      AC: scenario green on test DB; excluded from default verify.sh
+      (integration marker).
+
+## Live-test checkpoints (execution order for hand-testing in Telegram)
+Units are grouped into feature slices so every checkpoint ends with
+something the human can try live in the dev bot (`docker compose up
+--build`, dev BOT_TOKEN, own tg_id in ALLOWED_TG_IDS, `docs/seed.sql`
+applied). Unit CONTENTS are unchanged — only the recommended execution
+order interleaves M1/M2. Dependencies allow it: every slice depends only
+on U0.1/U0.2 and its own listed units.
+
+- **CP0 — before any new unit**: live-test the whole MVP (never done
+  yet): /add, /expenses, /categories, /tags, /budgets, /statistics;
+  create a budget plan via curl and cross its threshold → notification
+  arrives. This is the manual twin of MVP U5.1.
+- **CP1** = U0.1 + U0.2 — no visible change; re-run CP0 commands to
+  confirm nothing broke (foundation slice).
+- **CP2 — budgets from the bot** = U2.2 (needs no new backend — client
+  wrappers exist since U4.1): create/update/delete a budget plan in
+  Telegram; threshold message on expense create.
+- **CP3 — family fan-out** = U1.4: second family tg_id added to
+  seed/allowlist; member A adds expense over threshold → member B gets
+  the message too.
+- **CP4 — who added what + delete** = U1.3 + U2.1: /expenses shows
+  author + category; pick an expense → delete it.
+- **CP5 — edit expense** = U2.1b: fix an amount/comment from Telegram.
+- **CP6 — period statistics + chart** = U1.2 + U2.3 + U2.4 (U2.4 has the
+  uv.lock ask-gate): switch period presets, drill into a category/tag,
+  get the pie-chart PNG.
+- **CP7 — hardening, API-only testing** = U1.1 + U1.5 + U1.6 (U1.6 has
+  the migrations ask-gate): foreign-account ids → 404 via curl;
+  permissions CRUD via curl changes a member's live bot behavior;
+  amount<=0 → 422.
+- **CP8 — polish + smoke** = U2.5 + U3.1: /start, /help, newest-first
+  list, double-tap guard; automated smoke green.
+
+## Risks
+- `zoneinfo` on `python:3.13-slim`: Debian slim may lack system tzdata —
+  if `ZoneInfo("Europe/...")` raises in-container, add the `tzdata` pip
+  package (needs the same uv.lock sign-off as U2.4; check during U0.1).
+- matplotlib in the single shared image (MVP D40: one image for api+bot)
+  adds ~30–60MB for the api service too — accepted for V1.1; revisit only
+  if image size becomes a deploy problem.
+- Telegram send failures during fan-out (member never pressed /start on
+  the prod bot → 403 from Bot API) — U1.4's per-recipient best-effort
+  handles it, but log fields must NEVER include the exception object
+  (bot-token leak class, MVP D36).
+- U2.1/U2.1b picker keyboards: Telegram caps inline keyboards (~100
+  buttons) and messages at 4096 chars — reuse MVP's `_MAX_EXPENSES_SHOWN`
+  truncation pattern for the picker.
+- `user_name` JOIN: if a user row is ever hard-deleted, historical
+  expenses would break the JOIN — use LEFT JOIN, `user_name` stays None
+  (already optional in the contract).
+- Statistics custom periods make the "one fetch, aggregate in Python"
+  design (MVP D35) fetch potentially large windows — fine for a family's
+  data volume; flag if a "last 12 months" preset is ever added.
+
+## Decision log
+- D100 (2026-07-19, plan creation): separate plan file, decision ids from
+  D100 — the MVP plan (D1–D45) is two units from done; mixing a feature
+  wave into it would bury its STATE. Rejected: extending the MVP plan
+  with an M5.5 milestone (original proposal, superseded by the 8-point
+  requirements list).
+- D101 (2026-07-19, HUMAN): category diagram = real PNG pie chart via
+  matplotlib rendered bot-side, sent as a photo. Rejected: text
+  percentage bars (no dependency, but not the asked-for "circle"),
+  deferring the chart to the V2 Mini App. Backend stays JSON-only so the
+  Mini App can render its own charts later (root CLAUDE.md HTTP-only
+  rule). uv.lock change gated on explicit human sign-off at U2.4.
+- D102 (2026-07-19): expense author exposed as an additive
+  `ExpenseResponse.user_name: str | None` populated by a LEFT JOIN in the
+  repo. Rejected: bot resolving names via a users endpoint — `users` API
+  is admin-only (MVP D27) so member bots would 403, and `BackendClient`
+  deliberately wraps no users methods (MVP D37).
+- D103 (2026-07-19, HUMAN): permissions management = admin-only API
+  endpoints only (`api/permissions.py` + service reusing U1.5's repo).
+  Rejected: bot admin commands now (starts the V2 admin panel early;
+  also blocked on the allowlist→DB migration prerequisite), defer
+  entirely (leaves requirement #4 with zero management surface).
+- D104 (2026-07-19, HUMAN): budget threshold notifications go to ALL
+  account members, each send individually best-effort. Rejected:
+  creator-only (current behavior — second family member never learns the
+  budget is nearly spent), admins+creator (needless asymmetry for a
+  2-member family). `NotificationService.send` signature unchanged —
+  fan-out loop lives in `ExpenseService._check_budget_and_notify`.
+- D105 (2026-07-19): foreign-account `category_id`/`tag_ids` on
+  expense/budget create/update → `NotFoundError` (404). Rejected: 403
+  (confirms the id exists — cross-account probing, contra MVP D29), 422
+  (it's not a shape error).
+- D106 (2026-07-19): statistics period selection = optional ISO-8601
+  `start`/`end` query params, bot presets compute the bounds client-side
+  from `family_tz`... NO — bounds are computed backend-side when params
+  are absent; bot presets send explicit bounds it derives from its own
+  clock in UTC (instant-correct per MVP D20; the backend never trusts the
+  bot's idea of "month" for the default case). Rejected: named-period
+  enum params (`period=last_month`) — less flexible, and the Mini App
+  will want raw date ranges anyway.
+- D107 (2026-07-19): `services/period.py` is the shared home for
+  `month_bounds` (services layer — it's business-calendar logic used only
+  by services). Rejected: a new top-level `utils/` package (nothing else
+  would live there; root CLAUDE.md's architecture map has no utils entry).
+
+## STATE (handoff)
+- Done: — (plan written 2026-07-19, awaiting human review; no code
+  touched).
+- Next: human reviews/approves this plan → CP0 live MVP test + MVP U5.1
+  first (per Constraints) → then /clear → /unit U0.1 docs/plans/
+  family-features-v1_1.md, following the Live-test checkpoints order
+  (CP1…CP8), NOT strict milestone order.
+- Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
+  stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
+  MVP plan's pending items still stand: U4.4b reviewer pass never ran;
+  MVP U5.1 + U6.1 not implemented. New packages need `__init__.py`
+  (MVP D7). Never name a repo method after a builtin used in later
+  annotations (MVP D22).
