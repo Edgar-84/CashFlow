@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -11,6 +11,7 @@ from models.budget_plan import (
     BudgetProgress,
 )
 from models.errors import ConflictError, NotFoundError
+from services.period import month_bounds
 
 
 class BudgetPlanRepositoryProtocol(Protocol):
@@ -55,19 +56,6 @@ def calculate_progress(
         is_over_threshold=fill_pct is not None and fill_pct >= notify_threshold,
         is_exceeded=fill_pct is not None and fill_pct >= 100,
     )
-
-
-def _current_month_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
-    """UTC-based month bounds — config has no family-timezone setting yet (same
-    gap D20/D23 left for the caller of expense_repo's period methods)."""
-    now = now or datetime.now(UTC)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0, day=1)
-    end = (
-        start.replace(year=start.year + 1, month=1)
-        if start.month == 12
-        else start.replace(month=start.month + 1)
-    )
-    return start, end
 
 
 class BudgetService:
@@ -134,7 +122,7 @@ class BudgetService:
         self, budget_plan_id: UUID, account_id: UUID, *, now: datetime | None = None
     ) -> BudgetProgress:
         plan = await self.get(budget_plan_id, account_id)  # 404 if missing or foreign
-        start, end = _current_month_bounds(now)
+        start, end = month_bounds(now)
         sums = await self._expense_repo.sum_by_category_month(account_id, start=start, end=end)
         spent = sums.get(plan.category_id, 0)
         return calculate_progress(

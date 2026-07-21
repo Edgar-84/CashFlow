@@ -44,6 +44,7 @@ should exist only in the server's `.env`.
 | `BACKEND_BASE_URL` | ignored in docker (pinned to `http://api:8000`); `http://localhost:8000` for bare-host runs | ignored (pinned in compose) |
 | `INTERNAL_TOKEN` | any random dev value | strong secret — `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `ALLOWED_TG_IDS` | your Telegram id | all family members' ids |
+| `FAMILY_TZ` | optional, defaults to `UTC` — IANA name, e.g. `Europe/Belgrade` | same |
 
 How the three ways to run map onto this:
 

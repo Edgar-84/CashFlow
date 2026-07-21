@@ -5,12 +5,13 @@ tag")."""
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
 from models.expense import ExpenseResponse
 from models.statistics import CategoryTotal, PeriodTotal, TagTotal
+from services.period import month_bounds
 
 
 class ExpensePeriodRepositoryProtocol(Protocol):
@@ -22,19 +23,6 @@ class ExpensePeriodRepositoryProtocol(Protocol):
     async def get_by_period(
         self, account_id: UUID, start: datetime, end: datetime
     ) -> list[ExpenseResponse]: ...
-
-
-def _current_month_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
-    """Same convention as services.budget_service._current_month_bounds (D34) —
-    UTC-based, config has no family-timezone setting yet."""
-    now = now or datetime.now(UTC)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0, day=1)
-    end = (
-        start.replace(year=start.year + 1, month=1)
-        if start.month == 12
-        else start.replace(month=start.month + 1)
-    )
-    return start, end
 
 
 class StatisticsService:
@@ -54,7 +42,7 @@ class StatisticsService:
     async def _expenses(
         self, account_id: UUID, *, user_id: UUID | None, now: datetime | None
     ) -> tuple[list[ExpenseResponse], datetime, datetime]:
-        start, end = _current_month_bounds(now)
+        start, end = month_bounds(now)
         expenses = await self._expense_repo.get_by_period(account_id, start, end)
         if user_id is not None:
             expenses = [e for e in expenses if e.user_id == user_id]

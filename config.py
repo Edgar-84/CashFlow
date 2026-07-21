@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     backend_base_url: str
     internal_token: str
     allowed_tg_ids: str
+    family_tz: str = "UTC"
 
     @property
     def allowed_tg_ids_list(self) -> list[int]:

@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -8,6 +8,7 @@ from models.category import CategoryResponse
 from models.errors import NotFoundError
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.user import UserResponse
+from services.period import month_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -50,19 +51,6 @@ class NotificationSenderProtocol(Protocol):
     async def send(
         self, user: UserResponse, category: CategoryResponse, fill_pct: float
     ) -> None: ...
-
-
-def _current_month_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
-    """Same convention as services.budget_service._current_month_bounds (D34) —
-    UTC-based, config has no family-timezone setting yet."""
-    now = now or datetime.now(UTC)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0, day=1)
-    end = (
-        start.replace(year=start.year + 1, month=1)
-        if start.month == 12
-        else start.replace(month=start.month + 1)
-    )
-    return start, end
 
 
 class ExpenseService:
@@ -115,7 +103,7 @@ class ExpenseService:
         lookup must not undo an expense that already committed.
         """
         try:
-            start, end = _current_month_bounds()
+            start, end = month_bounds()
             fill_pct = await self._budget_plan_repo.check_limit(
                 user.account_id, expense.category_id, start=start, end=end
             )

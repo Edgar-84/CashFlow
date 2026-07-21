@@ -70,7 +70,7 @@ family-timezone-correct "current month".
 ## Units
 
 ### M0 — Contracts & foundation
-- [ ] **U0.1 Family timezone + shared period helper**: `family_tz` in
+- [x] **U0.1 Family timezone + shared period helper**: `family_tz` in
       config; new `services/period.py` `month_bounds(now, tz)` using
       `zoneinfo`; the three services import it and their private copies
       are deleted; existing `now=` test seams preserved.
@@ -301,17 +301,45 @@ on U0.1/U0.2 and its own listed units.
   `month_bounds` (services layer — it's business-calendar logic used only
   by services). Rejected: a new top-level `utils/` package (nothing else
   would live there; root CLAUDE.md's architecture map has no utils entry).
+- D108 (2026-07-21, U0.1): the Risks-section concern about `python:3.13-slim`
+  lacking system tzdata did NOT materialize — verified by running
+  `ZoneInfo("Europe/Belgrade")` inside a bare `python:3.13-slim` container
+  (no packages installed) and it resolved correctly. No `tzdata` pip
+  package added, no `uv.lock` sign-off needed for U0.1. `month_bounds(now,
+  tz)` determines the month from `now`'s wall-clock time in `tz` (so a UTC
+  instant still on the 31st but already the 1st in a UTC+N family timezone
+  counts as the new month) and returns bounds converted back to UTC-aware
+  datetimes, matching what repositories already compare against. `now`
+  must be tz-aware — naive raises `ValueError` rather than guessing UTC or
+  local. Scope check: only `config.family_tz` + `services/period.py` were
+  added; the three services call `month_bounds(now)` with the default
+  `tz="UTC"` unchanged (identical behavior to before) — wiring
+  `settings.family_tz` into actual call sites is U1.2's job per the
+  Contracts section (only `statistics_service` is listed there), not this
+  unit's.
 
 ## STATE (handoff)
-- Done: — (plan written 2026-07-19, awaiting human review; no code
-  touched).
-- Next: human reviews/approves this plan → CP0 live MVP test + MVP U5.1
-  first (per Constraints) → then /clear → /unit U0.1 docs/plans/
-  family-features-v1_1.md, following the Live-test checkpoints order
+- Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
+  `services/period.py::month_bounds(now, tz)`; `budget_service`,
+  `expense_service`, `statistics_service` import it and their private
+  `_current_month_bounds` copies are deleted; call sites unchanged
+  (default `tz="UTC"` — no behavior change yet). `tests/test_period.py`
+  covers the AC (mid-year, Dec→Jan rollover, UTC+3 evening-of-31st
+  rollover, naive-`now` rejected); the three services' test files had
+  their duplicated month-bounds tests removed and imports/assertions
+  repointed at `services.period.month_bounds`. `tzdata`-in-container risk
+  checked and closed (D108) — no `uv.lock` touch. `verify.sh` green.
+- Next: CP0 live MVP test (if not already done) → U0.2 Contract deltas
+  (`ExpenseResponse.user_name`, `BudgetPlanBase.amount Field(gt=0)`,
+  statistics signature stubs) → follow Live-test checkpoints order
   (CP1…CP8), NOT strict milestone order.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
   stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
   MVP plan's pending items still stand: U4.4b reviewer pass never ran;
-  MVP U5.1 + U6.1 not implemented. New packages need `__init__.py`
-  (MVP D7). Never name a repo method after a builtin used in later
-  annotations (MVP D22).
+  MVP U6.1 not implemented (U5.1 landed on master, PR #25). New packages
+  need `__init__.py` (MVP D7). Never name a repo method after a builtin
+  used in later annotations (MVP D22). `family_tz` is NOT yet wired into
+  any service's default month calc — only `config` + the shared helper
+  exist; U1.2 wires it into `statistics_service` per Contracts (budget/
+  expense notification-check bounds stay UTC unless a later unit adds
+  that — not currently listed).
