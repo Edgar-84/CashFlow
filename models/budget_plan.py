@@ -9,7 +9,7 @@ Period = Literal["monthly"]
 
 class BudgetPlanBase(BaseModel):
     category_id: UUID
-    amount: int  # minor units (kopecks/cents) — NEVER float
+    amount: int = Field(gt=0)  # minor units (kopecks/cents) — NEVER float
     period: Period = "monthly"
     notify_threshold: int = Field(default=80, ge=0, le=100)  # percent
 

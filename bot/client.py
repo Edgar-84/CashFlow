@@ -11,6 +11,7 @@ Non-2xx responses raise httpx.HTTPStatusError — handlers (U4.3+) translate
 that into a human-readable Telegram message, never a raw traceback.
 """
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -152,14 +153,46 @@ class BackendClient:
 
     # -- statistics --------------------------------------------------------
 
-    async def statistics_by_period(self) -> PeriodTotal:
-        response = await self._request("GET", "/statistics/by-period")
+    async def statistics_by_period(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        category_id: UUID | None = None,
+        tag_id: UUID | None = None,
+    ) -> PeriodTotal:
+        params = _statistics_query_params(start, end, category_id=category_id, tag_id=tag_id)
+        response = await self._request("GET", "/statistics/by-period", params=params)
         return PeriodTotal.model_validate(response.json())
 
-    async def statistics_by_category(self) -> list[CategoryTotal]:
-        response = await self._request("GET", "/statistics/by-category")
+    async def statistics_by_category(
+        self, start: datetime | None = None, end: datetime | None = None
+    ) -> list[CategoryTotal]:
+        params = _statistics_query_params(start, end)
+        response = await self._request("GET", "/statistics/by-category", params=params)
         return [CategoryTotal.model_validate(item) for item in response.json()]
 
-    async def statistics_by_tag(self) -> list[TagTotal]:
-        response = await self._request("GET", "/statistics/by-tag")
+    async def statistics_by_tag(
+        self, start: datetime | None = None, end: datetime | None = None
+    ) -> list[TagTotal]:
+        params = _statistics_query_params(start, end)
+        response = await self._request("GET", "/statistics/by-tag", params=params)
         return [TagTotal.model_validate(item) for item in response.json()]
+
+
+def _statistics_query_params(
+    start: datetime | None,
+    end: datetime | None,
+    *,
+    category_id: UUID | None = None,
+    tag_id: UUID | None = None,
+) -> dict[str, str]:
+    params: dict[str, str] = {}
+    if start is not None:
+        params["start"] = start.isoformat()
+    if end is not None:
+        params["end"] = end.isoformat()
+    if category_id is not None:
+        params["category_id"] = str(category_id)
+    if tag_id is not None:
+        params["tag_id"] = str(tag_id)
+    return params

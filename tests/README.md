@@ -13,8 +13,8 @@ check defaults/validation. No DB, no network.
 | `test_user_models` | `UserCreate` defaults `role` to `MEMBER`; `UserUpdate` fields optional; `UserResponse` round-trips `account_id` | [`models/user.py`](../models/user.py) |
 | `test_category_models` | Create/Update/Response basic field round-trip | [`models/category.py`](../models/category.py) |
 | `test_tag_models` | Create/Update/Response basic field round-trip | [`models/tag.py`](../models/tag.py) |
-| `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags` | [`models/expense.py`](../models/expense.py) |
-| `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=80`); `notify_threshold` rejects >100; `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
+| `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags`; `user_name` defaults `None` and round-trips when supplied | [`models/expense.py`](../models/expense.py) |
+| `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=80`); `notify_threshold` rejects >100; `amount<=0` (zero and negative) rejected on `Create`; `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
 | `test_permission_models` | `PermissionCreate.own_only` defaults `True`; `PermissionUpdate` fields optional | [`models/permission.py`](../models/permission.py) |
 | `test_enums_have_expected_members` | `Role`/`Resource`/`Action` enum membership matches spec | [`models/enums.py`](../models/enums.py) |
 | `test_domain_errors_are_typed_and_distinct` | `NotFoundError`/`PermissionDeniedError`/`LimitExceededWarning` are distinct `DomainError` subclasses | [`models/errors.py`](../models/errors.py) |
@@ -363,6 +363,7 @@ Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeE
 | `test_by_period_no_expenses_is_zero` | No expenses → `total=0`, not an error |
 | `test_by_period_own_user_id_filters_to_own_expenses` | `user_id` filter restricts the sum to that user's expenses |
 | `test_by_period_scopes_by_account` | Excludes another account's expenses |
+| `test_by_period_accepts_stub_period_and_filter_params_without_error` | `start`/`end`/`category_id`/`tag_id` are accepted (Contracts additive delta) but not yet applied — pins today's stub behavior (default month, no filter) |
 | `test_by_category_groups_totals_by_category` | `by_category()` groups totals per `category_id`; each `total` is `int` |
 | `test_by_category_own_user_id_filters_to_own_expenses` | `user_id` filter applies before aggregation |
 | `test_by_tag_groups_totals_by_tag` | `by_tag()` groups totals per `tag_id`, incl. an expense tagged with two tags contributing to both |
@@ -409,6 +410,8 @@ Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`, no real net
 | `test_tags_crud` | Tags list/get/create/update/delete round trip |
 | `test_budget_plans_crud_and_progress` | Budget plans list/get/create/update/delete plus `get_budget_plan_progress` round trip |
 | `test_statistics_endpoints` | `statistics_by_period`/`statistics_by_category`/`statistics_by_tag` parse into their respective models |
+| `test_statistics_by_period_sends_optional_params_as_query_string` | `start`/`end`/`category_id`/`tag_id` are sent as ISO-8601/string query params when given |
+| `test_statistics_by_period_omits_params_when_not_given` | No query params are sent when all optional args are omitted |
 
 ## Bot tests (`test_bot_middlewares.py`) → [`bot/middlewares.py`](../bot/middlewares.py)
 Hermetic — no real Telegram/network; middleware called directly with a fake

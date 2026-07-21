@@ -40,33 +40,73 @@ class StatisticsService:
         self._expense_repo = expense_repo
 
     async def _expenses(
-        self, account_id: UUID, *, user_id: UUID | None, now: datetime | None
+        self,
+        account_id: UUID,
+        *,
+        user_id: UUID | None,
+        now: datetime | None,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> tuple[list[ExpenseResponse], datetime, datetime]:
-        start, end = month_bounds(now)
-        expenses = await self._expense_repo.get_by_period(account_id, start, end)
+        """`start`/`end` are accepted here per the Contracts additive delta
+        (plan Decision log) but not yet applied — they will replace the
+        `month_bounds(now)` window once the caller-supplied-period unit wires
+        them in; passing them today has no effect."""
+        period_start, period_end = month_bounds(now)
+        expenses = await self._expense_repo.get_by_period(account_id, period_start, period_end)
         if user_id is not None:
             expenses = [e for e in expenses if e.user_id == user_id]
-        return expenses, start, end
+        return expenses, period_start, period_end
 
     async def by_period(
-        self, account_id: UUID, *, user_id: UUID | None = None, now: datetime | None = None
+        self,
+        account_id: UUID,
+        *,
+        user_id: UUID | None = None,
+        now: datetime | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        category_id: UUID | None = None,
+        tag_id: UUID | None = None,
     ) -> PeriodTotal:
-        expenses, start, end = await self._expenses(account_id, user_id=user_id, now=now)
-        return PeriodTotal(start=start, end=end, total=sum(e.amount for e in expenses))
+        # category_id/tag_id accepted per the Contracts additive delta; the
+        # filtering itself is not yet applied (see `_expenses`).
+        expenses, period_start, period_end = await self._expenses(
+            account_id, user_id=user_id, now=now, start=start, end=end
+        )
+        return PeriodTotal(
+            start=period_start, end=period_end, total=sum(e.amount for e in expenses)
+        )
 
     async def by_category(
-        self, account_id: UUID, *, user_id: UUID | None = None, now: datetime | None = None
+        self,
+        account_id: UUID,
+        *,
+        user_id: UUID | None = None,
+        now: datetime | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> list[CategoryTotal]:
-        expenses, _, _ = await self._expenses(account_id, user_id=user_id, now=now)
+        expenses, _, _ = await self._expenses(
+            account_id, user_id=user_id, now=now, start=start, end=end
+        )
         totals: dict[UUID, int] = defaultdict(int)
         for expense in expenses:
             totals[expense.category_id] += expense.amount
         return [CategoryTotal(category_id=cid, total=total) for cid, total in totals.items()]
 
     async def by_tag(
-        self, account_id: UUID, *, user_id: UUID | None = None, now: datetime | None = None
+        self,
+        account_id: UUID,
+        *,
+        user_id: UUID | None = None,
+        now: datetime | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> list[TagTotal]:
-        expenses, _, _ = await self._expenses(account_id, user_id=user_id, now=now)
+        expenses, _, _ = await self._expenses(
+            account_id, user_id=user_id, now=now, start=start, end=end
+        )
         totals: dict[UUID, int] = defaultdict(int)
         for expense in expenses:
             for tag in expense.tags:

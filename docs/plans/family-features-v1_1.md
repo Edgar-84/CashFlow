@@ -80,7 +80,7 @@ family-timezone-correct "current month".
       helper. Files: config.py, services/period.py, 3 service files,
       tests (yellow-zone file count, but purely mechanical consolidation).
       Model: sonnet.
-- [ ] **U0.2 Contract deltas**: `ExpenseResponse.user_name` (additive,
+- [x] **U0.2 Contract deltas**: `ExpenseResponse.user_name` (additive,
       default None), `BudgetPlanBase.amount Field(gt=0)` (model side only
       — DB CHECK comes with U1.6), statistics service/client signature
       stubs per Contracts (params accepted, default behavior unchanged).
@@ -318,6 +318,24 @@ on U0.1/U0.2 and its own listed units.
   Contracts section (only `statistics_service` is listed there), not this
   unit's.
 
+- D109 (2026-07-21, U0.2): `Field(gt=0)` added only to `BudgetPlanBase.amount`
+  as the Contracts bullet literally names — `BudgetPlanCreate` inherits it
+  (POST covered), but `BudgetPlanUpdate` does NOT inherit `Base` (four-schema
+  pattern, models/CLAUDE.md) and was left with a plain `int | None`. U1.6's
+  own AC wants "API POST/PATCH with amount<=0 → 422 (model)" — PATCH needs
+  its own `Field(gt=0)` on `BudgetPlanUpdate.amount`, not yet added. Flagged
+  for U1.6 rather than fixed here (contracts named Base only; Update wasn't
+  this unit's contract to change).
+- D110 (2026-07-21, U0.2): statistics signature stubs split by layer.
+  `StatisticsService.by_period/by_category/by_tag` gained the `start`/`end`
+  params (`by_period` also `category_id`/`tag_id`) but the body still calls
+  `month_bounds(now)` unconditionally and ignores the new params — real
+  filtering is U1.2's AC, not U0.2's (task-methodology: contracts unit ≠
+  business logic unit). `bot/client.py`'s three `statistics_*` methods DO
+  fully forward the new params as query strings (mechanical, and FastAPI
+  silently ignores query params a route doesn't declare yet, so it's
+  harmless ahead of U1.2 wiring `api/statistics.py`).
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -329,10 +347,24 @@ on U0.1/U0.2 and its own listed units.
   their duplicated month-bounds tests removed and imports/assertions
   repointed at `services.period.month_bounds`. `tzdata`-in-container risk
   checked and closed (D108) — no `uv.lock` touch. `verify.sh` green.
-- Next: CP0 live MVP test (if not already done) → U0.2 Contract deltas
-  (`ExpenseResponse.user_name`, `BudgetPlanBase.amount Field(gt=0)`,
-  statistics signature stubs) → follow Live-test checkpoints order
-  (CP1…CP8), NOT strict milestone order.
+- Done: U0.2 (2026-07-21) — `ExpenseResponse.user_name: str | None = None`
+  (LEFT-JOIN-populated later, D102); `BudgetPlanBase.amount` gained
+  `Field(gt=0)` (inherited by `BudgetPlanCreate`; `BudgetPlanUpdate` NOT
+  touched, see D109); `StatisticsService.by_period/by_category/by_tag`
+  gained `start`/`end` params (`by_period` also `category_id`/`tag_id`) as
+  accepted-but-unapplied stubs (D110); `bot/client.py`'s three
+  `statistics_*` methods fully forward the same params as query strings.
+  Tests added: `tests/test_models.py` (user_name round-trip, amount<=0
+  ValidationError on Create), `tests/test_statistics_service.py` (stub
+  params don't change output), `tests/test_bot_client.py` (query-string
+  pass-through and omission). `tests/README.md` updated. `verify.sh` green.
+  This unit is flagged Human-review in the plan (touches reviewed MVP
+  contracts) — no reviewer subagent run yet, human sign-off pending.
+- Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands
+  to confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
+  (CP1…CP8), NOT strict milestone order. U1.2 is the next unit that
+  actually wires the statistics stub params (D110) and `family_tz` into
+  `statistics_service`'s default bounds.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
   stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
   MVP plan's pending items still stand: U4.4b reviewer pass never ran;
@@ -342,4 +374,6 @@ on U0.1/U0.2 and its own listed units.
   any service's default month calc — only `config` + the shared helper
   exist; U1.2 wires it into `statistics_service` per Contracts (budget/
   expense notification-check bounds stay UTC unless a later unit adds
-  that — not currently listed).
+  that — not currently listed). `BudgetPlanUpdate.amount` still lacks
+  `Field(gt=0)` — U1.6 needs to decide whether to add it for PATCH 422s
+  (D109).

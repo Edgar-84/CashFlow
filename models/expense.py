@@ -30,4 +30,7 @@ class ExpenseResponse(ExpenseBase):
     created_at: datetime
     updated_at: datetime  # DB-trigger-maintained (set_updated_at) — never set by app code
     tags: list[TagResponse] = []
+    # populated by a repo LEFT JOIN on users.name; None for old fixtures or a
+    # hard-deleted user (plan Decision log D102)
+    user_name: str | None = None
     model_config = ConfigDict(from_attributes=True)
