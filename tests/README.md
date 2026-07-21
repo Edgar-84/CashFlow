@@ -572,5 +572,13 @@ period total plus category/tag breakdowns (U4.5 AC).
 
 ---
 
-Sections not yet populated — add as the corresponding units land:
-- e2e smoke (M5, `test.mark.integration`, excluded from default `verify.sh`)
+## E2e smoke (`test_e2e_smoke.py`) — U5.1, `@pytest.mark.integration`, excluded from default `verify.sh`
+Real FastAPI app on a real Postgres pool (`main.lifespan`) driven through
+`bot.client.BackendClient` — no fakes for expenses/budgets/DB. Only the
+outbound Telegram call inside `NotificationService` is swapped for a
+`httpx.MockTransport` (same pattern as `test_notification_service.py`), so
+the test needs neither a live bot token nor network access.
+
+| Test | Checks |
+|---|---|
+| `test_add_expense_appears_in_list_and_fires_budget_notification` | Bot client creates an expense against the real API/DB, the expense appears in `list_expenses`, and crossing the budget's `notify_threshold` fires exactly one Telegram notification with the category name and fill percentage (U5.1 AC) |

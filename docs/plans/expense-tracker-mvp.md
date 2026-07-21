@@ -167,7 +167,7 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
 
 ## Milestone M5 — Smoke
 
-- [ ] **U5.1 e2e smoke (@integration)**: bot client → real API → test DB:
+- [x] **U5.1 e2e smoke (@integration)**: bot client → real API → test DB:
       add expense → appears in list → budget threshold notification fired.
       AC: scenario green on test DB; run excluded from default verify.sh
       (integration marker).
@@ -1168,7 +1168,11 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   three pre-existing gaps carried over unflagged (same as D43's NITs).
   verify.sh green (331 non-integration tests: 316 + 15 new); this unit
   touches no repository/DB code, so the pre-existing integration suite
-  wasn't re-run. Not yet reviewed by the reviewer subagent — pending.
+  wasn't re-run. Reviewed (2026-07-21, separate session) — no findings:
+  confirmed a faithful mirror of U4.4/categories.py (layering, FSM states,
+  router registration order, keyboard/callback wiring, four-schema model
+  pattern) and confirmed the D44 409-omission is correct against
+  docs/SCHEMA.sql's `ON DELETE CASCADE` for tags. verify.sh green.
 - Done: U4.5 (bot/handlers/budgets.py — `cmd_list_budgets` (`/budgets`, plain,
   no FSM): lists budget plans with a 10-cell text progress bar + spent/limit
   formatted from minor units + exceeded/over-threshold warning, category
@@ -1188,18 +1192,29 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   D45). verify.sh green (347 non-integration tests: 331 + 16 new); this unit
   touches no repository/DB code, so the pre-existing integration suite
   wasn't re-run.
-- Next: U5.1 (e2e smoke @integration: bot client → real API → test DB — add
-  expense → appears in list → budget threshold notification fired). This is
-  M4's last unit landing; M4 (Bot) is now fully done. `models/budget_plan.py`'s
-  `amount` still has no positivity constraint (flagged since D23, not touched
-  by U2.5/U2.6/U3.1/U4.5) — flag again if any future unit's math assumes
+- Done: U5.1 (tests/test_e2e_smoke.py —
+  `test_add_expense_appears_in_list_and_fires_budget_notification`: real
+  FastAPI app + real Postgres pool driven through `bot.client.BackendClient`,
+  only the outbound Telegram call mocked via `httpx.MockTransport` (D46).
+  Add expense → appears in list → budget threshold notification fired, all
+  against a throwaway/CI Postgres via the `@integration` marker. M5 (Smoke)
+  is now fully done; M4 (Bot) was already done as of U4.5. Reviewed by the
+  reviewer subagent same session (APPROVE — one WARN fixed: the fixture's
+  `try` now wraps setup, not just the yield, so a mid-setup failure on the
+  committing connection still cleans up whatever already landed; one doc NIT
+  fixed: D46's integration-test count corrected 47→46/46→45; one low-priority
+  NIT not fixed: `tg_id = uuid4().int % 1_000_000_000` has a theoretical
+  collision risk against a leftover row from an aborted prior run, not worth
+  guarding against given the WARN fix removes the main source of leftovers).
+- Next: U6.1 (CD flow: GitHub Actions → GHCR → EC2 — design locked in D42;
+  only hard prerequisite was U4.3a, done). `models/budget_plan.py`'s `amount`
+  still has no positivity constraint (flagged since D23, not touched by
+  U2.5/U2.6/U3.1/U4.5/U5.1) — flag again if any future unit's math assumes
   `amount > 0`. `budget_plan_repo`'s two-round-trip notification check (D36)
   and `cmd_list_budgets`'s per-plan progress-fetch N+1 (D45) are both
   candidates for a follow-up `with_progress` backend optimization, not
   urgent. `repositories/base.py`'s `list()` has no `ORDER BY` (D40, U4.3b) —
   flag if `/expenses` or any future list view needs a defined display order.
-  U4.4b (bot/handlers/tags.py) is still not yet reviewed by the reviewer
-  subagent — pending from a prior session, unrelated to U4.5.
 - Gotchas: update project CLAUDE.md status checklist manually (per its own
   rule); keep amounts int-only end to end — bot parses user input to minor
   units immediately. A real `.env` now exists on this machine (used live by
@@ -1502,6 +1517,25 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   since neither router registers per-state text handlers). verify.sh green
   (347 non-integration tests: 331 + 16 new); this unit touches no
   repository/DB code, so the pre-existing integration suite wasn't re-run.
+- D46 (U5.1): `tests/test_e2e_smoke.py` seeds via a plain committing
+  connection acquired from the `db_pool` fixture, not the rollback-wrapped
+  `db_conn` fixture every other integration test uses — the app under test
+  runs its own `main.lifespan`-managed pool/connection, which would never
+  see rows sitting inside another connection's still-open, uncommitted
+  transaction. Cleanup is therefore explicit (`DELETE` in FK order — no
+  `ON DELETE CASCADE` from `accounts`), in a `finally` block, keyed on a
+  fresh `account_id`/random `tg_id` per run so a failed cleanup can't
+  collide with the next run. The one fake in an otherwise fully-real stack
+  (real API, real DB, real `bot.client.BackendClient`) is the outbound
+  Telegram call inside `NotificationService` — swapped for an
+  `httpx.MockTransport` via `app.dependency_overrides[get_notification_service]`,
+  same precedent as `test_notification_service.py` (no real bot token/network
+  needed, D37). Scenario: `BackendClient.create_expense` (9000 against a
+  10000-limit, 80%-threshold plan) → appears in `list_expenses` → exactly
+  one Telegram request captured with the category name and fill_pct in the
+  text. Green via `bash scripts/integration_docker.sh` (46 integration
+  tests: 45 + 1 new) and the full suite; verify.sh unaffected (integration
+  marker excluded, 347 unit tests still green) — M5 done.
 
 
 ## Deferred decisions (tracked, not forgotten)
