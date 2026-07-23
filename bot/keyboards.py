@@ -12,6 +12,7 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from models.budget_plan import BudgetPlanResponse
 from models.category import CategoryResponse
 from models.tag import TagResponse
 
@@ -22,6 +23,10 @@ class CategoryCallback(CallbackData, prefix="category"):
 
 class TagCallback(CallbackData, prefix="tag"):
     tag_id: UUID
+
+
+class BudgetCallback(CallbackData, prefix="budget"):
+    budget_plan_id: UUID
 
 
 TAGS_DONE_CALLBACK = "tags:done"
@@ -50,6 +55,20 @@ def tags_keyboard(
         builder.button(text=text, callback_data=TagCallback(tag_id=tag.id))
     builder.adjust(2)
     builder.row(InlineKeyboardButton(text="Done", callback_data=TAGS_DONE_CALLBACK))
+    return builder.as_markup()
+
+
+def budgets_keyboard(
+    plans: list[BudgetPlanResponse], category_names: dict[UUID, str]
+) -> InlineKeyboardMarkup:
+    """Select an existing budget plan by its category's name (U2.2) — mirrors
+    categories_keyboard/CategoryCallback's generic id-carrying-selector shape,
+    but keyed on budget_plan_id since a plan, not a category, is the target."""
+    builder = InlineKeyboardBuilder()
+    for plan in plans:
+        name = category_names.get(plan.category_id, "Unknown")
+        builder.button(text=name, callback_data=BudgetCallback(budget_plan_id=plan.id))
+    builder.adjust(2)
     return builder.as_markup()
 
 

@@ -28,3 +28,13 @@ class TagManage(StatesGroup):
     rename_select = State()
     rename_name = State()
     delete_select = State()
+
+
+class BudgetManage(StatesGroup):
+    add_category = State()
+    add_amount = State()
+    add_threshold = State()
+    update_select = State()
+    update_amount = State()
+    update_threshold = State()
+    delete_select = State()

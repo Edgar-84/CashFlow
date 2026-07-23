@@ -11,12 +11,15 @@ from bot.keyboards import (
     CONFIRM_CALLBACK,
     SELECTED_PREFIX,
     TAGS_DONE_CALLBACK,
+    BudgetCallback,
     CategoryCallback,
     TagCallback,
+    budgets_keyboard,
     categories_keyboard,
     confirm_keyboard,
     tags_keyboard,
 )
+from models.budget_plan import BudgetPlanResponse
 from models.category import CategoryResponse
 from models.tag import TagResponse
 
@@ -27,6 +30,19 @@ def make_category(name: str) -> CategoryResponse:
 
 def make_tag(name: str) -> TagResponse:
     return TagResponse(id=uuid4(), account_id=uuid4(), name=name, created_at=datetime.now(UTC))
+
+
+def make_plan(category_id: UUID) -> BudgetPlanResponse:
+    return BudgetPlanResponse(
+        id=uuid4(),
+        account_id=uuid4(),
+        category_id=category_id,
+        amount=10000,
+        period="monthly",
+        notify_threshold=80,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
 
 
 def flatten(markup: InlineKeyboardMarkup) -> list[InlineKeyboardButton]:
@@ -79,6 +95,34 @@ def test_tag_callback_round_trips_the_uuid() -> None:
     packed = TagCallback(tag_id=tag.id).pack()
 
     assert TagCallback.unpack(packed).tag_id == tag.id
+
+
+def test_budgets_keyboard_renders_one_button_per_plan_with_category_name() -> None:
+    groceries = make_category("Groceries")
+    rent = make_category("Rent")
+    plans = [make_plan(groceries.id), make_plan(rent.id)]
+    category_names = {groceries.id: groceries.name, rent.id: rent.name}
+
+    buttons = flatten(budgets_keyboard(plans, category_names))
+
+    assert [b.text for b in buttons] == ["Groceries", "Rent"]
+    for button, plan in zip(buttons, plans, strict=True):
+        assert button.callback_data == f"budget:{plan.id.hex}"
+
+
+def test_budgets_keyboard_unknown_category_falls_back_to_placeholder() -> None:
+    plan = make_plan(uuid4())
+
+    buttons = flatten(budgets_keyboard([plan], {}))
+
+    assert buttons[0].text == "Unknown"
+
+
+def test_budget_callback_round_trips_the_uuid() -> None:
+    plan = make_plan(uuid4())
+    packed = BudgetCallback(budget_plan_id=plan.id).pack()
+
+    assert BudgetCallback.unpack(packed).budget_plan_id == plan.id
 
 
 def test_confirm_keyboard_renders_confirm_and_cancel() -> None:
