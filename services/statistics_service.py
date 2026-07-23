@@ -26,7 +26,8 @@ class ExpensePeriodRepositoryProtocol(Protocol):
 
 
 class StatisticsService:
-    """Aggregates the caller's account expenses for the current month.
+    """Aggregates the caller's account expenses for a period (default: the
+    current family-timezone month).
 
     ``user_id``, when given, restricts the aggregate to that user's own
     expenses — the route passes it when the caller's permission decision has
@@ -36,8 +37,11 @@ class StatisticsService:
     log D35).
     """
 
-    def __init__(self, expense_repo: ExpensePeriodRepositoryProtocol) -> None:
+    def __init__(
+        self, expense_repo: ExpensePeriodRepositoryProtocol, family_tz: str = "UTC"
+    ) -> None:
         self._expense_repo = expense_repo
+        self._family_tz = family_tz
 
     async def _expenses(
         self,
@@ -48,11 +52,12 @@ class StatisticsService:
         start: datetime | None = None,
         end: datetime | None = None,
     ) -> tuple[list[ExpenseResponse], datetime, datetime]:
-        """`start`/`end` are accepted here per the Contracts additive delta
-        (plan Decision log) but not yet applied — they will replace the
-        `month_bounds(now)` window once the caller-supplied-period unit wires
-        them in; passing them today has no effect."""
-        period_start, period_end = month_bounds(now)
+        """Caller-supplied `start`/`end` win over the default family-timezone
+        current month; each bound defaults independently, so passing neither
+        reproduces `month_bounds(now, family_tz)` exactly."""
+        default_start, default_end = month_bounds(now, self._family_tz)
+        period_start = start if start is not None else default_start
+        period_end = end if end is not None else default_end
         expenses = await self._expense_repo.get_by_period(account_id, period_start, period_end)
         if user_id is not None:
             expenses = [e for e in expenses if e.user_id == user_id]
@@ -69,11 +74,13 @@ class StatisticsService:
         category_id: UUID | None = None,
         tag_id: UUID | None = None,
     ) -> PeriodTotal:
-        # category_id/tag_id accepted per the Contracts additive delta; the
-        # filtering itself is not yet applied (see `_expenses`).
         expenses, period_start, period_end = await self._expenses(
             account_id, user_id=user_id, now=now, start=start, end=end
         )
+        if category_id is not None:
+            expenses = [e for e in expenses if e.category_id == category_id]
+        if tag_id is not None:
+            expenses = [e for e in expenses if any(tag.id == tag_id for tag in e.tags)]
         return PeriodTotal(
             start=period_start, end=period_end, total=sum(e.amount for e in expenses)
         )

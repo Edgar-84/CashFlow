@@ -196,3 +196,63 @@ async def test_statistics_without_auth_is_401(
     response = await client.get("/statistics/by-period")
 
     assert response.status_code == 401
+
+
+async def test_by_period_custom_window(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
+) -> None:
+    in_window = datetime(2026, 3, 15, tzinfo=UTC)
+    outside_window = datetime(2026, 7, 5, tzinfo=UTC)
+    override_repos(
+        [
+            make_expense(account_id=account_id, amount=1000, created_at=in_window),
+            make_expense(account_id=account_id, amount=9999, created_at=outside_window),
+        ]
+    )
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"start": "2026-01-01T00:00:00Z", "end": "2026-04-01T00:00:00Z"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1000
+
+
+async def test_by_period_category_and_tag_filter(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
+) -> None:
+    category_id = uuid4()
+    tag_id = uuid4()
+    override_repos(
+        [
+            make_expense(
+                account_id=account_id, category_id=category_id, amount=1000, tag_ids=[tag_id]
+            ),
+            make_expense(account_id=account_id, amount=2000),
+        ]
+    )
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"category_id": str(category_id), "tag_id": str(tag_id)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1000
+
+
+async def test_by_period_start_after_end_is_422(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"start": "2026-07-01T00:00:00Z", "end": "2026-06-01T00:00:00Z"},
+    )
+
+    assert response.status_code == 422
