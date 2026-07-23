@@ -121,6 +121,14 @@ class FakeCategoryRepo:
         return self._categories.get(id)
 
 
+class FakeTagRepo:
+    def __init__(self, tags: list[TagResponse] | None = None) -> None:
+        self._tags: dict[UUID, TagResponse] = {t.id: t for t in (tags or [])}
+
+    async def get(self, id: UUID) -> TagResponse | None:
+        return self._tags.get(id)
+
+
 class FakeNotificationService:
     def __init__(self) -> None:
         self.sent: list[tuple[UserResponse, CategoryResponse, float]] = []
@@ -143,13 +151,24 @@ def make_service(
     *,
     budget_plan_repo: Any = None,
     category_repo: Any = None,
+    tag_repo: Any = None,
     notification_service: Any = None,
 ) -> ExpenseService:
     return ExpenseService(
         repo,
         budget_plan_repo if budget_plan_repo is not None else FakeBudgetPlanRepo(),
         category_repo if category_repo is not None else FakeCategoryRepo(),
+        tag_repo if tag_repo is not None else FakeTagRepo(),
         notification_service if notification_service is not None else FakeNotificationService(),
+    )
+
+
+def make_category(*, account_id: UUID, category_id: UUID | None = None) -> CategoryResponse:
+    return CategoryResponse(
+        id=category_id or uuid4(),
+        name="Groceries",
+        account_id=account_id,
+        created_at=datetime.now(UTC),
     )
 
 
@@ -226,8 +245,9 @@ async def test_get_foreign_account_raises_not_found() -> None:
 async def test_create_sets_account_and_user_id_from_caller() -> None:
     account_id = uuid4()
     caller = make_caller(account_id=account_id)
-    service = make_service(FakeExpenseRepo([]))
-    data = ExpenseCreate(amount=500, category_id=uuid4())
+    category = make_category(account_id=account_id)
+    service = make_service(FakeExpenseRepo([]), category_repo=FakeCategoryRepo([category]))
+    data = ExpenseCreate(amount=500, category_id=category.id)
 
     created = await service.create(data, caller)
 
@@ -238,13 +258,18 @@ async def test_create_sets_account_and_user_id_from_caller() -> None:
 async def test_create_attaches_tags() -> None:
     account_id = uuid4()
     caller = make_caller(account_id=account_id)
-    tag_id = uuid4()
-    service = make_service(FakeExpenseRepo([]))
-    data = ExpenseCreate(amount=500, category_id=uuid4(), tag_ids=[tag_id])
+    category = make_category(account_id=account_id)
+    tag = _fake_tag(uuid4(), account_id)
+    service = make_service(
+        FakeExpenseRepo([]),
+        category_repo=FakeCategoryRepo([category]),
+        tag_repo=FakeTagRepo([tag]),
+    )
+    data = ExpenseCreate(amount=500, category_id=category.id, tag_ids=[tag.id])
 
     created = await service.create(data, caller)
 
-    assert [t.id for t in created.tags] == [tag_id]
+    assert [t.id for t in created.tags] == [tag.id]
 
 
 async def test_update_changes_amount() -> None:
@@ -295,14 +320,14 @@ async def test_update_explicit_null_comment_clears_it() -> None:
 async def test_update_tag_ids_replaces_tags() -> None:
     account_id = uuid4()
     old_tag_id = uuid4()
-    new_tag_id = uuid4()
+    new_tag = _fake_tag(uuid4(), account_id)
     expense = make_expense(account_id=account_id)
     expense = expense.model_copy(update={"tags": [_fake_tag(old_tag_id, account_id)]})
-    service = make_service(FakeExpenseRepo([expense]))
+    service = make_service(FakeExpenseRepo([expense]), tag_repo=FakeTagRepo([new_tag]))
 
-    updated = await service.update(expense.id, ExpenseUpdate(tag_ids=[new_tag_id]), account_id)
+    updated = await service.update(expense.id, ExpenseUpdate(tag_ids=[new_tag.id]), account_id)
 
-    assert [t.id for t in updated.tags] == [new_tag_id]
+    assert [t.id for t in updated.tags] == [new_tag.id]
 
 
 async def test_update_tag_ids_empty_list_clears_tags() -> None:
@@ -435,13 +460,15 @@ async def test_create_does_not_notify_below_threshold() -> None:
 async def test_create_does_not_notify_when_no_budget_plan() -> None:
     account_id = uuid4()
     caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
     notification_service = FakeNotificationService()
     service = make_service(
         FakeExpenseRepo([]),
         budget_plan_repo=FakeBudgetPlanRepo(fill_pct=None),
+        category_repo=FakeCategoryRepo([category]),
         notification_service=notification_service,
     )
-    data = ExpenseCreate(amount=500, category_id=uuid4())
+    data = ExpenseCreate(amount=500, category_id=category.id)
 
     await service.create(data, caller)
 
@@ -471,11 +498,13 @@ async def test_create_still_succeeds_when_notification_send_raises() -> None:
 async def test_create_still_succeeds_when_budget_check_raises() -> None:
     account_id = uuid4()
     caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
     service = make_service(
         FakeExpenseRepo([]),
         budget_plan_repo=RaisingBudgetPlanRepo(),
+        category_repo=FakeCategoryRepo([category]),
     )
-    data = ExpenseCreate(amount=500, category_id=uuid4())
+    data = ExpenseCreate(amount=500, category_id=category.id)
 
     created = await service.create(data, caller)  # must not raise
 
@@ -485,11 +514,137 @@ async def test_create_still_succeeds_when_budget_check_raises() -> None:
 async def test_create_passes_account_scoped_bounds_to_check_limit() -> None:
     account_id = uuid4()
     caller = make_caller(account_id=account_id)
-    category_id = uuid4()
+    category = make_category(account_id=account_id)
     budget_plan_repo = FakeBudgetPlanRepo(fill_pct=None)
-    service = make_service(FakeExpenseRepo([]), budget_plan_repo=budget_plan_repo)
-    data = ExpenseCreate(amount=500, category_id=category_id)
+    service = make_service(
+        FakeExpenseRepo([]),
+        budget_plan_repo=budget_plan_repo,
+        category_repo=FakeCategoryRepo([category]),
+    )
+    data = ExpenseCreate(amount=500, category_id=category.id)
 
     await service.create(data, caller)
 
-    assert budget_plan_repo.check_limit_calls == [(account_id, category_id)]
+    assert budget_plan_repo.check_limit_calls == [(account_id, category.id)]
+
+
+# --- U1.1: cross-account validation (closes MVP D33/D23) ------------------
+
+
+async def test_create_foreign_category_raises_not_found() -> None:
+    account_id = uuid4()
+    other_account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    foreign_category = make_category(account_id=other_account_id)
+    service = make_service(FakeExpenseRepo([]), category_repo=FakeCategoryRepo([foreign_category]))
+    data = ExpenseCreate(amount=500, category_id=foreign_category.id)
+
+    with pytest.raises(NotFoundError):
+        await service.create(data, caller)
+
+
+async def test_create_nonexistent_category_raises_not_found() -> None:
+    caller = make_caller(account_id=uuid4())
+    service = make_service(FakeExpenseRepo([]))
+    data = ExpenseCreate(amount=500, category_id=uuid4())
+
+    with pytest.raises(NotFoundError):
+        await service.create(data, caller)
+
+
+async def test_create_foreign_tag_raises_not_found() -> None:
+    account_id = uuid4()
+    other_account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
+    foreign_tag = _fake_tag(uuid4(), other_account_id)
+    service = make_service(
+        FakeExpenseRepo([]),
+        category_repo=FakeCategoryRepo([category]),
+        tag_repo=FakeTagRepo([foreign_tag]),
+    )
+    data = ExpenseCreate(amount=500, category_id=category.id, tag_ids=[foreign_tag.id])
+
+    with pytest.raises(NotFoundError):
+        await service.create(data, caller)
+
+
+async def test_create_mixed_own_and_foreign_tags_raises_not_found() -> None:
+    account_id = uuid4()
+    other_account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
+    own_tag = _fake_tag(uuid4(), account_id)
+    foreign_tag = _fake_tag(uuid4(), other_account_id)
+    service = make_service(
+        FakeExpenseRepo([]),
+        category_repo=FakeCategoryRepo([category]),
+        tag_repo=FakeTagRepo([own_tag, foreign_tag]),
+    )
+    data = ExpenseCreate(amount=500, category_id=category.id, tag_ids=[own_tag.id, foreign_tag.id])
+
+    with pytest.raises(NotFoundError):
+        await service.create(data, caller)
+
+
+async def test_create_own_category_and_tags_pass() -> None:
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
+    tag = _fake_tag(uuid4(), account_id)
+    service = make_service(
+        FakeExpenseRepo([]),
+        category_repo=FakeCategoryRepo([category]),
+        tag_repo=FakeTagRepo([tag]),
+    )
+    data = ExpenseCreate(amount=500, category_id=category.id, tag_ids=[tag.id])
+
+    created = await service.create(data, caller)
+
+    assert created.category_id == category.id
+    assert [t.id for t in created.tags] == [tag.id]
+
+
+async def test_update_foreign_category_raises_not_found() -> None:
+    account_id = uuid4()
+    other_account_id = uuid4()
+    expense = make_expense(account_id=account_id)
+    foreign_category = make_category(account_id=other_account_id)
+    service = make_service(
+        FakeExpenseRepo([expense]), category_repo=FakeCategoryRepo([foreign_category])
+    )
+
+    with pytest.raises(NotFoundError):
+        await service.update(expense.id, ExpenseUpdate(category_id=foreign_category.id), account_id)
+
+
+async def test_update_foreign_tag_raises_not_found() -> None:
+    account_id = uuid4()
+    other_account_id = uuid4()
+    expense = make_expense(account_id=account_id)
+    foreign_tag = _fake_tag(uuid4(), other_account_id)
+    service = make_service(FakeExpenseRepo([expense]), tag_repo=FakeTagRepo([foreign_tag]))
+
+    with pytest.raises(NotFoundError):
+        await service.update(expense.id, ExpenseUpdate(tag_ids=[foreign_tag.id]), account_id)
+
+
+async def test_update_own_category_and_tags_pass() -> None:
+    account_id = uuid4()
+    expense = make_expense(account_id=account_id)
+    category = make_category(account_id=account_id)
+    tag = _fake_tag(uuid4(), account_id)
+    service = make_service(
+        FakeExpenseRepo([expense]),
+        category_repo=FakeCategoryRepo([category]),
+        tag_repo=FakeTagRepo([tag]),
+    )
+
+    updated = await service.update(
+        expense.id,
+        ExpenseUpdate(category_id=category.id, tag_ids=[tag.id]),
+        account_id,
+    )
+
+    assert updated.category_id == category.id
+    assert [t.id for t in updated.tags] == [tag.id]

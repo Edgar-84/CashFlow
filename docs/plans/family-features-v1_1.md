@@ -91,7 +91,7 @@ family-timezone-correct "current month".
       Model: sonnet. ⚠ Human-review — touches reviewed MVP contracts.
 
 ### M1 — Backend logic
-- [ ] **U1.1 Cross-account validation** (closes MVP D33/D23 flags):
+- [x] **U1.1 Cross-account validation** (closes MVP D33/D23 flags):
       `ExpenseService.create/update` verify `category_id` and every
       `tag_ids` entry belong to the caller's account (new narrow
       `TagRepositoryProtocol` dep); `BudgetService.create/update` verify
@@ -372,6 +372,16 @@ on U0.1/U0.2 and its own listed units.
   (348 passed). Rejected: fixing the test instead — the zero-amount case is
   real product behavior `check_limit()` must keep tolerating until U1.6's
   DB `CHECK` actually prevents such rows from existing.
+- D113 (2026-07-23, U1.1): `BudgetService.update()` does NOT validate
+  `category_id` against the caller's account, despite the unit's summary
+  line saying "create/update" — `BudgetPlanUpdate` has no `category_id`
+  field at all (it's immutable post-creation; only `create()` ever sets
+  it), so there's nothing for `update()` to validate. Only
+  `BudgetService.create()` and both `ExpenseService.create()`/`update()`
+  gained the check. Also: `ExpenseService`'s `_check_budget_and_notify`
+  had a stale comment (from before this unit) documenting the very gap
+  U1.1 closes — updated to note `create()` now validates `category_id`
+  before that method ever runs, so no redundant check was added there.
 
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
@@ -427,13 +437,42 @@ on U0.1/U0.2 and its own listed units.
   instead of a specific one; amount/threshold parse-reprompt blocks are
   duplicated between add/update; `_parse_notify_threshold`'s bare `int()`
   accepts PEP 515 underscore literals as a side effect).
-- Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands
-  to confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
+- Done: U1.1 (2026-07-23) — `ExpenseService.create/update` now validate
+  `category_id` and every `tag_ids` entry belong to the caller's account
+  (new narrow `TagLookupRepositoryProtocol`, `tag_repo` dep added to the
+  constructor); `BudgetService.create` validates `category_id` the same
+  way (new narrow `CategoryLookupRepositoryProtocol`, `category_repo` dep
+  added — `update` has nothing to validate, see D113). Foreign/nonexistent
+  ids → `NotFoundError` (404, not 403 — MVP D29 precedent). Wired in
+  `api/deps.py`'s `get_expense_service`/`get_budget_service`. Closes MVP
+  D33/D23. Hit the MVP D22 gotcha again: adding `_validate_tags(self,
+  tag_ids: list[UUID], ...)` after `ExpenseService.list` broke that
+  method's own `list[...]` annotation the same way the MVP repo bug did —
+  fixed by moving `list` to be the last method in the class (same fix as
+  D22, not `from __future__ import annotations`, which D22 already found
+  doesn't help mypy's static check). Tests: 9 new cases in
+  `tests/test_expense_service.py` (foreign/nonexistent category, foreign
+  tag, mixed own+foreign tags, own-ids-pass, on both create and update) +
+  3 in `tests/test_budget_service.py` (foreign/nonexistent category,
+  own-id-passes on create) + 3 API-level 404 tests in
+  `tests/test_expenses_api.py` + 1 in `tests/test_budgets_api.py`.
+  Existing tests across all four files that previously posted an
+  unregistered `category_id`/`tag_id` needed a matching fake row added
+  (expected fallout of a real ownership check landing where none existed
+  before) — no test assertions were weakened, only made realistic.
+  `tests/README.md` updated. `verify.sh` green (384 non-integration
+  tests). Reviewed by the reviewer subagent same session (plan flags this
+  unit RISKY, permissions-adjacent) — APPROVE, one NIT not fixed:
+  `_validate_tags` does one sequential repo `.get()` per tag id instead of
+  a batched lookup (fine at family-app scale, flagged if `tag_ids` ever
+  grows large).
+- Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands to
+  confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
   (CP1…CP8), NOT strict milestone order. U1.2 is the next unit that
   actually wires the statistics stub params (D110) and `family_tz` into
-  `statistics_service`'s default bounds. U2.2 (this unit) landed early per
-  D111 — U1.1 through U1.6 and U2.1/U2.1b are still open ahead of it in
-  the plan's own order.
+  `statistics_service`'s default bounds. U2.2 landed early per D111 — U1.2
+  through U1.6 and U2.1/U2.1b are still open ahead of it in the plan's own
+  order.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
   stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
   MVP plan's pending items still stand: U4.4b reviewer pass never ran;

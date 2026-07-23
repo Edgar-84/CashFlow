@@ -10,6 +10,7 @@ from models.budget_plan import (
     BudgetPlanUpdate,
     BudgetProgress,
 )
+from models.category import CategoryResponse
 from models.errors import ConflictError, NotFoundError
 from services.period import month_bounds
 
@@ -32,6 +33,15 @@ class ExpenseSumRepositoryProtocol(Protocol):
     async def sum_by_category_month(
         self, account_id: UUID, start: datetime, end: datetime
     ) -> dict[UUID, int]: ...
+
+
+class CategoryLookupRepositoryProtocol(Protocol):
+    """Narrow slice of category_repo — verifies `category_id` on create
+    belongs to the caller's account (U1.1, closes MVP D23/D33).
+    `BudgetPlanUpdate` has no `category_id` field (immutable post-creation),
+    so `update` has nothing to validate here."""
+
+    async def get(self, id: UUID) -> CategoryResponse | None: ...
 
 
 def calculate_progress(
@@ -71,9 +81,11 @@ class BudgetService:
         self,
         budget_plan_repo: BudgetPlanRepositoryProtocol,
         expense_repo: ExpenseSumRepositoryProtocol,
+        category_repo: CategoryLookupRepositoryProtocol,
     ) -> None:
         self._budget_plan_repo = budget_plan_repo
         self._expense_repo = expense_repo
+        self._category_repo = category_repo
 
     async def list(self, account_id: UUID) -> list[BudgetPlanResponse]:
         return await self._budget_plan_repo.list(account_id=account_id)
@@ -85,6 +97,10 @@ class BudgetService:
         return plan
 
     async def create(self, data: BudgetPlanCreate, account_id: UUID) -> BudgetPlanResponse:
+        category = await self._category_repo.get(data.category_id)
+        if category is None or category.account_id != account_id:
+            # 404, not 403 — no cross-account probing (MVP D29 precedent).
+            raise NotFoundError(f"Category {data.category_id} not found")
         payload = data.model_dump()
         payload["account_id"] = account_id
         try:
