@@ -449,6 +449,9 @@ match on).
 | `test_tags_keyboard_renders_toggle_buttons_and_done` | One toggle button per tag (`tag:<uuid hex>`) plus a final "Done" button (`tags:done`) |
 | `test_tags_keyboard_marks_selected_tags` | Selected tags get the ✅ label prefix; callback_data stays stable so tapping toggles |
 | `test_tag_callback_round_trips_the_uuid` | `TagCallback.pack()`/`unpack()` round-trips the UUID |
+| `test_budgets_keyboard_renders_one_button_per_plan_with_category_name` | One button per plan, text = its category's name, callback_data = `budget:<uuid hex>` (U2.2 AC) |
+| `test_budgets_keyboard_unknown_category_falls_back_to_placeholder` | A plan whose category isn't in the passed-in name map renders "Unknown" instead of a blank/crashing label |
+| `test_budget_callback_round_trips_the_uuid` | `BudgetCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` |
 
 ## Bot tests (`test_bot_handlers_expenses.py`) → [`bot/handlers/expenses.py`](../bot/handlers/expenses.py)
@@ -545,10 +548,14 @@ never returns 409 for tags.
 
 ## Bot tests (`test_bot_handlers_budgets.py`) → [`bot/handlers/budgets.py`](../bot/handlers/budgets.py)
 Hermetic — a `FakeBudgetBackendClient` stands in for `bot/client.py`'s
-`BackendClient`; handlers are called directly with mock `Message` objects. No
-FSM: U4.5 AC scopes this module to read-only rendering (see plan Decision log
-D45) — `/budgets` lists each plan with a progress bar built from
-`GET /budgets/{id}/progress`.
+`BackendClient`; handlers are called directly with mock Message/CallbackQuery
+objects and a real `FSMContext` over aiogram's `MemoryStorage`. `/budgets`
+itself has no FSM (U4.5 AC: read-only rendering) — `/budgets` lists each plan
+with a progress bar built from `GET /budgets/{id}/progress`. Add/update/
+delete (U2.2, superseding MVP D45's API-only-for-V1 scope) use the
+`BudgetManage` FSM; one real-`Dispatcher` test guards the same
+registration-order class of bug as `test_bot_handlers_categories.py`
+(D39/D40 precedent).
 
 | Test | Checks |
 |---|---|
@@ -562,6 +569,24 @@ D45) — `/budgets` lists each plan with a progress bar built from
 | `test_list_budgets_backend_error_on_list_shows_friendly_message` | A `list_budget_plans` transport failure shows a human message instead of raising |
 | `test_list_budgets_unknown_category_falls_back_to_placeholder` | A plan whose category isn't in the fetched category list still renders, as "Unknown" |
 | `test_list_budgets_progress_fetch_error_shows_inline_message_and_continues` | A `get_budget_plan_progress` failure for one plan shows an inline error for that plan without failing the whole list |
+| `test_add_budget_happy_path_with_explicit_threshold` | `/addbudget` → category → amount → threshold ends in a `create_budget_plan` call with the right `BudgetPlanCreate` and cleared state (U2.2 AC) |
+| `test_add_budget_threshold_skip_uses_default` | `/skip` at the threshold step creates the plan with the default 80% threshold |
+| `test_add_budget_no_categories` | `/addbudget` with no categories shows a message and never enters the FSM |
+| `test_add_budget_invalid_amount_reprompts` | Unparseable amount text re-prompts and stays in `BudgetManage.add_amount` (AC) |
+| `test_add_budget_invalid_threshold_reprompts` | Out-of-range threshold text re-prompts and stays in `BudgetManage.add_threshold`, no create call (AC) |
+| `test_add_budget_duplicate_shows_friendly_message` | A 409 from `create_budget_plan` (`UNIQUE(category_id, account_id, period)`) shows an "already exists" message, not a traceback (AC) |
+| `test_add_budget_permission_denied_shows_friendly_message` | A 403 from `create_budget_plan` shows a permission message, not a traceback (AC) |
+| `test_update_budget_happy_path_amount_and_threshold` | `/updatebudget` → select → new amount → new threshold ends in an `update_budget_plan` call with both fields set (AC) |
+| `test_update_budget_skip_both_keeps_values_unchanged` | Skipping both amount and threshold sends no update call at all ("Nothing changed.") |
+| `test_update_budget_no_plans` | `/updatebudget` with none shows a message and never enters the FSM |
+| `test_update_budget_invalid_amount_reprompts` | Unparseable amount text re-prompts and stays in `BudgetManage.update_amount` (AC) |
+| `test_update_budget_invalid_threshold_reprompts` | Out-of-range threshold text re-prompts and stays in `BudgetManage.update_threshold`, no update call (AC) |
+| `test_update_budget_permission_denied_shows_friendly_message` | A 403 from `update_budget_plan` shows a permission message, not a traceback (AC) |
+| `test_delete_budget_happy_path` | `/deletebudget` → select ends in a `delete_budget_plan` call for the selected plan (AC) |
+| `test_delete_budget_no_plans` | `/deletebudget` with none shows a message and never enters the FSM |
+| `test_delete_budget_permission_denied_shows_friendly_message` | A 403 from `delete_budget_plan` shows a permission message, not a traceback (AC) |
+| `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
+| `test_cancel_command_reaches_cancel_handler_not_add_amount_catchall` | Through a real `Dispatcher`: `/cancel` while in `BudgetManage.add_amount` reaches `on_cancel_command`, not the catch-all `on_add_budget_amount_entered` |
 
 ## Bot tests (`test_bot_handlers_statistics.py`) → [`bot/handlers/statistics.py`](../bot/handlers/statistics.py)
 Hermetic — a `FakeStatisticsBackendClient` stands in for `bot/client.py`'s

@@ -158,7 +158,7 @@ family-timezone-correct "current month".
       catch-alls (MVP D39).
       AC: fake-client walkthroughs per field, invalid amount re-prompt,
       cancel mid-flow, backend-error message; registration-order test.
-- [ ] **U2.2 Budget-plan CRUD in bot** (requirement #8; U4.4's shape):
+- [x] **U2.2 Budget-plan CRUD in bot** (requirement #8; U4.4's shape):
       `BudgetManage` StatesGroup; `/budgets` keeps the U4.5 rendering,
       new add flow (category → amount → notify-threshold %) and
       rename-free update/delete flows via the existing keyboards pattern;
@@ -337,6 +337,24 @@ on U0.1/U0.2 and its own listed units.
   fully forward the new params as query strings (mechanical, and FastAPI
   silently ignores query params a route doesn't declare yet, so it's
   harmless ahead of U1.2 wiring `api/statistics.py`).
+- D111 (2026-07-22, U2.2): implemented out of the plan's milestone order —
+  M1 (U1.1-U1.6) and U2.1/U2.1b are still not done, but a live user-testing
+  session hit MVP D45's "budgets are API-only" gap directly (a raw-API
+  budget create used dollars where cents were required, with no bot-side
+  guardrail) and asked for this unit specifically; nothing in U2.2's own
+  AC depends on U1.1-U1.6/U2.1/U2.1b's code. Human confirmed proceeding
+  out of order rather than waiting. Two implementation choices not spelled
+  out by the Units entry: (1) `parse_amount_to_minor_units` is imported
+  from `bot/handlers/expenses.py` rather than extracted to a shared module
+  — one function, two call sites, extracting it would add a file for no
+  behavior change; (2) update is "amount, then threshold, each
+  independently skippable via /skip" rather than a single combined prompt,
+  mirroring how `/add`'s comment step already uses `/skip` — lets a user
+  change just one field without re-typing the other. Commands: `/addbudget`,
+  `/updatebudget`, `/deletebudget` (no "rename" — budgets have no name).
+  `BudgetPlanUpdate.amount` still has no `Field(gt=0)` (D109) but the bot
+  path can't send a non-positive amount: `parse_amount_to_minor_units`
+  already rejects `<= 0` before it reaches the model.
 - D112 (2026-07-23, PR #27 CI): `Field(gt=0)` on `BudgetPlanBase.amount`
   (as D109/Contracts originally specified) broke
   `test_check_limit_zero_amount_plan_returns_none` in CI — that integration
@@ -384,12 +402,38 @@ on U0.1/U0.2 and its own listed units.
   (D112) — fixed and confirmed via `bash scripts/integration_docker.sh`
   (46 passed). This unit is flagged Human-review in the plan (touches
   reviewed MVP contracts) — no reviewer subagent run, human sign-off
-  pending.
+  pending. **Merged to master via PR #27.**
+- Done: U2.2 (2026-07-22, out of milestone order — see D111) —
+  `BudgetManage` StatesGroup (`bot/states.py`); `BudgetCallback` +
+  `budgets_keyboard` (`bot/keyboards.py`); `bot/handlers/budgets.py` gained
+  `/addbudget` (category → amount → notify-threshold%, threshold
+  defaultable via `/skip`), `/updatebudget` (select plan → new amount →
+  new threshold, both independently skippable, "Nothing changed." if both
+  skipped), `/deletebudget` (select → delete), all reusing
+  `parse_amount_to_minor_units` from `bot/handlers/expenses.py`; 409
+  (duplicate plan) → "already exists" message, 403 → permission message.
+  `/budgets` read-only rendering unchanged. Tests: 20 new cases in
+  `tests/test_bot_handlers_budgets.py` (add/update/delete happy paths,
+  duplicate, permission-denied, invalid amount/threshold re-prompts,
+  cancel, registration-order) + 3 in `tests/test_bot_keyboards.py`
+  (`budgets_keyboard`/`BudgetCallback`). `tests/README.md` updated.
+  `verify.sh` green (369 non-integration tests). Branched off
+  `U0.2_contract_deltas` before PR #27 merged; `origin/master` merged back
+  into this branch to pick up the D112 fix and resolve the branch-order
+  gap (one conflict, in this STATE section — resolved by keeping U0.2's
+  master-side text above and this note). Reviewed by the reviewer
+  subagent same session (APPROVE — one WARN + two NITs, all flagged not
+  fixed: 404-on-stale-plan-id falls through to the generic error message
+  instead of a specific one; amount/threshold parse-reprompt blocks are
+  duplicated between add/update; `_parse_notify_threshold`'s bare `int()`
+  accepts PEP 515 underscore literals as a side effect).
 - Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands
   to confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
   (CP1…CP8), NOT strict milestone order. U1.2 is the next unit that
   actually wires the statistics stub params (D110) and `family_tz` into
-  `statistics_service`'s default bounds.
+  `statistics_service`'s default bounds. U2.2 (this unit) landed early per
+  D111 — U1.1 through U1.6 and U2.1/U2.1b are still open ahead of it in
+  the plan's own order.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
   stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
   MVP plan's pending items still stand: U4.4b reviewer pass never ran;
