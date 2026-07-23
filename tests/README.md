@@ -216,6 +216,14 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | `test_create_still_succeeds_when_notification_send_raises` | `notification_service.send()` raising is swallowed — expense creation still returns the created expense (root CLAUDE.md D3, second line of defense beyond `NotificationService`'s own try/except) |
 | `test_create_still_succeeds_when_budget_check_raises` | A `budget_plan_repo` error (DB hiccup) during the notification check doesn't fail expense creation |
 | `test_create_passes_account_scoped_bounds_to_check_limit` | `check_limit()` is called with the caller's `account_id`/the expense's `category_id` |
+| `test_create_foreign_category_raises_not_found` | U1.1: `create()` with a `category_id` belonging to another account → `NotFoundError` (404, not 403 — closes MVP D33/D23) |
+| `test_create_nonexistent_category_raises_not_found` | `create()` with an unknown `category_id` → `NotFoundError` |
+| `test_create_foreign_tag_raises_not_found` | `create()` with a `tag_ids` entry belonging to another account → `NotFoundError` |
+| `test_create_mixed_own_and_foreign_tags_raises_not_found` | `create()` with one own + one foreign tag → `NotFoundError` (no partial success) |
+| `test_create_own_category_and_tags_pass` | `create()` with a `category_id`/`tag_ids` all belonging to the caller's account succeeds |
+| `test_update_foreign_category_raises_not_found` | `update()` with a foreign `category_id` → `NotFoundError` |
+| `test_update_foreign_tag_raises_not_found` | `update()` with a foreign `tag_ids` entry → `NotFoundError` |
+| `test_update_own_category_and_tags_pass` | `update()` with an own `category_id`/`tag_ids` succeeds |
 
 ## Service tests (`test_notification_service.py`) → [`services/notification_service.py`](../services/notification_service.py)
 Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`. No real network (U3.1 AC).
@@ -253,6 +261,9 @@ with in-memory fakes. No DB. `calculate_progress` is pure (no fakes needed).
 | `test_get_progress_combines_plan_and_spent` | `get_progress()` combines `budget_plan_repo.get()` + `expense_repo.sum_by_category_month()` into a `BudgetProgress` with real `int` spent/remaining; also asserts the exact `[start, end)` month bounds passed to the repo match `services.period.month_bounds()` (review fix — the fake previously ignored these args) |
 | `test_get_progress_no_expenses_this_month_is_zero_spent` | No matching sum → `spent=0`, not a `KeyError` |
 | `test_get_progress_missing_plan_raises_not_found` | `get_progress()` on an unknown plan id raises `NotFoundError` |
+| `test_create_foreign_category_raises_not_found` | U1.1: `create()` with a `category_id` belonging to another account → `NotFoundError` (404, not 403 — closes MVP D33/D23); `BudgetPlanUpdate` has no `category_id` field, so `update()` has nothing to validate here |
+| `test_create_nonexistent_category_raises_not_found` | `create()` with an unknown `category_id` → `NotFoundError` |
+| `test_create_own_category_passes` | `create()` with a `category_id` belonging to the caller's account succeeds |
 
 ## API/route tests (`test_expenses_api.py`) → [`api/expenses.py`](../api/expenses.py)
 Hermetic — the real app with `ExpenseRepository`/`UserRepository`/`PermissionRepository`
@@ -278,6 +289,9 @@ first time — plan Decision log handoff note).
 | `test_delete_own_expense_as_member` | Member `DELETE /expenses/{id}` on their own expense → 204, row removed |
 | `test_delete_other_members_expense_is_403` | Member `DELETE /expenses/{id}` on another user's expense → 403 (`own_only`) |
 | `test_delete_expense_as_viewer_is_403` | Viewer `DELETE /expenses/{id}` → 403 |
+| `test_create_expense_with_foreign_category_is_404` | U1.1 end-to-end: `POST /expenses` with a `category_id` the fake `category_repo` doesn't have → 404 |
+| `test_create_expense_with_foreign_tag_is_404` | `POST /expenses` with a `tag_ids` entry the fake `tag_repo` doesn't have → 404 |
+| `test_update_expense_with_foreign_category_is_404` | `PATCH /expenses/{id}` with an unknown `category_id` → 404 |
 
 ## API/route tests (`test_categories_api.py`) → [`api/categories.py`](../api/categories.py)
 Hermetic — the real app with `CategoryRepository`/`UserRepository`/`PermissionRepository`
@@ -331,6 +345,7 @@ Hermetic — the real app with `BudgetPlanRepository`/`ExpenseRepository`/`UserR
 | `test_update_budget_plan_as_member_is_403` | Member `PATCH /budgets/{id}` → 403 |
 | `test_delete_budget_plan_as_admin` | Admin `DELETE /budgets/{id}` → 204, row removed |
 | `test_delete_budget_plan_as_member_is_403` | Member `DELETE /budgets/{id}` → 403 |
+| `test_create_budget_plan_with_foreign_category_is_404` | U1.1 end-to-end: `POST /budgets` with a `category_id` the fake `category_repo` doesn't have → 404 |
 
 ## API/route tests (`test_users_api.py`) → [`api/users.py`](../api/users.py)
 Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replaced by

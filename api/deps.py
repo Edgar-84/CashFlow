@@ -120,16 +120,20 @@ def get_expense_service(
     expense_repo: Annotated[ExpenseRepository, Depends(get_expense_repo)],
     budget_plan_repo: Annotated[BudgetPlanRepository, Depends(get_budget_plan_repo)],
     category_repo: Annotated[CategoryRepository, Depends(get_category_repo)],
+    tag_repo: Annotated[TagRepository, Depends(get_tag_repo)],
     notification_service: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> ExpenseService:
-    return ExpenseService(expense_repo, budget_plan_repo, category_repo, notification_service)
+    return ExpenseService(
+        expense_repo, budget_plan_repo, category_repo, tag_repo, notification_service
+    )
 
 
 def get_budget_service(
     budget_plan_repo: Annotated[BudgetPlanRepository, Depends(get_budget_plan_repo)],
     expense_repo: Annotated[ExpenseRepository, Depends(get_expense_repo)],
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repo)],
 ) -> BudgetService:
-    return BudgetService(budget_plan_repo, expense_repo)
+    return BudgetService(budget_plan_repo, expense_repo, category_repo)
 
 
 def get_statistics_service(

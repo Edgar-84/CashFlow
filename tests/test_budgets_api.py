@@ -12,12 +12,13 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
-from test_budget_service import FakeBudgetPlanRepo, FakeExpenseSumRepo
+from test_budget_service import FakeBudgetPlanRepo, FakeCategoryRepo, FakeExpenseSumRepo
 from test_deps import FakePermissionRepo
 from test_users_api import TgLookupFakeUserRepo, auth_headers
 
 from api import deps
 from models.budget_plan import BudgetPlanResponse
+from models.category import CategoryResponse
 from models.enums import Role
 from models.user import UserResponse
 
@@ -69,6 +70,13 @@ def category_id() -> UUID:
 
 
 @pytest.fixture
+def category(account_id: UUID, category_id: UUID) -> CategoryResponse:
+    return CategoryResponse(
+        id=category_id, name="Groceries", account_id=account_id, created_at=datetime.now(UTC)
+    )
+
+
+@pytest.fixture
 def plan(account_id: UUID, category_id: UUID) -> BudgetPlanResponse:
     return BudgetPlanResponse(
         id=uuid4(),
@@ -87,7 +95,11 @@ OverrideRepos = Callable[..., FakeBudgetPlanRepo]
 
 @pytest.fixture
 def override_repos(
-    app: FastAPI, admin: UserResponse, member: UserResponse, viewer: UserResponse
+    app: FastAPI,
+    admin: UserResponse,
+    member: UserResponse,
+    viewer: UserResponse,
+    category: CategoryResponse,
 ) -> OverrideRepos:
     def _apply(
         plans: list[BudgetPlanResponse] | None = None,
@@ -102,6 +114,9 @@ def override_repos(
         repo = FakeBudgetPlanRepo(plans, duplicate_ids=duplicate_ids)
         app.dependency_overrides[deps.get_budget_plan_repo] = lambda: repo
         app.dependency_overrides[deps.get_expense_repo] = lambda: FakeExpenseSumRepo(sums)
+        # get_budget_service also wires category_repo (U1.1 cross-account
+        # validation on create) — seeded with the one valid `category` fixture.
+        app.dependency_overrides[deps.get_category_repo] = lambda: FakeCategoryRepo([category])
         return repo
 
     return _apply
@@ -166,10 +181,13 @@ async def test_get_budget_plan_progress(
 
 
 async def test_create_budget_plan_as_admin(
-    client: AsyncClient, override_repos: OverrideRepos, admin: UserResponse, account_id: UUID
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    admin: UserResponse,
+    account_id: UUID,
+    category_id: UUID,
 ) -> None:
     override_repos([])
-    category_id = uuid4()
 
     response = await client.post(
         "/budgets",
@@ -199,9 +217,8 @@ async def test_create_budget_plan_as_member_is_403(
 
 
 async def test_create_duplicate_budget_plan_as_admin_is_409(
-    client: AsyncClient, override_repos: OverrideRepos, admin: UserResponse
+    client: AsyncClient, override_repos: OverrideRepos, admin: UserResponse, category_id: UUID
 ) -> None:
-    category_id = uuid4()
     override_repos([], duplicate_ids={category_id})
 
     response = await client.post(
@@ -270,3 +287,20 @@ async def test_delete_budget_plan_as_member_is_403(
     response = await client.delete(f"/budgets/{plan.id}", headers=auth_headers(member.tg_id))
 
     assert response.status_code == 403
+
+
+# --- U1.1: cross-account validation (closes MVP D33/D23) ------------------
+
+
+async def test_create_budget_plan_with_foreign_category_is_404(
+    client: AsyncClient, override_repos: OverrideRepos, admin: UserResponse
+) -> None:
+    override_repos([])  # default category_repo only knows the `category` fixture
+
+    response = await client.post(
+        "/budgets",
+        headers=auth_headers(admin.tg_id),
+        json={"category_id": str(uuid4()), "amount": 5_000},
+    )
+
+    assert response.status_code == 404

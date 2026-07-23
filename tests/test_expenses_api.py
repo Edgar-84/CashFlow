@@ -17,6 +17,8 @@ from test_expense_service import (
     FakeCategoryRepo,
     FakeExpenseRepo,
     FakeNotificationService,
+    FakeTagRepo,
+    make_category,
     make_expense,
 )
 from test_users_api import TgLookupFakeUserRepo, auth_headers
@@ -26,6 +28,7 @@ from models.category import CategoryResponse
 from models.enums import Resource, Role
 from models.expense import ExpenseResponse
 from models.permission import PermissionResponse
+from models.tag import TagResponse
 from models.user import UserResponse
 
 
@@ -71,6 +74,11 @@ def other_member(account_id: UUID) -> UserResponse:
 
 
 @pytest.fixture
+def category(account_id: UUID) -> CategoryResponse:
+    return make_category(account_id=account_id)
+
+
+@pytest.fixture
 def viewer(account_id: UUID) -> UserResponse:
     return UserResponse(
         id=uuid4(),
@@ -92,6 +100,7 @@ def override_repos(
     member: UserResponse,
     other_member: UserResponse,
     viewer: UserResponse,
+    category: CategoryResponse,
 ) -> OverrideRepos:
     def _apply(expenses: list[ExpenseResponse] | None = None) -> FakeExpenseRepo:
         app.dependency_overrides[deps.get_user_repo] = lambda: TgLookupFakeUserRepo(
@@ -101,11 +110,14 @@ def override_repos(
         repo = FakeExpenseRepo(expenses)
         app.dependency_overrides[deps.get_expense_repo] = lambda: repo
         # get_expense_service also wires budget_plan_repo/category_repo (for
-        # the notification check) and notification_service (U3.1) — default
-        # to "no budget plan" fakes so routes that never exercise create()
-        # don't need real DB/network dependencies resolved.
+        # the notification check AND, since U1.1, cross-account validation)/
+        # tag_repo (U1.1)/notification_service (U3.1) — default to "no budget
+        # plan" fakes and a category_repo seeded with the one valid `category`
+        # fixture so routes that create/update against it don't need real
+        # DB/network dependencies resolved.
         app.dependency_overrides[deps.get_budget_plan_repo] = lambda: FakeBudgetPlanRepo()
-        app.dependency_overrides[deps.get_category_repo] = lambda: FakeCategoryRepo()
+        app.dependency_overrides[deps.get_category_repo] = lambda: FakeCategoryRepo([category])
+        app.dependency_overrides[deps.get_tag_repo] = lambda: FakeTagRepo()
         app.dependency_overrides[deps.get_notification_service] = lambda: FakeNotificationService()
         return repo
 
@@ -185,14 +197,18 @@ async def test_get_missing_expense_is_404(
 
 
 async def test_create_expense_as_member(
-    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+    category: CategoryResponse,
 ) -> None:
     override_repos([])
 
     response = await client.post(
         "/expenses",
         headers=auth_headers(member.tg_id),
-        json={"amount": 1500, "category_id": str(uuid4())},
+        json={"amount": 1500, "category_id": str(category.id)},
     )
 
     assert response.status_code == 201
@@ -203,19 +219,25 @@ async def test_create_expense_as_member(
 
 
 async def test_create_expense_with_tags(
-    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+    client: AsyncClient,
+    app: FastAPI,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+    category: CategoryResponse,
 ) -> None:
     override_repos([])
-    tag_id = str(uuid4())
+    tag = TagResponse(id=uuid4(), name="tag", account_id=account_id, created_at=datetime.now(UTC))
+    app.dependency_overrides[deps.get_tag_repo] = lambda: FakeTagRepo([tag])
 
     response = await client.post(
         "/expenses",
         headers=auth_headers(member.tg_id),
-        json={"amount": 1500, "category_id": str(uuid4()), "tag_ids": [tag_id]},
+        json={"amount": 1500, "category_id": str(category.id), "tag_ids": [str(tag.id)]},
     )
 
     assert response.status_code == 201
-    assert [t["id"] for t in response.json()["tags"]] == [tag_id]
+    assert [t["id"] for t in response.json()["tags"]] == [str(tag.id)]
 
 
 async def test_create_expense_as_viewer_is_403(
@@ -318,22 +340,26 @@ async def test_update_any_expense_as_admin(
 
 async def test_update_expense_tags_replaces_them(
     client: AsyncClient,
+    app: FastAPI,
     override_repos: OverrideRepos,
     member: UserResponse,
     account_id: UUID,
 ) -> None:
     expense = make_expense(account_id=account_id, user_id=member.id)
     override_repos([expense])
-    new_tag_id = str(uuid4())
+    new_tag = TagResponse(
+        id=uuid4(), name="tag", account_id=account_id, created_at=datetime.now(UTC)
+    )
+    app.dependency_overrides[deps.get_tag_repo] = lambda: FakeTagRepo([new_tag])
 
     response = await client.patch(
         f"/expenses/{expense.id}",
         headers=auth_headers(member.tg_id),
-        json={"tag_ids": [new_tag_id]},
+        json={"tag_ids": [str(new_tag.id)]},
     )
 
     assert response.status_code == 200
-    assert [t["id"] for t in response.json()["tags"]] == [new_tag_id]
+    assert [t["id"] for t in response.json()["tags"]] == [str(new_tag.id)]
 
 
 async def test_delete_own_expense_as_member(
@@ -378,3 +404,55 @@ async def test_delete_expense_as_viewer_is_403(
     response = await client.delete(f"/expenses/{expense.id}", headers=auth_headers(viewer.tg_id))
 
     assert response.status_code == 403
+
+
+# --- U1.1: cross-account validation (closes MVP D33/D23) ------------------
+
+
+async def test_create_expense_with_foreign_category_is_404(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])  # default category_repo only knows the `category` fixture
+
+    response = await client.post(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        json={"amount": 1500, "category_id": str(uuid4())},
+    )
+
+    assert response.status_code == 404
+
+
+async def test_create_expense_with_foreign_tag_is_404(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    category: CategoryResponse,
+) -> None:
+    override_repos([])  # default tag_repo knows no tags at all
+
+    response = await client.post(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        json={"amount": 1500, "category_id": str(category.id), "tag_ids": [str(uuid4())]},
+    )
+
+    assert response.status_code == 404
+
+
+async def test_update_expense_with_foreign_category_is_404(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    expense = make_expense(account_id=account_id, user_id=member.id)
+    override_repos([expense])
+
+    response = await client.patch(
+        f"/expenses/{expense.id}",
+        headers=auth_headers(member.tg_id),
+        json={"category_id": str(uuid4())},
+    )
+
+    assert response.status_code == 404

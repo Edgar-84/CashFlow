@@ -8,6 +8,7 @@ import asyncpg
 import pytest
 
 from models.budget_plan import BudgetPlanCreate, BudgetPlanResponse, BudgetPlanUpdate
+from models.category import CategoryResponse
 from models.errors import ConflictError, NotFoundError
 from services.budget_service import BudgetService, calculate_progress
 from services.period import month_bounds
@@ -68,6 +69,36 @@ class FakeExpenseSumRepo:
     ) -> dict[UUID, int]:
         self.calls.append((account_id, start, end))
         return dict(self._sums)
+
+
+class FakeCategoryRepo:
+    def __init__(self, categories: list[CategoryResponse] | None = None) -> None:
+        self._categories: dict[UUID, CategoryResponse] = {c.id: c for c in (categories or [])}
+
+    async def get(self, id: UUID) -> CategoryResponse | None:
+        return self._categories.get(id)
+
+
+def make_category(*, account_id: UUID, category_id: UUID | None = None) -> CategoryResponse:
+    return CategoryResponse(
+        id=category_id or uuid4(),
+        name="Groceries",
+        account_id=account_id,
+        created_at=datetime.now(UTC),
+    )
+
+
+def make_service(
+    budget_plan_repo: FakeBudgetPlanRepo,
+    expense_repo: FakeExpenseSumRepo,
+    *,
+    category_repo: Any = None,
+) -> BudgetService:
+    return BudgetService(
+        budget_plan_repo,
+        expense_repo,
+        category_repo if category_repo is not None else FakeCategoryRepo(),
+    )
 
 
 def make_plan(
@@ -156,7 +187,7 @@ async def test_list_scopes_by_account() -> None:
     other_account_id = uuid4()
     mine = make_plan(account_id=account_id)
     other = make_plan(account_id=other_account_id)
-    service = BudgetService(FakeBudgetPlanRepo([mine, other]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([mine, other]), FakeExpenseSumRepo())
 
     result = await service.list(account_id)
 
@@ -166,7 +197,7 @@ async def test_list_scopes_by_account() -> None:
 async def test_get_returns_plan_in_account() -> None:
     account_id = uuid4()
     plan = make_plan(account_id=account_id)
-    service = BudgetService(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
 
     result = await service.get(plan.id, account_id)
 
@@ -174,7 +205,7 @@ async def test_get_returns_plan_in_account() -> None:
 
 
 async def test_get_missing_raises_not_found() -> None:
-    service = BudgetService(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
 
     with pytest.raises(NotFoundError):
         await service.get(uuid4(), uuid4())
@@ -184,7 +215,7 @@ async def test_get_foreign_account_raises_not_found() -> None:
     account_id = uuid4()
     other_account_id = uuid4()
     plan = make_plan(account_id=other_account_id)
-    service = BudgetService(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
 
     with pytest.raises(NotFoundError):
         await service.get(plan.id, account_id)
@@ -192,9 +223,11 @@ async def test_get_foreign_account_raises_not_found() -> None:
 
 async def test_create_forces_account_id_from_caller() -> None:
     account_id = uuid4()
-    category_id = uuid4()
-    service = BudgetService(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
-    data = BudgetPlanCreate(category_id=category_id, amount=10_000)
+    category = make_category(account_id=account_id)
+    service = make_service(
+        FakeBudgetPlanRepo([]), FakeExpenseSumRepo(), category_repo=FakeCategoryRepo([category])
+    )
+    data = BudgetPlanCreate(category_id=category.id, amount=10_000)
 
     created = await service.create(data, account_id)
 
@@ -205,18 +238,18 @@ async def test_create_duplicate_raises_conflict() -> None:
     # UNIQUE(category_id, account_id, period) — docs/SCHEMA.sql, plan Decision
     # log D23/D24 flagged the raw asyncpg.UniqueViolationError as untranslated.
     account_id = uuid4()
-    category_id = uuid4()
-    repo = FakeBudgetPlanRepo([], duplicate_ids={category_id})
-    service = BudgetService(repo, FakeExpenseSumRepo())
+    category = make_category(account_id=account_id)
+    repo = FakeBudgetPlanRepo([], duplicate_ids={category.id})
+    service = make_service(repo, FakeExpenseSumRepo(), category_repo=FakeCategoryRepo([category]))
 
     with pytest.raises(ConflictError):
-        await service.create(BudgetPlanCreate(category_id=category_id, amount=10_000), account_id)
+        await service.create(BudgetPlanCreate(category_id=category.id, amount=10_000), account_id)
 
 
 async def test_update_changes_fields() -> None:
     account_id = uuid4()
     plan = make_plan(account_id=account_id)
-    service = BudgetService(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
 
     updated = await service.update(plan.id, BudgetPlanUpdate(amount=20_000), account_id)
 
@@ -227,7 +260,7 @@ async def test_update_explicit_null_amount_is_ignored_not_nulled() -> None:
     # amount/period/notify_threshold are all NOT NULL (same D30/D32 precedent).
     account_id = uuid4()
     plan = make_plan(account_id=account_id, amount=10_000)
-    service = BudgetService(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
 
     updated = await service.update(plan.id, BudgetPlanUpdate(amount=None), account_id)
 
@@ -237,7 +270,7 @@ async def test_update_explicit_null_amount_is_ignored_not_nulled() -> None:
 async def test_update_explicit_null_period_is_ignored_not_nulled() -> None:
     account_id = uuid4()
     plan = make_plan(account_id=account_id)
-    service = BudgetService(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
 
     updated = await service.update(plan.id, BudgetPlanUpdate(period=None), account_id)
 
@@ -247,7 +280,7 @@ async def test_update_explicit_null_period_is_ignored_not_nulled() -> None:
 async def test_update_explicit_null_notify_threshold_is_ignored_not_nulled() -> None:
     account_id = uuid4()
     plan = make_plan(account_id=account_id, notify_threshold=80)
-    service = BudgetService(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo())
 
     updated = await service.update(plan.id, BudgetPlanUpdate(notify_threshold=None), account_id)
 
@@ -255,7 +288,7 @@ async def test_update_explicit_null_notify_threshold_is_ignored_not_nulled() -> 
 
 
 async def test_update_missing_raises_not_found() -> None:
-    service = BudgetService(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
 
     with pytest.raises(NotFoundError):
         await service.update(uuid4(), BudgetPlanUpdate(amount=1), uuid4())
@@ -265,7 +298,7 @@ async def test_delete_removes_plan() -> None:
     account_id = uuid4()
     plan = make_plan(account_id=account_id)
     repo = FakeBudgetPlanRepo([plan])
-    service = BudgetService(repo, FakeExpenseSumRepo())
+    service = make_service(repo, FakeExpenseSumRepo())
 
     await service.delete(plan.id, account_id)
 
@@ -273,7 +306,7 @@ async def test_delete_removes_plan() -> None:
 
 
 async def test_delete_missing_raises_not_found() -> None:
-    service = BudgetService(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
 
     with pytest.raises(NotFoundError):
         await service.delete(uuid4(), uuid4())
@@ -289,7 +322,7 @@ async def test_get_progress_combines_plan_and_spent() -> None:
         account_id=account_id, category_id=category_id, amount=10_000, notify_threshold=80
     )
     expense_repo = FakeExpenseSumRepo({category_id: 8_000})
-    service = BudgetService(FakeBudgetPlanRepo([plan]), expense_repo)
+    service = make_service(FakeBudgetPlanRepo([plan]), expense_repo)
     now = datetime(2026, 7, 17, 13, 45, tzinfo=UTC)
 
     progress = await service.get_progress(plan.id, account_id, now=now)
@@ -312,7 +345,7 @@ async def test_get_progress_no_expenses_this_month_is_zero_spent() -> None:
     account_id = uuid4()
     category_id = uuid4()
     plan = make_plan(account_id=account_id, category_id=category_id, amount=10_000)
-    service = BudgetService(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo({}))
+    service = make_service(FakeBudgetPlanRepo([plan]), FakeExpenseSumRepo({}))
 
     progress = await service.get_progress(plan.id, account_id)
 
@@ -321,7 +354,46 @@ async def test_get_progress_no_expenses_this_month_is_zero_spent() -> None:
 
 
 async def test_get_progress_missing_plan_raises_not_found() -> None:
-    service = BudgetService(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
+    service = make_service(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
 
     with pytest.raises(NotFoundError):
         await service.get_progress(uuid4(), uuid4())
+
+
+# --- U1.1: cross-account validation (closes MVP D33/D23) ------------------
+
+
+async def test_create_foreign_category_raises_not_found() -> None:
+    account_id = uuid4()
+    other_account_id = uuid4()
+    foreign_category = make_category(account_id=other_account_id)
+    service = make_service(
+        FakeBudgetPlanRepo([]),
+        FakeExpenseSumRepo(),
+        category_repo=FakeCategoryRepo([foreign_category]),
+    )
+    data = BudgetPlanCreate(category_id=foreign_category.id, amount=10_000)
+
+    with pytest.raises(NotFoundError):
+        await service.create(data, account_id)
+
+
+async def test_create_nonexistent_category_raises_not_found() -> None:
+    service = make_service(FakeBudgetPlanRepo([]), FakeExpenseSumRepo())
+    data = BudgetPlanCreate(category_id=uuid4(), amount=10_000)
+
+    with pytest.raises(NotFoundError):
+        await service.create(data, uuid4())
+
+
+async def test_create_own_category_passes() -> None:
+    account_id = uuid4()
+    category = make_category(account_id=account_id)
+    service = make_service(
+        FakeBudgetPlanRepo([]), FakeExpenseSumRepo(), category_repo=FakeCategoryRepo([category])
+    )
+    data = BudgetPlanCreate(category_id=category.id, amount=10_000)
+
+    created = await service.create(data, account_id)
+
+    assert created.category_id == category.id
