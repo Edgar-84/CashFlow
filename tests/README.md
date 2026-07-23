@@ -72,6 +72,10 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 | `test_get_by_period_scopes_by_account` | `get_by_period()` excludes another account's expenses |
 | `test_sum_by_category_month_scopes_by_account` | `sum_by_category_month()` excludes another account's expenses |
 | `test_create_with_duplicate_tag_ids_rolls_back_whole_expense` | A PK violation on duplicate `tag_ids` rolls back the whole `create()` — no partial expense left behind (D21) |
+| `test_get_populates_user_name` | `create()`/`get()` populate `user_name` via the `users.name` LEFT JOIN (D102) |
+| `test_list_populates_user_name` | `list()` populates `user_name` |
+| `test_get_by_period_populates_user_name` | `get_by_period()` populates `user_name` |
+| `test_get_by_category_populates_user_name` | `get_by_category()` populates `user_name` |
 
 ### `test_budget_plan_repo.py` → [`repositories/budget_plan_repo.py`](../repositories/budget_plan_repo.py)
 | Test | Checks |
