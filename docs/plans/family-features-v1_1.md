@@ -45,9 +45,11 @@ family-timezone-correct "current month".
 - `models/expense.py` `ExpenseResponse`: `user_name: str | None = None`
   (additive, populated by a repo JOIN on `users.name`; None tolerated for
   old fixtures — D102).
-- `models/budget_plan.py` `BudgetPlanBase.amount`: gains `Field(gt=0)`
-  (closes the gap flagged since MVP D23); DB `CHECK (amount > 0)` on
-  `budget_plans` AND `expenses` arrives in U1.6's migration.
+- `models/budget_plan.py` `BudgetPlanCreate.amount`: gains `Field(gt=0)`
+  (closes the gap flagged since MVP D23; originally specified on
+  `BudgetPlanBase`, corrected to `Create`-only by D112 — see Decision log).
+  DB `CHECK (amount > 0)` on `budget_plans` AND `expenses` arrives in
+  U1.6's migration.
 - `services/statistics_service.py` methods gain optional tz-aware
   `start`/`end` params (default: family-tz current month); `by_period`
   additionally gains optional `category_id: UUID | None`,
@@ -335,7 +337,6 @@ on U0.1/U0.2 and its own listed units.
   fully forward the new params as query strings (mechanical, and FastAPI
   silently ignores query params a route doesn't declare yet, so it's
   harmless ahead of U1.2 wiring `api/statistics.py`).
-
 - D111 (2026-07-22, U2.2): implemented out of the plan's milestone order —
   M1 (U1.1-U1.6) and U2.1/U2.1b are still not done, but a live user-testing
   session hit MVP D45's "budgets are API-only" gap directly (a raw-API
@@ -354,6 +355,23 @@ on U0.1/U0.2 and its own listed units.
   `BudgetPlanUpdate.amount` still has no `Field(gt=0)` (D109) but the bot
   path can't send a non-positive amount: `parse_amount_to_minor_units`
   already rejects `<= 0` before it reaches the model.
+- D112 (2026-07-23, PR #27 CI): `Field(gt=0)` on `BudgetPlanBase.amount`
+  (as D109/Contracts originally specified) broke
+  `test_check_limit_zero_amount_plan_returns_none` in CI — that integration
+  test inserts a `budget_plans` row with `amount=0` directly (the DB has no
+  `CHECK` yet, U1.6) specifically to exercise `check_limit()`'s own
+  `row["limit_amount"] <= 0 → None` guard, but the repo reads the row back
+  via `BudgetPlanResponse.model_validate(...)`, and `BudgetPlanResponse`
+  also inherits `BudgetPlanBase` (four-schema pattern) — so the Base-level
+  constraint rejected a legitimate, currently-DB-permitted row on *read*,
+  not just on write. Fix: moved `Field(gt=0)` to `BudgetPlanCreate.amount`
+  only (overriding the plain `int` inherited from `Base`), so new writes
+  through the API are still validated but reading back any existing row
+  (test fixture or otherwise) isn't. Confirmed via
+  `bash scripts/integration_docker.sh` (46 passed) and the fast unit gate
+  (348 passed). Rejected: fixing the test instead — the zero-amount case is
+  real product behavior `check_limit()` must keep tolerating until U1.6's
+  DB `CHECK` actually prevents such rows from existing.
 
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
@@ -367,18 +385,24 @@ on U0.1/U0.2 and its own listed units.
   repointed at `services.period.month_bounds`. `tzdata`-in-container risk
   checked and closed (D108) — no `uv.lock` touch. `verify.sh` green.
 - Done: U0.2 (2026-07-21) — `ExpenseResponse.user_name: str | None = None`
-  (LEFT-JOIN-populated later, D102); `BudgetPlanBase.amount` gained
-  `Field(gt=0)` (inherited by `BudgetPlanCreate`; `BudgetPlanUpdate` NOT
-  touched, see D109); `StatisticsService.by_period/by_category/by_tag`
-  gained `start`/`end` params (`by_period` also `category_id`/`tag_id`) as
-  accepted-but-unapplied stubs (D110); `bot/client.py`'s three
-  `statistics_*` methods fully forward the same params as query strings.
-  Tests added: `tests/test_models.py` (user_name round-trip, amount<=0
-  ValidationError on Create), `tests/test_statistics_service.py` (stub
-  params don't change output), `tests/test_bot_client.py` (query-string
-  pass-through and omission). `tests/README.md` updated. `verify.sh` green.
-  This unit is flagged Human-review in the plan (touches reviewed MVP
-  contracts) — no reviewer subagent run yet, human sign-off pending.
+  (LEFT-JOIN-populated later, D102); `BudgetPlanCreate.amount` gained
+  `Field(gt=0)` (moved off `BudgetPlanBase` post-CI, see D112 — originally
+  landed on `Base` per D109/Contracts, broke reading back a pre-existing
+  zero-amount row via `BudgetPlanResponse`; `BudgetPlanUpdate` still NOT
+  touched, that part of D109 stands); `StatisticsService.by_period/
+  by_category/by_tag` gained `start`/`end` params (`by_period` also
+  `category_id`/`tag_id`) as accepted-but-unapplied stubs (D110);
+  `bot/client.py`'s three `statistics_*` methods fully forward the same
+  params as query strings. Tests added: `tests/test_models.py`
+  (user_name round-trip, amount<=0 ValidationError on Create),
+  `tests/test_statistics_service.py` (stub params don't change output),
+  `tests/test_bot_client.py` (query-string pass-through and omission).
+  `tests/README.md` updated. `verify.sh` green (348 unit); PR #27 opened,
+  CI's integration job caught the `Field(gt=0)`-on-Base regression
+  (D112) — fixed and confirmed via `bash scripts/integration_docker.sh`
+  (46 passed). This unit is flagged Human-review in the plan (touches
+  reviewed MVP contracts) — no reviewer subagent run, human sign-off
+  pending. **Merged to master via PR #27.**
 - Done: U2.2 (2026-07-22, out of milestone order — see D111) —
   `BudgetManage` StatesGroup (`bot/states.py`); `BudgetCallback` +
   `budgets_keyboard` (`bot/keyboards.py`); `bot/handlers/budgets.py` gained
@@ -394,13 +418,15 @@ on U0.1/U0.2 and its own listed units.
   cancel, registration-order) + 3 in `tests/test_bot_keyboards.py`
   (`budgets_keyboard`/`BudgetCallback`). `tests/README.md` updated.
   `verify.sh` green (369 non-integration tests). Branched off
-  `U0.2_contract_deltas` (not master — U0.2's PR isn't merged yet); the
-  human still needs to reconcile that merge order. Reviewed by the
-  reviewer subagent same session (APPROVE — one WARN + two NITs, all
-  flagged not fixed: 404-on-stale-plan-id falls through to the generic
-  error message instead of a specific one; amount/threshold parse-reprompt
-  blocks are duplicated between add/update; `_parse_notify_threshold`'s
-  bare `int()` accepts PEP 515 underscore literals as a side effect).
+  `U0.2_contract_deltas` before PR #27 merged; `origin/master` merged back
+  into this branch to pick up the D112 fix and resolve the branch-order
+  gap (one conflict, in this STATE section — resolved by keeping U0.2's
+  master-side text above and this note). Reviewed by the reviewer
+  subagent same session (APPROVE — one WARN + two NITs, all flagged not
+  fixed: 404-on-stale-plan-id falls through to the generic error message
+  instead of a specific one; amount/threshold parse-reprompt blocks are
+  duplicated between add/update; `_parse_notify_threshold`'s bare `int()`
+  accepts PEP 515 underscore literals as a side effect).
 - Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands
   to confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
   (CP1…CP8), NOT strict milestone order. U1.2 is the next unit that
