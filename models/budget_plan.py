@@ -15,7 +15,12 @@ class BudgetPlanBase(BaseModel):
 
 
 class BudgetPlanCreate(BudgetPlanBase):
-    pass
+    # gt=0 lives here, not on Base: BudgetPlanResponse also inherits Base
+    # (four-schema pattern), and the DB has no CHECK(amount > 0) yet (U1.6) —
+    # a Base-level constraint made every read of a pre-existing/legacy
+    # zero-or-negative row raise ValidationError, not just new writes (found
+    # via CI on PR #27, plan Decision log D112).
+    amount: int = Field(gt=0)
 
 
 class BudgetPlanUpdate(BaseModel):

@@ -2,6 +2,7 @@
 real network (tests/CLAUDE.md, U4.1 AC)."""
 
 import json
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
@@ -244,3 +245,46 @@ async def test_statistics_endpoints(make_expense_json: dict[str, object]) -> Non
     client3 = make_client(_echo(by_tag_json))
     by_tag = await client3.statistics_by_tag()
     assert by_tag[0].total == 1500
+
+
+async def test_statistics_by_period_sends_optional_params_as_query_string(
+    make_expense_json: dict[str, object],
+) -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200, json={"start": "2026-01-01T00:00:00Z", "end": "2026-02-01T00:00:00Z", "total": 0}
+        )
+
+    client = make_client(httpx.MockTransport(handler))
+    category_id = uuid4()
+    tag_id = uuid4()
+    await client.statistics_by_period(
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 2, 1, tzinfo=UTC),
+        category_id=category_id,
+        tag_id=tag_id,
+    )
+
+    query = captured[0].url.params
+    assert query["start"] == "2026-01-01T00:00:00+00:00"
+    assert query["end"] == "2026-02-01T00:00:00+00:00"
+    assert query["category_id"] == str(category_id)
+    assert query["tag_id"] == str(tag_id)
+
+
+async def test_statistics_by_period_omits_params_when_not_given() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200, json={"start": "2026-01-01T00:00:00Z", "end": "2026-02-01T00:00:00Z", "total": 0}
+        )
+
+    client = make_client(httpx.MockTransport(handler))
+    await client.statistics_by_period()
+
+    assert captured[0].url.params == httpx.QueryParams()

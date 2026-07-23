@@ -85,6 +85,22 @@ def test_expense_models_require_category_id() -> None:
     )
     assert response.amount == 1500
     assert len(response.tags) == 1
+    assert response.user_name is None
+
+    named = ExpenseResponse.model_validate(
+        {
+            "id": uuid4(),
+            "amount": 1500,
+            "comment": "Bread",
+            "category_id": category_id,
+            "user_id": uuid4(),
+            "account_id": uuid4(),
+            "created_at": datetime.now(UTC),
+            "updated_at": datetime.now(UTC),
+            "user_name": "Wife",
+        }
+    )
+    assert named.user_name == "Wife"
 
     with pytest.raises(ValueError):
         ExpenseResponse.model_validate(
@@ -120,6 +136,12 @@ def test_budget_plan_models() -> None:
 
     with pytest.raises(ValueError):
         BudgetPlanCreate(category_id=category_id, amount=500_00, notify_threshold=101)
+
+    with pytest.raises(ValueError):
+        BudgetPlanCreate(category_id=category_id, amount=0)
+
+    with pytest.raises(ValueError):
+        BudgetPlanCreate(category_id=category_id, amount=-100)
 
     with pytest.raises(ValueError):
         BudgetPlanResponse.model_validate(

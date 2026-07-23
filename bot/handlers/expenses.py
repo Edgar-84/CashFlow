@@ -190,7 +190,8 @@ async def on_tag_toggled(
     await state.update_data(selected_tag_ids=list(selected))
     await callback.answer()
     if isinstance(callback.message, Message):
-        await callback.message.edit_reply_markup(reply_markup=tags_keyboard(tags, selected))
+        selected_uuids = {UUID(tid) for tid in selected}
+        await callback.message.edit_reply_markup(reply_markup=tags_keyboard(tags, selected_uuids))
 
 
 async def on_tags_done(callback: CallbackQuery, state: FSMContext) -> None:

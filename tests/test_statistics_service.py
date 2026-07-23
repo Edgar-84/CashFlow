@@ -123,6 +123,30 @@ async def test_by_period_scopes_by_account() -> None:
     assert called_account_id == account_id
 
 
+async def test_by_period_accepts_stub_period_and_filter_params_without_error() -> None:
+    """start/end/category_id/tag_id are accepted per the Contracts additive
+    delta but not yet wired — this pins today's stub behavior so the next
+    unit's test change is a deliberate, visible diff."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    in_month = datetime(2026, 7, 5, tzinfo=UTC)
+    expense = make_expense(account_id=account_id, amount=1000, created_at=in_month)
+    service = StatisticsService(FakeExpensePeriodRepo([expense]))
+
+    result = await service.by_period(
+        account_id,
+        now=now,
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 2, 1, tzinfo=UTC),
+        category_id=uuid4(),
+        tag_id=uuid4(),
+    )
+
+    assert result.total == 1000
+    assert result.start == datetime(2026, 7, 1, tzinfo=UTC)
+    assert result.end == datetime(2026, 8, 1, tzinfo=UTC)
+
+
 # --- by_category ---
 
 
