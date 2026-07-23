@@ -109,7 +109,7 @@ family-timezone-correct "current month".
       window, last-month window, category filter, tag filter,
       start>=end → 422; default (no params) still equals current family
       month.
-- [ ] **U1.3 Expense author**: `ExpenseRepository` `get/list/get_by_period/
+- [x] **U1.3 Expense author**: `ExpenseRepository` `get/list/get_by_period/
       get_by_category` JOIN `users.name` → `user_name` in the row dicts.
       AC: @integration tests — user_name populated on all four read paths;
       unit fixtures updated. Model: sonnet (mechanical SQL).
@@ -399,6 +399,18 @@ on U0.1/U0.2 and its own listed units.
   `status.HTTP_422_UNPROCESSABLE_CONTENT` (not the deprecated
   `_ENTITY` alias flagged by this project's starlette version).
 
+- D115 (2026-07-23, U1.3): `ExpenseRepository.get`/`list` no longer delegate to
+  `BaseRepository.get`/`list` — both now run their own `LEFT JOIN users`
+  query (`_SELECT_WITH_AUTHOR` class constant) so `user_name` comes back on
+  every read path, not just `get_by_period`/`get_by_category` (which never
+  went through the base class). `list(**filters)`'s dynamic `WHERE` clause
+  qualifies filter columns as `expenses.<col>` (not bare `<col>`) because
+  `users` has its own `account_id` and `created_at` columns — an unqualified
+  reference would be ambiguous once the JOIN is in the query, not just a
+  style choice. `super().get()` is still used internally in `update()` for
+  the pre-update existence check (no need for the JOIN there, it only reads
+  `id`).
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -500,11 +512,23 @@ on U0.1/U0.2 and its own listed units.
   non-integration tests). Not yet run: reviewer subagent (unit not flagged
   RISKY in the plan) and a live CP6 Telegram check (blocked on U2.3/U2.4,
   not yet implemented).
+- Done: U1.3 (2026-07-23) — `ExpenseRepository.get`/`list`/`get_by_period`/
+  `get_by_category` all now query through a shared `_SELECT_WITH_AUTHOR`
+  (`expenses LEFT JOIN users ON users.id = expenses.user_id`, selecting
+  `users.name AS user_name`) instead of `SELECT * FROM expenses`; `get`/
+  `list` no longer delegate to `BaseRepository` (D115). `create`/`update`
+  already ended their flow with `self.get(id)`, so they pick up `user_name`
+  for free with no changes of their own. Tests: 4 new cases in
+  `tests/test_expense_repo.py` (`user_name` populated via each of the four
+  read paths); `tests/README.md` updated. `verify.sh` green (391 unit tests)
+  and `bash scripts/integration_docker.sh` green (50 integration tests, 16
+  of them in `test_expense_repo.py`). Not flagged RISKY in the plan
+  (mechanical SQL) — no reviewer subagent run.
 - Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands to
   confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
-  (CP1…CP8), NOT strict milestone order. U1.3 (expense author JOIN) is next
-  in the plan's own order; U2.2 landed early per D111, U1.4 through U1.6 and
-  U2.1/U2.1b are still open.
+  (CP1…CP8), NOT strict milestone order. U2.1 (`/expenses` author+category
+  display, needs U1.3's JOIN — now done) is the plan's own next unit; U2.2
+  landed early per D111, U1.4 through U1.6 and U2.1b are still open.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
   stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
   MVP plan's pending items still stand: U4.4b reviewer pass never ran;

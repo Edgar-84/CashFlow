@@ -13,6 +13,14 @@ from repositories.base import BaseRepository
 
 
 class ExpenseRepository(BaseRepository[ExpenseResponse]):
+    # LEFT JOIN (not INNER): a hard-deleted user must not hide their past
+    # expenses — user_name just comes back None (plan Decision log D102).
+    _SELECT_WITH_AUTHOR = """
+        SELECT expenses.*, users.name AS user_name
+        FROM expenses
+        LEFT JOIN users ON users.id = expenses.user_id
+    """
+
     def __init__(self, conn: asyncpg.Connection) -> None:
         super().__init__(conn, table="expenses", model=ExpenseResponse)
 
@@ -40,9 +48,10 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         return [e.model_copy(update={"tags": tags_by_id.get(e.id, [])}) for e in expenses]
 
     async def get(self, id: UUID) -> ExpenseResponse | None:
-        expense = await super().get(id)
-        if expense is None:
+        row = await self._conn.fetchrow(f"{self._SELECT_WITH_AUTHOR} WHERE expenses.id = $1", id)
+        if row is None:
             return None
+        expense = self._model.model_validate(dict(row))
         return (await self._attach_tags([expense]))[0]
 
     async def create(self, data: dict[str, Any]) -> ExpenseResponse:
@@ -81,10 +90,11 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         self, account_id: UUID, start: datetime, end: datetime
     ) -> list[ExpenseResponse]:
         rows = await self._conn.fetch(
-            """
-            SELECT * FROM expenses
-            WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
-            ORDER BY created_at
+            f"""
+            {self._SELECT_WITH_AUTHOR}
+            WHERE expenses.account_id = $1
+              AND expenses.created_at >= $2 AND expenses.created_at < $3
+            ORDER BY expenses.created_at
             """,
             account_id,
             start,
@@ -95,10 +105,10 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
 
     async def get_by_category(self, account_id: UUID, category_id: UUID) -> list[ExpenseResponse]:
         rows = await self._conn.fetch(
-            """
-            SELECT * FROM expenses
-            WHERE account_id = $1 AND category_id = $2
-            ORDER BY created_at
+            f"""
+            {self._SELECT_WITH_AUTHOR}
+            WHERE expenses.account_id = $1 AND expenses.category_id = $2
+            ORDER BY expenses.created_at
             """,
             account_id,
             category_id,
@@ -123,5 +133,13 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         return {row["category_id"]: row["total"] for row in rows}
 
     async def list(self, **filters: Any) -> list[ExpenseResponse]:
-        expenses = await super().list(**filters)
+        if filters:
+            columns = list(filters.keys())
+            where = " AND ".join(f"expenses.{col} = ${i}" for i, col in enumerate(columns, start=1))
+            rows = await self._conn.fetch(
+                f"{self._SELECT_WITH_AUTHOR} WHERE {where}", *filters.values()
+            )
+        else:
+            rows = await self._conn.fetch(self._SELECT_WITH_AUTHOR)
+        expenses = [self._model.model_validate(dict(row)) for row in rows]
         return await self._attach_tags(expenses)

@@ -361,6 +361,82 @@ async def test_sum_by_category_month_scopes_by_account(db_conn: asyncpg.Connecti
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
+async def test_get_populates_user_name(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id, name="Alice")
+    repo = ExpenseRepository(db_conn)
+
+    created = await repo.create(
+        {
+            "amount": 500,
+            "category_id": category_id,
+            "user_id": user.id,
+            "account_id": account_id,
+        }
+    )
+    assert created.user_name == "Alice"
+
+    fetched = await repo.get(created.id)
+    assert fetched is not None
+    assert fetched.user_name == "Alice"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_populates_user_name(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id, name="Bob")
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=category_id)
+    repo = ExpenseRepository(db_conn)
+
+    results = await repo.list(account_id=account_id)
+
+    assert len(results) == 1
+    assert results[0].user_name == "Bob"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_get_by_period_populates_user_name(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id, name="Carol")
+    july_start = datetime(2026, 7, 1, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        created_at=july_start,
+    )
+    repo = ExpenseRepository(db_conn)
+
+    results = await repo.get_by_period(account_id, july_start, august_start)
+
+    assert len(results) == 1
+    assert results[0].user_name == "Carol"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_get_by_category_populates_user_name(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id, name="Dave")
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=category_id)
+    repo = ExpenseRepository(db_conn)
+
+    results = await repo.get_by_category(account_id, category_id)
+
+    assert len(results) == 1
+    assert results[0].user_name == "Dave"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
 async def test_create_with_duplicate_tag_ids_rolls_back_whole_expense(
     db_conn: asyncpg.Connection,
 ) -> None:
