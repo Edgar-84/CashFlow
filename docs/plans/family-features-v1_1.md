@@ -100,7 +100,7 @@ family-timezone-correct "current month".
       AC: hermetic service tests — foreign category / foreign tag /
       mixed own+foreign tags all 404, own ids still pass; API-level test
       per endpoint. RISKY → reviewer subagent (permissions-adjacent).
-- [ ] **U1.2 Statistics: period params + filters**: implement the U0.2
+- [x] **U1.2 Statistics: period params + filters**: implement the U0.2
       signatures — service filters the `get_by_period` fetch window by
       caller-supplied bounds (default `month_bounds(family_tz)`), by_period
       applies optional category/tag filter before aggregation (own_only
@@ -383,6 +383,22 @@ on U0.1/U0.2 and its own listed units.
   U1.1 closes — updated to note `create()` now validates `category_id`
   before that method ever runs, so no redundant check was added there.
 
+- D114 (2026-07-23, U1.2): `family_tz` reaches `StatisticsService` via a
+  constructor arg (`family_tz: str = "UTC"`), set from `get_settings().family_tz`
+  only in `api/deps.py`'s `get_statistics_service` — mirrors
+  `NotificationService(bot_token, ...)` (services/CLAUDE.md: constructor DI,
+  no globals; a service importing `config.get_settings()` itself was
+  rejected). `start`/`end` default independently in `_expenses` (each
+  falls back to its own `month_bounds(now, family_tz)` side if omitted)
+  rather than requiring both-or-neither — simpler and still satisfies
+  "default (no params) = current family month" since the bot always sends
+  both together per D106. `start >= end` → 422 is enforced in
+  `api/statistics.py` (routes validate query params, per this unit's own
+  summary line), not in the service — the service has no HTTP concept and
+  a hermetic service test can't assert a status code anyway. Used
+  `status.HTTP_422_UNPROCESSABLE_CONTENT` (not the deprecated
+  `_ENTITY` alias flagged by this project's starlette version).
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -466,22 +482,37 @@ on U0.1/U0.2 and its own listed units.
   `_validate_tags` does one sequential repo `.get()` per tag id instead of
   a batched lookup (fine at family-app scale, flagged if `tag_ids` ever
   grows large).
+- Done: U1.2 (2026-07-23) — `StatisticsService.__init__` gained
+  `family_tz: str = "UTC"` (wired from `get_settings().family_tz` in
+  `api/deps.py::get_statistics_service`, D114); `_expenses` now uses
+  caller-supplied `start`/`end` (each defaulting independently to
+  `month_bounds(now, family_tz)`) instead of ignoring them; `by_period`
+  applies `category_id`/`tag_id` filters post-fetch, before summing
+  (own_only filter still applied first, unchanged, D35). `api/statistics.py`:
+  all three routes gained optional `start`/`end` query params, `by-period`
+  also `category_id`/`tag_id`; `start >= end` → 422 via a shared
+  `_validate_period` helper (D114). Tests: replaced the stub-pinning test
+  in `test_statistics_service.py` with 5 real ones (custom 3-month window,
+  last-month window, family_tz default wiring proven against a UTC-vs-
+  Belgrade month rollover, category filter, tag filter); added 3 to
+  `test_statistics_api.py` (custom window, category+tag filter, 422 on
+  start>=end). `tests/README.md` updated. `verify.sh` green (391
+  non-integration tests). Not yet run: reviewer subagent (unit not flagged
+  RISKY in the plan) and a live CP6 Telegram check (blocked on U2.3/U2.4,
+  not yet implemented).
 - Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands to
   confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
-  (CP1…CP8), NOT strict milestone order. U1.2 is the next unit that
-  actually wires the statistics stub params (D110) and `family_tz` into
-  `statistics_service`'s default bounds. U2.2 landed early per D111 — U1.2
-  through U1.6 and U2.1/U2.1b are still open ahead of it in the plan's own
-  order.
+  (CP1…CP8), NOT strict milestone order. U1.3 (expense author JOIN) is next
+  in the plan's own order; U2.2 landed early per D111, U1.4 through U1.6 and
+  U2.1/U2.1b are still open.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
   stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
   MVP plan's pending items still stand: U4.4b reviewer pass never ran;
   MVP U6.1 not implemented (U5.1 landed on master, PR #25). New packages
   need `__init__.py` (MVP D7). Never name a repo method after a builtin
-  used in later annotations (MVP D22). `family_tz` is NOT yet wired into
-  any service's default month calc — only `config` + the shared helper
-  exist; U1.2 wires it into `statistics_service` per Contracts (budget/
-  expense notification-check bounds stay UTC unless a later unit adds
-  that — not currently listed). `BudgetPlanUpdate.amount` still lacks
+  used in later annotations (MVP D22). `family_tz` is now wired into
+  `statistics_service`'s default bounds only (D114) — budget/expense
+  notification-check bounds still default to UTC (not currently listed as
+  in-scope for any unit). `BudgetPlanUpdate.amount` still lacks
   `Field(gt=0)` — U1.6 needs to decide whether to add it for PATCH 422s
   (D109).

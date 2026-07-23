@@ -378,7 +378,11 @@ Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeE
 | `test_by_period_no_expenses_is_zero` | No expenses → `total=0`, not an error |
 | `test_by_period_own_user_id_filters_to_own_expenses` | `user_id` filter restricts the sum to that user's expenses |
 | `test_by_period_scopes_by_account` | Excludes another account's expenses |
-| `test_by_period_accepts_stub_period_and_filter_params_without_error` | `start`/`end`/`category_id`/`tag_id` are accepted (Contracts additive delta) but not yet applied — pins today's stub behavior (default month, no filter) |
+| `test_by_period_custom_window_overrides_current_month` | Explicit `start`/`end` replace the default current-month window |
+| `test_by_period_last_month_window` | Explicit `start`/`end` covering the prior month works the same as any custom window |
+| `test_by_period_default_uses_family_tz_not_utc` | No `start`/`end` → default bounds computed from the constructor's `family_tz`, not hardcoded UTC (U1.2 wiring) |
+| `test_by_period_category_filter` | `category_id` restricts the sum to that category, applied before aggregation |
+| `test_by_period_tag_filter` | `tag_id` restricts the sum to expenses carrying that tag, applied before aggregation |
 | `test_by_category_groups_totals_by_category` | `by_category()` groups totals per `category_id`; each `total` is `int` |
 | `test_by_category_own_user_id_filters_to_own_expenses` | `user_id` filter applies before aggregation |
 | `test_by_tag_groups_totals_by_tag` | `by_tag()` groups totals per `tag_id`, incl. an expense tagged with two tags contributing to both |
@@ -399,6 +403,9 @@ Action.READ)`-gated — statistics has no `Resource` enum entry of its own (plan
 | `test_by_category_as_member` | `GET /statistics/by-category` groups totals by category |
 | `test_by_tag_as_member` | `GET /statistics/by-tag` groups totals by tag |
 | `test_statistics_without_auth_is_401` | Missing auth headers → 401 |
+| `test_by_period_custom_window` | `start`/`end` query params (ISO-8601) restrict the aggregate to that window |
+| `test_by_period_category_and_tag_filter` | `category_id`/`tag_id` query params on `by-period` restrict the aggregate |
+| `test_by_period_start_after_end_is_422` | `start >= end` → 422 |
 
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)
 | Test | Checks | Target |

@@ -123,28 +123,96 @@ async def test_by_period_scopes_by_account() -> None:
     assert called_account_id == account_id
 
 
-async def test_by_period_accepts_stub_period_and_filter_params_without_error() -> None:
-    """start/end/category_id/tag_id are accepted per the Contracts additive
-    delta but not yet wired — this pins today's stub behavior so the next
-    unit's test change is a deliberate, visible diff."""
+async def test_by_period_custom_window_overrides_current_month() -> None:
     account_id = uuid4()
     now = datetime(2026, 7, 17, tzinfo=UTC)
-    in_month = datetime(2026, 7, 5, tzinfo=UTC)
-    expense = make_expense(account_id=account_id, amount=1000, created_at=in_month)
-    service = StatisticsService(FakeExpensePeriodRepo([expense]))
+    in_window = datetime(2026, 3, 15, tzinfo=UTC)
+    outside_window = datetime(2026, 7, 5, tzinfo=UTC)
+    e1 = make_expense(account_id=account_id, amount=1000, created_at=in_window)
+    e2 = make_expense(account_id=account_id, amount=9999, created_at=outside_window)
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
 
     result = await service.by_period(
         account_id,
         now=now,
         start=datetime(2026, 1, 1, tzinfo=UTC),
-        end=datetime(2026, 2, 1, tzinfo=UTC),
-        category_id=uuid4(),
-        tag_id=uuid4(),
+        end=datetime(2026, 4, 1, tzinfo=UTC),
     )
 
     assert result.total == 1000
-    assert result.start == datetime(2026, 7, 1, tzinfo=UTC)
-    assert result.end == datetime(2026, 8, 1, tzinfo=UTC)
+    assert result.start == datetime(2026, 1, 1, tzinfo=UTC)
+    assert result.end == datetime(2026, 4, 1, tzinfo=UTC)
+
+
+async def test_by_period_last_month_window() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    last_month = datetime(2026, 6, 15, tzinfo=UTC)
+    this_month = datetime(2026, 7, 5, tzinfo=UTC)
+    e1 = make_expense(account_id=account_id, amount=1200, created_at=last_month)
+    e2 = make_expense(account_id=account_id, amount=9999, created_at=this_month)
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    result = await service.by_period(
+        account_id,
+        now=now,
+        start=datetime(2026, 6, 1, tzinfo=UTC),
+        end=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+
+    assert result.total == 1200
+
+
+async def test_by_period_default_uses_family_tz_not_utc() -> None:
+    """A UTC instant still on the 31st but already the 1st in the family
+    timezone (Europe/Belgrade, UTC+2 in July) must land in the new month's
+    default bounds (mirrors the services/period.py D108 test, now proven
+    through StatisticsService's own constructor wiring rather than a
+    hardcoded 'UTC')."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 31, 22, 0, tzinfo=UTC)  # already Aug 1 00:00 in Belgrade
+    early_august = datetime(2026, 7, 31, 23, 0, tzinfo=UTC)
+    expense = make_expense(account_id=account_id, amount=1000, created_at=early_august)
+    service = StatisticsService(FakeExpensePeriodRepo([expense]), family_tz="Europe/Belgrade")
+
+    result = await service.by_period(account_id, now=now)
+
+    assert result.start == datetime(2026, 7, 31, 22, 0, tzinfo=UTC)
+    assert result.end == datetime(2026, 8, 31, 22, 0, tzinfo=UTC)
+    assert result.total == 1000
+
+
+async def test_by_period_category_filter() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    in_month = datetime(2026, 7, 5, tzinfo=UTC)
+    groceries = uuid4()
+    transport = uuid4()
+    e1 = make_expense(
+        account_id=account_id, category_id=groceries, amount=1000, created_at=in_month
+    )
+    e2 = make_expense(
+        account_id=account_id, category_id=transport, amount=2000, created_at=in_month
+    )
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    result = await service.by_period(account_id, now=now, category_id=groceries)
+
+    assert result.total == 1000
+
+
+async def test_by_period_tag_filter() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    in_month = datetime(2026, 7, 5, tzinfo=UTC)
+    food_tag = uuid4()
+    e1 = make_expense(account_id=account_id, amount=1000, created_at=in_month, tag_ids=[food_tag])
+    e2 = make_expense(account_id=account_id, amount=2000, created_at=in_month, tag_ids=[])
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    result = await service.by_period(account_id, now=now, tag_id=food_tag)
+
+    assert result.total == 1000
 
 
 # --- by_category ---

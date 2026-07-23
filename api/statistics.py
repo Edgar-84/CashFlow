@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from api.deps import PermissionChecker, get_statistics_service
 from models.enums import Action, Resource
@@ -23,13 +24,34 @@ def _own_user_id(request: Request, user: UserResponse) -> UUID | None:
     return user.id if decision.own_only else None
 
 
+def _validate_period(start: datetime | None, end: datetime | None) -> None:
+    """Both bounds are optional independently (Contracts), but if both are
+    given they must describe a non-empty window (plan Decision log D106)."""
+    if start is not None and end is not None and start >= end:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="start must be before end"
+        )
+
+
 @router.get("/by-period", response_model=PeriodTotal)
 async def get_statistics_by_period(
     request: Request,
     user: Annotated[UserResponse, Depends(PermissionChecker(Resource.EXPENSES, Action.READ))],
     service: Annotated[StatisticsService, Depends(get_statistics_service)],
+    start: datetime | None = None,
+    end: datetime | None = None,
+    category_id: UUID | None = None,
+    tag_id: UUID | None = None,
 ) -> PeriodTotal:
-    return await service.by_period(user.account_id, user_id=_own_user_id(request, user))
+    _validate_period(start, end)
+    return await service.by_period(
+        user.account_id,
+        user_id=_own_user_id(request, user),
+        start=start,
+        end=end,
+        category_id=category_id,
+        tag_id=tag_id,
+    )
 
 
 @router.get("/by-category", response_model=list[CategoryTotal])
@@ -37,8 +59,13 @@ async def get_statistics_by_category(
     request: Request,
     user: Annotated[UserResponse, Depends(PermissionChecker(Resource.EXPENSES, Action.READ))],
     service: Annotated[StatisticsService, Depends(get_statistics_service)],
+    start: datetime | None = None,
+    end: datetime | None = None,
 ) -> list[CategoryTotal]:
-    return await service.by_category(user.account_id, user_id=_own_user_id(request, user))
+    _validate_period(start, end)
+    return await service.by_category(
+        user.account_id, user_id=_own_user_id(request, user), start=start, end=end
+    )
 
 
 @router.get("/by-tag", response_model=list[TagTotal])
@@ -46,5 +73,10 @@ async def get_statistics_by_tag(
     request: Request,
     user: Annotated[UserResponse, Depends(PermissionChecker(Resource.EXPENSES, Action.READ))],
     service: Annotated[StatisticsService, Depends(get_statistics_service)],
+    start: datetime | None = None,
+    end: datetime | None = None,
 ) -> list[TagTotal]:
-    return await service.by_tag(user.account_id, user_id=_own_user_id(request, user))
+    _validate_period(start, end)
+    return await service.by_tag(
+        user.account_id, user_id=_own_user_id(request, user), start=start, end=end
+    )
