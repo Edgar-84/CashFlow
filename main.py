@@ -9,6 +9,7 @@ from api.budgets import router as budgets_router
 from api.categories import router as categories_router
 from api.deps import close_http_client
 from api.expenses import router as expenses_router
+from api.permissions import router as permissions_router
 from api.statistics import router as statistics_router
 from api.tags import router as tags_router
 from api.users import router as users_router
@@ -49,6 +50,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     app.include_router(users_router)
+    app.include_router(permissions_router)
     app.include_router(categories_router)
     app.include_router(tags_router)
     app.include_router(expenses_router)

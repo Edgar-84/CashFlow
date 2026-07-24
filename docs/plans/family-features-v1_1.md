@@ -121,7 +121,7 @@ family-timezone-correct "current month".
       recipient #2 still notified AND expense still created; single-user
       account → 1 send (no dupes). RISKY → reviewer subagent
       (notification path, MVP D3/D36 invariants).
-- [ ] **U1.5 Permissions API** (human decision D103):
+- [x] **U1.5 Permissions API** (human decision D103):
       `services/permission_service.py` (account-scoped: target user must
       belong to the admin's account, 404 otherwise — D29 pattern;
       UniqueViolation → `ConflictError`, closes MVP D24's flagged gap) +
@@ -561,13 +561,48 @@ on U0.1/U0.2 and its own listed units.
   one WARN (sequential sends' latency — fixed via `asyncio.gather`, see
   D116) and one NIT (doc note that the creator is included in the fan-out
   by design — left as-is, already implied by D104's "every member").
+- Done: U1.5 (2026-07-24, human decision D103) — `services/permission_service.py`
+  (new): `PermissionService` — admin-scoped CRUD over `permissions` override rows.
+  The `permissions` table has no `account_id` column of its own, so scoping
+  goes through the row's target user via a single `_owned_by_account(user_id,
+  account_id)` choke point (`user_repo.get()` + `account_id` match) used by
+  `get`/`create`/`update`/`delete`: foreign/unknown target → `NotFoundError`
+  (404, not 403 — MVP D29 pattern, no cross-account probing). `create()`
+  catches `asyncpg.UniqueViolationError` on duplicate `(user_id, resource)` →
+  `ConflictError` (409), closing MVP D24's flagged gap. `PermissionUpdate`
+  already excluded `user_id`/`resource` (MVP contract) — a row can't be
+  reassigned to a different target/resource post-creation, so scoping can't
+  be escaped via update. `repositories/permission_repo.py` gained
+  `list_by_account(account_id)` (JOIN on `users`, same shape as U1.3's
+  expense-author JOIN — `permissions` has no `account_id` of its own for the
+  admin "grid" list either). `api/permissions.py` (new): CRUD router gated by
+  `require_admin` (symmetric with `api/users.py` — `permissions`/`users` are
+  documented as having no override-row/own_only concept, api/CLAUDE.md
+  predates this unit). Wired in `api/deps.py::get_permission_service` and
+  `main.py`. Tests: 11 new cases in `tests/test_permission_service.py`
+  (fakes), 14 new cases in `tests/test_permissions_api.py` (real app +
+  `app.dependency_overrides`, incl. `test_granted_override_flips_a_
+  subsequent_permission_decision` — the AC's end-to-end assert: admin grants
+  `can_update=True` via `POST /permissions`, a member's `PATCH
+  /categories/{id}` flips 403→200 through the real `PermissionChecker` path,
+  same fake repo instance shared via overrides, not manually seeded) + 2 new
+  integration cases in `tests/test_permission_repo.py` (`list_by_account`
+  scoping, empty-account case). `tests/README.md` updated. `verify.sh` green
+  (419 non-integration tests) and `bash scripts/integration_docker.sh` green
+  (52 integration tests). Flagged RISKY in the plan (permissions) — reviewed
+  by the reviewer subagent same session: **APPROVE**, no BLOCKER/WARN; two
+  NITs not fixed (HTTP tests don't exercise `require_admin`-403 on every
+  single verb, only list/create/update — same dependency proven three ways
+  already; `get`/`update`/`delete` do two sequential repo round trips instead
+  of one JOINed query, mirrors `UserService`'s existing pattern, fine at
+  family-app scale).
 - Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands to
   confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
   (CP1…CP8), NOT strict milestone order. CP3 (family fan-out, needs U1.4 —
   now done) and CP4 (`/expenses` author+category display + delete, needs
   U1.3 — also done) are both live-testable now; U2.1 is the plan's next
-  coding unit. U2.2 landed early per D111; U1.5, U1.6, U2.1b and later are
-  still open.
+  coding unit. U2.2 landed early per D111; U1.6, U2.1b and later are
+  still open (U1.5 now done).
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
   stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
   MVP plan's pending items still stand: U4.4b reviewer pass never ran;

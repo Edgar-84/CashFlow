@@ -100,6 +100,8 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 | `test_get_by_user_and_resource_returns_row` | `get_by_user_and_resource()` returns the matching row |
 | `test_get_by_user_and_resource_returns_none_when_no_row` | Returns `None` when no permission row exists for that (user, resource) |
 | `test_get_by_user_and_resource_scopes_by_user` | Excludes another user's permission row for the same resource |
+| `test_list_by_account_returns_only_that_accounts_rows` | `list_by_account()` JOINs on `users` and excludes another account's rows (U1.5) |
+| `test_list_by_account_returns_empty_when_no_rows` | Returns `[]` for an account with no override rows |
 
 ## API dependency tests (`test_deps.py`) → [`api/deps.py`](../api/deps.py)
 Hermetic — repositories replaced with in-memory fakes via
@@ -145,6 +147,26 @@ Hermetic — `UserRepositoryProtocol` replaced with an in-memory `FakeUserRepo`.
 | `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
 | `test_delete_removes_user` | `delete()` removes the row via the repo |
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
+
+## Service tests (`test_permission_service.py`) → [`services/permission_service.py`](../services/permission_service.py)
+Hermetic — `PermissionRepositoryProtocol`/`UserRepositoryProtocol` replaced with
+in-memory fakes (`FakePermissionRepo`, `FakeUserRepo`). No DB. `permissions` rows
+carry no `account_id` of their own — scoping goes through the row's target user
+(D103: target must belong to the admin's account, 404 otherwise, MVP D29 pattern).
+
+| Test | Checks |
+|---|---|
+| `test_list_scopes_to_account` | `list()` excludes another account's rows (via the target user's `account_id`) |
+| `test_get_missing_permission_is_not_found` | `get()` on an unknown id raises `NotFoundError` |
+| `test_get_foreign_account_permission_is_not_found` | `get()` on a row whose target user belongs to another account raises `NotFoundError` |
+| `test_create_permission_for_own_account_user` | `create()` succeeds when the target user belongs to the caller's account |
+| `test_create_permission_for_foreign_account_user_is_not_found` | `create()` with a foreign-account target raises `NotFoundError`, not 403 (no cross-account probing) |
+| `test_create_permission_for_unknown_user_is_not_found` | `create()` with a nonexistent `user_id` raises `NotFoundError` |
+| `test_create_duplicate_user_resource_is_conflict` | A duplicate `(user_id, resource)` (`asyncpg.UniqueViolationError` from the repo) is translated to `ConflictError` |
+| `test_update_applies_partial_changes` | `update()` applies a partial `PermissionUpdate`, leaves other fields untouched |
+| `test_update_foreign_account_permission_is_not_found` | `update()` on a foreign-account target's row raises `NotFoundError` |
+| `test_delete_removes_row` | `delete()` removes the row via the repo |
+| `test_delete_foreign_account_permission_is_not_found` | `delete()` on a foreign-account target's row raises `NotFoundError` |
 
 ## Service tests (`test_category_service.py`) → [`services/category_service.py`](../services/category_service.py)
 Hermetic — `CategoryRepositoryProtocol` replaced with an in-memory `FakeCategoryRepo`. No DB.
@@ -374,6 +396,27 @@ Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replac
 | `test_update_user_as_viewer_is_403` | Viewer `PATCH /users/{id}` → 403 |
 | `test_delete_user_as_admin` | `DELETE /users/{id}` → 204, row removed |
 | `test_delete_user_as_member_is_403` | Member `DELETE /users/{id}` → 403 |
+
+## API/route tests (`test_permissions_api.py`) → [`api/permissions.py`](../api/permissions.py)
+Hermetic — the real app (`client`/`app` fixtures) with `PermissionRepository`/
+`UserRepository` replaced by in-memory fakes via `app.dependency_overrides`. No DB.
+
+| Test | Checks |
+|---|---|
+| `test_list_permissions_as_admin_returns_account_grid` | Admin `GET /permissions` returns only the admin's account rows (the "grid", AC) |
+| `test_list_permissions_as_member_is_403` | Member `GET /permissions` → 403 (`require_admin` gate) |
+| `test_list_permissions_as_viewer_is_403` | Viewer `GET /permissions` → 403 |
+| `test_create_permission_as_admin` | `POST /permissions` → 201 |
+| `test_create_permission_as_member_is_403` | Member `POST /permissions` → 403 |
+| `test_create_duplicate_user_resource_is_409` | Duplicate `(user_id, resource)` → 409 (AC) |
+| `test_create_permission_for_foreign_account_user_is_404` | Target user in another account → 404, not 403 (AC, D103) |
+| `test_get_permission_as_admin` | Admin `GET /permissions/{id}` returns the row |
+| `test_get_foreign_account_permission_is_404` | Row whose target user is in another account → 404 |
+| `test_update_permission_as_admin` | `PATCH /permissions/{id}` applies a partial update |
+| `test_update_permission_as_viewer_is_403` | Viewer `PATCH /permissions/{id}` → 403 |
+| `test_delete_permission_as_admin` | `DELETE /permissions/{id}` → 204, row removed |
+| `test_delete_foreign_account_permission_is_404` | `DELETE` on a foreign-account target's row → 404 |
+| `test_granted_override_flips_a_subsequent_permission_decision` | End-to-end (AC): a member's `PATCH /categories/{id}` is 403 by default; admin grants `can_update=True` via `POST /permissions`; the same `PATCH /categories/{id}` then returns 200 — proves the override row observably changes a subsequent `PermissionChecker` decision on a different resource's route |
 
 ## Service tests (`test_statistics_service.py`) → [`services/statistics_service.py`](../services/statistics_service.py)
 Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeExpensePeriodRepo`. No DB.

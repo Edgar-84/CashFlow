@@ -39,6 +39,7 @@ from services.budget_service import BudgetService
 from services.category_service import CategoryService
 from services.expense_service import ExpenseService
 from services.notification_service import NotificationService
+from services.permission_service import PermissionService
 from services.statistics_service import StatisticsService
 from services.tag_service import TagService
 from services.user_service import UserService
@@ -90,6 +91,13 @@ def get_category_service(
     category_repo: Annotated[CategoryRepository, Depends(get_category_repo)],
 ) -> CategoryService:
     return CategoryService(category_repo)
+
+
+def get_permission_service(
+    permission_repo: Annotated[PermissionRepository, Depends(get_permission_repo)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repo)],
+) -> PermissionService:
+    return PermissionService(permission_repo, user_repo)
 
 
 def get_tag_service(
