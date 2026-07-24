@@ -121,10 +121,11 @@ def get_expense_service(
     budget_plan_repo: Annotated[BudgetPlanRepository, Depends(get_budget_plan_repo)],
     category_repo: Annotated[CategoryRepository, Depends(get_category_repo)],
     tag_repo: Annotated[TagRepository, Depends(get_tag_repo)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repo)],
     notification_service: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> ExpenseService:
     return ExpenseService(
-        expense_repo, budget_plan_repo, category_repo, tag_repo, notification_service
+        expense_repo, budget_plan_repo, category_repo, tag_repo, user_repo, notification_service
     )
 
 

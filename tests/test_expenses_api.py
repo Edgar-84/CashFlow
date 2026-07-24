@@ -258,11 +258,16 @@ async def test_create_expense_triggers_notification_when_threshold_crossed(
     client: AsyncClient,
     app: FastAPI,
     override_repos: OverrideRepos,
+    admin: UserResponse,
     member: UserResponse,
+    other_member: UserResponse,
+    viewer: UserResponse,
     account_id: UUID,
 ) -> None:
     # U3.1: end-to-end wiring of the notification-flow invariant
     # (services/CLAUDE.md) through the real get_expense_service factory.
+    # U1.4/D104: fan-out to every account member, not just the creator —
+    # override_repos wires get_user_repo with all four account fixtures.
     override_repos([])
     category_id = uuid4()
     category = CategoryResponse(
@@ -282,7 +287,13 @@ async def test_create_expense_triggers_notification_when_threshold_crossed(
     )
 
     assert response.status_code == 201
-    assert len(notification_service.sent) == 1
+    assert len(notification_service.sent) == 4
+    assert {sent_user.id for sent_user, _, _ in notification_service.sent} == {
+        admin.id,
+        member.id,
+        other_member.id,
+        viewer.id,
+    }
 
 
 async def test_update_own_expense_as_member(

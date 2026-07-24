@@ -113,7 +113,7 @@ family-timezone-correct "current month".
       get_by_category` JOIN `users.name` → `user_name` in the row dicts.
       AC: @integration tests — user_name populated on all four read paths;
       unit fixtures updated. Model: sonnet (mechanical SQL).
-- [ ] **U1.4 Notification fan-out to all members** (human decision D104):
+- [x] **U1.4 Notification fan-out to all members** (human decision D104):
       `ExpenseService` gains a narrow `UserRepositoryProtocol`
       (`list(account_id=...)`) dep; `_check_budget_and_notify` sends to
       EVERY account user, each send individually best-effort.
@@ -411,6 +411,21 @@ on U0.1/U0.2 and its own listed units.
   the pre-update existence check (no need for the JOIN there, it only reads
   `id`).
 
+- D116 (2026-07-24, U1.4): `_check_budget_and_notify` fans out to
+  `user_repo.list(account_id=...)` (new narrow `UserRepositoryProtocol`,
+  `user_repo` constructor dep, wired last before `notification_service` in
+  both `ExpenseService.__init__` and `api/deps.py::get_expense_service`) via
+  `asyncio.gather` over a new `_notify_member` helper, not a sequential
+  `for` loop — an account with N members must not add up to N Bot-API
+  round-trips of latency on `POST /expenses` (reviewer WARN, same session).
+  Each `_notify_member` call keeps its own try/except so one recipient's
+  failure can't cancel or block the others' sends (`gather`'s default
+  fail-fast would otherwise let one exception dequeue the rest) — the
+  per-recipient log record stays id-only, no exception object (MVP D36).
+  The outer try/except in `_check_budget_and_notify` is unchanged and still
+  covers `check_limit`/`budget_plan_repo.list`/`category_repo.get`/
+  `user_repo.list` failures as one best-effort unit (root CLAUDE.md D3).
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -524,11 +539,35 @@ on U0.1/U0.2 and its own listed units.
   and `bash scripts/integration_docker.sh` green (50 integration tests, 16
   of them in `test_expense_repo.py`). Not flagged RISKY in the plan
   (mechanical SQL) — no reviewer subagent run.
+- Done: U1.4 (2026-07-24) — `ExpenseService` gained a narrow
+  `UserRepositoryProtocol` (`list(account_id=...)`) and `user_repo`
+  constructor dep (wired in `api/deps.py::get_expense_service` via the
+  existing `get_user_repo`); `_check_budget_and_notify` now fans out to
+  every account member (D104) via `asyncio.gather` over a new
+  `_notify_member` helper (concurrent, not sequential — D116), each
+  recipient's send independently best-effort (its own try/except, id-only
+  log fields per MVP D36) so one Bot-API failure can't cancel or skip the
+  rest. `services/CLAUDE.md`'s notification-flow invariant doc updated to
+  describe the fan-out step. Tests: 3 new cases in
+  `tests/test_expense_service.py` (2 members → 2 sends; one recipient's
+  send failure → the other still notified AND expense still created;
+  single-member account → 1 send, no dupes) + 3 pre-existing notify tests
+  updated to seed the new `FakeUserRepo`; `tests/test_expenses_api.py`'s
+  end-to-end notification test updated to expect all 4 account fixtures
+  (admin/member/other_member/viewer) notified, not just the creator.
+  `tests/README.md` updated. `verify.sh` green (394 non-integration
+  tests). Flagged RISKY in the plan (notification path, MVP D3/D36
+  invariants) — reviewed by the reviewer subagent same session: APPROVE,
+  one WARN (sequential sends' latency — fixed via `asyncio.gather`, see
+  D116) and one NIT (doc note that the creator is included in the fan-out
+  by design — left as-is, already implied by D104's "every member").
 - Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands to
   confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
-  (CP1…CP8), NOT strict milestone order. U2.1 (`/expenses` author+category
-  display, needs U1.3's JOIN — now done) is the plan's own next unit; U2.2
-  landed early per D111, U1.4 through U1.6 and U2.1b are still open.
+  (CP1…CP8), NOT strict milestone order. CP3 (family fan-out, needs U1.4 —
+  now done) and CP4 (`/expenses` author+category display + delete, needs
+  U1.3 — also done) are both live-testable now; U2.1 is the plan's next
+  coding unit. U2.2 landed early per D111; U1.5, U1.6, U2.1b and later are
+  still open.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
   stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
   MVP plan's pending items still stand: U4.4b reviewer pass never ran;

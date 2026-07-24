@@ -25,11 +25,16 @@ On `ExpenseService.create(...)`:
 1. Save expense via `expense_repo.create(...)`.
 2. `fill_pct = await budget_plan_repo.check_limit(account_id, category_id, start=..., end=...)`
    (`None` if no plan exists for that category — skip the notification check).
-3. If `fill_pct is not None and fill_pct >= budget_plan.notify_threshold`:
-   `await notification_service.send(user, category, fill_pct)`.
+3. If `fill_pct is not None and fill_pct >= budget_plan.notify_threshold`: fan out to
+   EVERY member of the account (`await user_repo.list(account_id=...)`), calling
+   `await notification_service.send(member, category, fill_pct)` once per member
+   (plan Decision log D104 — `NotificationService.send`'s per-user signature is
+   unchanged, the fan-out loop lives in `ExpenseService`).
 4. Return the created `ExpenseResponse`.
 
-Failure to send a notification must NOT roll back the expense. Log and continue.
+Failure to send a notification must NOT roll back the expense. Each recipient's send
+is independently best-effort — one member's failure (e.g. Bot API 403) must not skip
+the rest. Log and continue.
 
 ## Rules
 - Async everywhere (`async def` + `await`).

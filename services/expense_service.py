@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Protocol
@@ -53,6 +54,15 @@ class TagLookupRepositoryProtocol(Protocol):
     async def get(self, id: UUID) -> TagResponse | None: ...
 
 
+class UserRepositoryProtocol(Protocol):
+    """Narrow slice of user_repo — just enough to fan out budget-threshold
+    notifications to every member of the caller's account (plan Decision
+    log D104: fan-out is ExpenseService's job, NotificationService.send's
+    signature stays per-user)."""
+
+    async def list(self, **filters: Any) -> list[UserResponse]: ...
+
+
 class NotificationSenderProtocol(Protocol):
     """Duck-typed interface for notification_service (tests/CLAUDE.md) — lets
     unit tests pass an in-memory fake instead of the real NotificationService,
@@ -80,12 +90,14 @@ class ExpenseService:
         budget_plan_repo: BudgetPlanQueryRepositoryProtocol,
         category_repo: CategoryLookupRepositoryProtocol,
         tag_repo: TagLookupRepositoryProtocol,
+        user_repo: UserRepositoryProtocol,
         notification_service: NotificationSenderProtocol,
     ) -> None:
         self._expense_repo = expense_repo
         self._budget_plan_repo = budget_plan_repo
         self._category_repo = category_repo
         self._tag_repo = tag_repo
+        self._user_repo = user_repo
         self._notification_service = notification_service
 
     async def get(self, expense_id: UUID, account_id: UUID) -> ExpenseResponse:
@@ -128,6 +140,11 @@ class ExpenseService:
         triggered it") is applied to the whole check, not just the HTTP send
         inside NotificationService — a DB hiccup on the budget/category
         lookup must not undo an expense that already committed.
+
+        Plan Decision log D104: notifications fan out to EVERY account
+        member (not just the caller), each send individually best-effort —
+        one recipient's send failure (e.g. they never pressed /start on the
+        prod bot, 403 from Bot API) must not skip the rest.
         """
         try:
             start, end = month_bounds()
@@ -152,11 +169,38 @@ class ExpenseService:
             category = await self._category_repo.get(expense.category_id)
             if category is None:
                 return
-            await self._notification_service.send(user, category, fill_pct)
+            members = await self._user_repo.list(account_id=user.account_id)
+            # Concurrent, not sequential: N members must not add up to N Bot
+            # API round-trips of latency to expense creation. Each send is
+            # still individually best-effort — _notify_member never raises.
+            await asyncio.gather(
+                *(self._notify_member(member, expense, category, fill_pct) for member in members)
+            )
         except Exception:
             logger.exception(
                 "Budget notification check failed",
                 extra={"expense_id": str(expense.id), "account_id": str(user.account_id)},
+            )
+
+    async def _notify_member(
+        self,
+        member: UserResponse,
+        expense: ExpenseResponse,
+        category: CategoryResponse,
+        fill_pct: float,
+    ) -> None:
+        try:
+            await self._notification_service.send(member, category, fill_pct)
+        except Exception:
+            # Per-recipient best-effort (D104) — log field set never includes
+            # the exception object (bot-token leak class, MVP D36).
+            logger.exception(
+                "Budget notification send failed",
+                extra={
+                    "expense_id": str(expense.id),
+                    "account_id": str(member.account_id),
+                    "recipient_user_id": str(member.id),
+                },
             )
 
     async def update(
