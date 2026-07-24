@@ -247,6 +247,21 @@ async def test_update_budget_plan_as_admin(
     assert response.json()["amount"] == 20_000
 
 
+async def test_update_budget_plan_with_non_positive_amount_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    admin: UserResponse,
+    plan: BudgetPlanResponse,
+) -> None:
+    override_repos([plan])
+
+    response = await client.patch(
+        f"/budgets/{plan.id}", headers=auth_headers(admin.tg_id), json={"amount": 0}
+    )
+
+    assert response.status_code == 422
+
+
 async def test_update_budget_plan_as_member_is_403(
     client: AsyncClient,
     override_repos: OverrideRepos,

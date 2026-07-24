@@ -44,7 +44,8 @@ CREATE TABLE expenses (
   user_id     UUID NOT NULL REFERENCES users(id),
   account_id  UUID NOT NULL REFERENCES accounts(id),
   created_at  TIMESTAMPTZ DEFAULT now(),
-  updated_at  TIMESTAMPTZ DEFAULT now()
+  updated_at  TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT expenses_amount_positive CHECK (amount > 0)
 );
 
 CREATE TABLE expense_tags (
@@ -62,7 +63,8 @@ CREATE TABLE budget_plans (
   notify_threshold   INT  NOT NULL DEFAULT 80, -- percent (0-100)
   created_at         TIMESTAMPTZ DEFAULT now(),
   updated_at         TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (category_id, account_id, period)
+  UNIQUE (category_id, account_id, period),
+  CONSTRAINT budget_plans_amount_positive CHECK (amount > 0)
 );
 
 CREATE TABLE permissions (

@@ -437,6 +437,34 @@ async def test_get_by_category_populates_user_name(db_conn: asyncpg.Connection) 
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
+async def test_zero_or_negative_amount_rejected_by_db_check(db_conn: asyncpg.Connection) -> None:
+    """DB CHECK (amount > 0) on expenses (U1.6)."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+
+    # each attempt runs in its own savepoint: a CHECK violation aborts the
+    # current (sub)transaction, so without this the second attempt would
+    # raise InFailedSQLTransactionError instead of the expected error.
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with db_conn.transaction():
+            await make_expense(
+                db_conn, account_id=account_id, user_id=user.id, category_id=category_id, amount=0
+            )
+
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with db_conn.transaction():
+            await make_expense(
+                db_conn,
+                account_id=account_id,
+                user_id=user.id,
+                category_id=category_id,
+                amount=-100,
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
 async def test_create_with_duplicate_tag_ids_rolls_back_whole_expense(
     db_conn: asyncpg.Connection,
 ) -> None:

@@ -296,6 +296,39 @@ async def test_create_expense_triggers_notification_when_threshold_crossed(
     }
 
 
+async def test_create_expense_with_non_positive_amount_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    category: CategoryResponse,
+) -> None:
+    override_repos([])
+
+    response = await client.post(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        json={"amount": 0, "category_id": str(category.id)},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_update_expense_with_non_positive_amount_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    expense = make_expense(account_id=account_id, user_id=member.id)
+    override_repos([expense])
+
+    response = await client.patch(
+        f"/expenses/{expense.id}", headers=auth_headers(member.tg_id), json={"amount": -100}
+    )
+
+    assert response.status_code == 422
+
+
 async def test_update_own_expense_as_member(
     client: AsyncClient,
     override_repos: OverrideRepos,

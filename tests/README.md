@@ -13,8 +13,8 @@ check defaults/validation. No DB, no network.
 | `test_user_models` | `UserCreate` defaults `role` to `MEMBER`; `UserUpdate` fields optional; `UserResponse` round-trips `account_id` | [`models/user.py`](../models/user.py) |
 | `test_category_models` | Create/Update/Response basic field round-trip | [`models/category.py`](../models/category.py) |
 | `test_tag_models` | Create/Update/Response basic field round-trip | [`models/tag.py`](../models/tag.py) |
-| `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags`; `user_name` defaults `None` and round-trips when supplied | [`models/expense.py`](../models/expense.py) |
-| `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=80`); `notify_threshold` rejects >100; `amount<=0` (zero and negative) rejected on `Create`; `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
+| `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags`; `user_name` defaults `None` and round-trips when supplied; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6) | [`models/expense.py`](../models/expense.py) |
+| `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=80`); `notify_threshold` rejects >100; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6 added `Update`); `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
 | `test_permission_models` | `PermissionCreate.own_only` defaults `True`; `PermissionUpdate` fields optional | [`models/permission.py`](../models/permission.py) |
 | `test_enums_have_expected_members` | `Role`/`Resource`/`Action` enum membership matches spec | [`models/enums.py`](../models/enums.py) |
 | `test_domain_errors_are_typed_and_distinct` | `NotFoundError`/`PermissionDeniedError`/`LimitExceededWarning` are distinct `DomainError` subclasses | [`models/errors.py`](../models/errors.py) |
@@ -76,6 +76,7 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 | `test_list_populates_user_name` | `list()` populates `user_name` |
 | `test_get_by_period_populates_user_name` | `get_by_period()` populates `user_name` |
 | `test_get_by_category_populates_user_name` | `get_by_category()` populates `user_name` |
+| `test_zero_or_negative_amount_rejected_by_db_check` | DB `CHECK (amount > 0)` on `expenses` rejects a direct zero/negative insert with `asyncpg.CheckViolationError` (U1.6) |
 
 ### `test_budget_plan_repo.py` → [`repositories/budget_plan_repo.py`](../repositories/budget_plan_repo.py)
 | Test | Checks |
@@ -86,9 +87,9 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 | `test_delete_missing_returns_false` | `delete()` on a missing id returns `False` |
 | `test_check_limit_no_plan_returns_none` | `check_limit()` returns `None` when no plan exists for the (account, category) pair |
 | `test_check_limit_fill_percentage` | Parametrized: 0% spent, exactly at `notify_threshold` (80%), over 100% — fill percentage computed from `BIGINT` sums, no `Decimal`/float leak into the sum itself |
-| `test_check_limit_zero_amount_plan_returns_none` | A plan with `amount=0` returns `None` instead of raising `ZeroDivisionError` |
 | `test_check_limit_ignores_expenses_outside_period` | Expenses outside `[start, end)` are excluded from the fill percentage |
 | `test_check_limit_scopes_by_account` | `check_limit()` excludes another account's expenses and plans |
+| `test_zero_amount_plan_rejected_by_db_check` | DB `CHECK (amount > 0)` on `budget_plans` rejects a direct zero/negative insert with `asyncpg.CheckViolationError` — supersedes the old `check_limit()`-tolerates-zero test now that such a row can't exist (U1.6, closes D112's flagged gap) |
 
 ### `test_permission_repo.py` → [`repositories/permission_repo.py`](../repositories/permission_repo.py)
 | Test | Checks |
@@ -321,6 +322,8 @@ first time — plan Decision log handoff note).
 | `test_create_expense_with_foreign_category_is_404` | U1.1 end-to-end: `POST /expenses` with a `category_id` the fake `category_repo` doesn't have → 404 |
 | `test_create_expense_with_foreign_tag_is_404` | `POST /expenses` with a `tag_ids` entry the fake `tag_repo` doesn't have → 404 |
 | `test_update_expense_with_foreign_category_is_404` | `PATCH /expenses/{id}` with an unknown `category_id` → 404 |
+| `test_create_expense_with_non_positive_amount_is_422` | `POST /expenses` with `amount=0` → 422 (model validation, U1.6) |
+| `test_update_expense_with_non_positive_amount_is_422` | `PATCH /expenses/{id}` with `amount=-100` → 422 (U1.6) |
 
 ## API/route tests (`test_categories_api.py`) → [`api/categories.py`](../api/categories.py)
 Hermetic — the real app with `CategoryRepository`/`UserRepository`/`PermissionRepository`
@@ -371,6 +374,7 @@ Hermetic — the real app with `BudgetPlanRepository`/`ExpenseRepository`/`UserR
 | `test_create_budget_plan_as_member_is_403` | Member `POST /budgets` → 403 (default matrix: no create) |
 | `test_create_duplicate_budget_plan_as_admin_is_409` | Duplicate `(category_id, account_id, period)` → 409 (`ConflictError` mapped by `main.py`'s handler) |
 | `test_update_budget_plan_as_admin` | Admin `PATCH /budgets/{id}` applies a partial update |
+| `test_update_budget_plan_with_non_positive_amount_is_422` | `PATCH /budgets/{id}` with `amount=0` → 422 (model validation, U1.6 — closes the `BudgetPlanUpdate` gap flagged by D109) |
 | `test_update_budget_plan_as_member_is_403` | Member `PATCH /budgets/{id}` → 403 |
 | `test_delete_budget_plan_as_admin` | Admin `DELETE /budgets/{id}` → 204, row removed |
 | `test_delete_budget_plan_as_member_is_403` | Member `DELETE /budgets/{id}` → 403 |
