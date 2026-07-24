@@ -528,6 +528,8 @@ match on).
 | `test_budgets_keyboard_renders_one_button_per_plan_with_category_name` | One button per plan, text = its category's name, callback_data = `budget:<uuid hex>` (U2.2 AC) |
 | `test_budgets_keyboard_unknown_category_falls_back_to_placeholder` | A plan whose category isn't in the passed-in name map renders "Unknown" instead of a blank/crashing label |
 | `test_budget_callback_round_trips_the_uuid` | `BudgetCallback.pack()`/`unpack()` round-trips the UUID |
+| `test_expenses_keyboard_renders_one_button_per_item_labeled_by_caller` | One button per `(id, label)` pair, one per row, callback_data = `expense:<uuid hex>` (U2.1 AC) |
+| `test_expense_callback_round_trips_the_uuid` | `ExpenseCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` |
 
 ## Bot tests (`test_bot_handlers_expenses.py`) → [`bot/handlers/expenses.py`](../bot/handlers/expenses.py)
@@ -540,7 +542,10 @@ Message/CallbackQuery objects and a real `FSMContext` over aiogram's
 handler calls can't see (U4.3 AC: FSM walkthrough — happy path, cancel
 mid-flow, invalid amount input re-prompts; amount parsed to minor units in one
 helper with its own tests). Also covers the `/expenses` list view (U4.3b) —
-a plain command handler, no FSM/real-dispatch tests needed.
+a plain command handler, no FSM/real-dispatch tests needed — and the U2.1
+`/deleteexpense` picker → detail view → delete-with-confirm `DeleteExpense`
+FSM (double-tap guard: a replayed confirm call after state is already
+cleared must not issue a second `delete_expense`).
 
 | Test | Checks |
 |---|---|
@@ -557,12 +562,25 @@ a plain command handler, no FSM/real-dispatch tests needed.
 | `test_prompt_tags_backend_error_shows_friendly_message_and_keeps_state` | A `list_tags` transport failure shows a human message and leaves state in place (retryable) |
 | `test_cancel_command_reaches_cancel_handler_not_amount_catchall` | Through a real `Dispatcher`: `/cancel` while in `AddExpense.amount` reaches `on_cancel_command`, not the catch-all `on_amount_entered` (AC: cancel mid-flow) |
 | `test_cancel_command_reaches_cancel_handler_not_comment_catchall` | Same, for `AddExpense.comment` — regression test for a router-registration-order bug found in review |
-| `test_list_expenses_renders_non_empty_list` | `/expenses` with data shows each expense's date and minor-units-formatted amount (AC) |
+| `test_list_expenses_renders_non_empty_list` | `/expenses` with data shows each expense's date, minor-units-formatted amount, category name, and author (U2.1 AC) |
+| `test_list_expenses_unknown_category_falls_back_to_placeholder` | An expense whose category isn't in the fetched category list renders "Unknown" instead of a blank/crashing label |
 | `test_list_expenses_renders_empty_list` | `/expenses` with no expenses shows "No expenses yet." instead of an empty message (AC) |
 | `test_list_expenses_shows_comment_when_present` | Comment is rendered for expenses that have one, omitted for those that don't (AC) |
 | `test_list_expenses_backend_error_shows_friendly_message` | A `list_expenses` transport failure shows a human message instead of raising |
+| `test_list_expenses_categories_backend_error_shows_friendly_message` | A `list_categories` transport failure (needed for the category-name column, U2.1) shows a human message instead of raising |
 | `test_list_expenses_truncates_long_list_and_long_comments` | Long lists/comments are truncated so the rendered message stays under Telegram's 4096-char limit (review fix) |
+| `test_delete_expense_picker_shows_recent_expenses` | `/deleteexpense` shows the 10 most recent expenses newest-first, regardless of the order `list_expenses()` returned them (U2.1 AC) |
+| `test_delete_expense_picker_no_expenses` | `/deleteexpense` with no expenses shows "No expenses to delete yet." and never enters the FSM |
+| `test_delete_expense_picker_backend_error_shows_friendly_message` | A `list_expenses` transport failure shows a human message instead of raising |
+| `test_delete_expense_selected_shows_detail_view_with_confirm` | Picking an expense shows date/category/amount/comment/author/tags plus a Confirm/Cancel keyboard (U2.1 AC: picker → detail → delete) |
+| `test_delete_expense_selected_unknown_id_reprompts` | A stale/unknown `expense_id` in the callback re-prompts instead of crashing, stays in `DeleteExpense.select` |
+| `test_delete_expense_confirmed_happy_path` | Confirming calls `delete_expense` once, strips the keyboard before showing "Expense deleted.", clears state (U2.1 AC) |
+| `test_delete_expense_confirmed_error_shows_friendly_message` | 403/404 from `delete_expense` show "permission"/"no longer exists" messages, not a traceback (U2.1 AC, parametrized) |
+| `test_delete_expense_double_tap_issues_single_api_call` | Calling the confirm handler twice (simulating a double-tap) issues exactly one `delete_expense` call; the second call is a no-op (U2.1 AC) |
+| `test_delete_expense_cancelled_clears_state` | The Cancel button clears FSM state and shows "Cancelled." |
 | `test_expenses_command_reaches_list_handler_not_amount_catchall` | Through a real `Dispatcher`: `/expenses` while in `AddExpense.amount` reaches `cmd_list_expenses`, not the catch-all `on_amount_entered` (review fix, D39-precedent registration-order regression test) |
+| `test_deleteexpense_command_reaches_delete_handler_not_amount_catchall` | Through a real `Dispatcher`: `/deleteexpense` while in `AddExpense.amount` reaches `cmd_delete_expense`, not the catch-all `on_amount_entered` (U2.1 AC: registration-order test, D39/D40 precedent) |
+| `test_cancel_command_reaches_cancel_handler_from_delete_select_state` | Through a real `Dispatcher`: `/cancel` while in `DeleteExpense.select` reaches `on_cancel_command` (proves the widened `StateFilter(AddExpense, DeleteExpense)` registration) |
 
 ## Bot tests (`test_bot_handlers_categories.py`) → [`bot/handlers/categories.py`](../bot/handlers/categories.py)
 Hermetic — a `FakeCategoryBackendClient` stands in for `bot/client.py`'s

@@ -17,7 +17,7 @@ shadowing `/cancel`) that calling handler functions directly cannot see.
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -29,8 +29,8 @@ from aiogram.types import Chat, Message, Update
 from aiogram.types import User as TelegramUser
 
 from bot.handlers import expenses as h
-from bot.keyboards import CategoryCallback, TagCallback
-from bot.states import AddExpense
+from bot.keyboards import CategoryCallback, ExpenseCallback, TagCallback
+from bot.states import AddExpense, DeleteExpense
 from models.category import CategoryResponse
 from models.expense import ExpenseCreate, ExpenseResponse
 from models.tag import TagResponse
@@ -75,6 +75,7 @@ class FakeBackendClient:
         self.tags = tags if tags is not None else [make_tag()]
         self.expenses = expenses if expenses is not None else []
         self.created: list[ExpenseCreate] = []
+        self.deleted: list[UUID] = []
 
     async def list_categories(self) -> list[CategoryResponse]:
         return self.categories
@@ -89,11 +90,25 @@ class FakeBackendClient:
     async def list_expenses(self) -> list[ExpenseResponse]:
         return self.expenses
 
+    async def delete_expense(self, expense_id: UUID) -> None:
+        self.deleted.append(expense_id)
+
 
 class FailingBackendClient(FakeBackendClient):
     async def create_expense(self, data: ExpenseCreate) -> ExpenseResponse:
         request = httpx.Request("POST", "http://test/expenses")
         response = httpx.Response(500, request=request)
+        raise httpx.HTTPStatusError("boom", request=request, response=response)
+
+
+class FailingDeleteBackendClient(FakeBackendClient):
+    def __init__(self, status_code: int, expenses: list[ExpenseResponse] | None = None) -> None:
+        super().__init__(expenses=expenses)
+        self._status_code = status_code
+
+    async def delete_expense(self, expense_id: UUID) -> None:
+        request = httpx.Request("DELETE", f"http://test/expenses/{expense_id}")
+        response = httpx.Response(self._status_code, request=request)
         raise httpx.HTTPStatusError("boom", request=request, response=response)
 
 
@@ -313,8 +328,15 @@ async def test_prompt_tags_backend_error_shows_friendly_message_and_keeps_state(
 
 
 async def test_list_expenses_renders_non_empty_list() -> None:
-    expense = make_expense(amount=1250, comment=None, created_at=datetime(2026, 7, 18, tzinfo=UTC))
-    client = FakeBackendClient(expenses=[expense])
+    category = make_category("Groceries")
+    expense = make_expense(
+        amount=1250,
+        comment=None,
+        category_id=category.id,
+        user_name="Alice",
+        created_at=datetime(2026, 7, 18, tzinfo=UTC),
+    )
+    client = FakeBackendClient(categories=[category], expenses=[expense])
     message = make_message("/expenses")
 
     await h.cmd_list_expenses(message, client)
@@ -323,6 +345,18 @@ async def test_list_expenses_renders_non_empty_list() -> None:
     text = message.answer.await_args.args[0]
     assert "12.50" in text
     assert "2026-07-18" in text
+    assert "Groceries" in text
+    assert "Alice" in text
+
+
+async def test_list_expenses_unknown_category_falls_back_to_placeholder() -> None:
+    expense = make_expense(category_id=uuid4())
+    client = FakeBackendClient(categories=[make_category()], expenses=[expense])
+    message = make_message("/expenses")
+
+    await h.cmd_list_expenses(message, client)
+
+    assert "Unknown" in message.answer.await_args.args[0]
 
 
 async def test_list_expenses_renders_empty_list() -> None:
@@ -363,6 +397,21 @@ async def test_list_expenses_backend_error_shows_friendly_message() -> None:
     assert "couldn't reach" in message.answer.await_args.args[0].lower()
 
 
+async def test_list_expenses_categories_backend_error_shows_friendly_message() -> None:
+    class FailingCategoriesClient(FakeBackendClient):
+        async def list_categories(self) -> list[CategoryResponse]:
+            request = httpx.Request("GET", "http://test/categories")
+            raise httpx.ConnectError("boom", request=request)
+
+    client = FailingCategoriesClient(expenses=[make_expense()])
+    message = make_message("/expenses")
+
+    await h.cmd_list_expenses(message, client)
+
+    message.answer.assert_awaited_once()
+    assert "couldn't reach" in message.answer.await_args.args[0].lower()
+
+
 async def test_list_expenses_truncates_long_list_and_long_comments() -> None:
     many = [make_expense() for _ in range(h._MAX_EXPENSES_SHOWN + 5)]
     long_comment = make_expense(comment="x" * 500)
@@ -375,6 +424,169 @@ async def test_list_expenses_truncates_long_list_and_long_comments() -> None:
     assert len(text) < 4096
     assert "and 6 more not shown" in text
     assert "x" * 500 not in text
+
+
+# -- delete flow: picker -> detail view -> delete-with-confirm --------------
+
+
+async def test_delete_expense_picker_shows_recent_expenses() -> None:
+    category = make_category("Groceries")
+    old = make_expense(
+        amount=100, category_id=category.id, created_at=datetime(2026, 1, 1, tzinfo=UTC)
+    )
+    recent = make_expense(
+        amount=1250, category_id=category.id, created_at=datetime(2026, 7, 18, tzinfo=UTC)
+    )
+    client = FakeBackendClient(categories=[category], expenses=[old, recent])
+    state = make_state()
+    message = make_message("/deleteexpense")
+
+    await h.cmd_delete_expense(message, state, client)
+
+    assert await state.get_state() == DeleteExpense.select.state
+    message.answer.assert_awaited_once()
+    markup = message.answer.await_args.kwargs["reply_markup"]
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    # Newest first, regardless of the order client.list_expenses() returned.
+    assert buttons[0].callback_data == f"expense:{recent.id.hex}"
+    assert buttons[1].callback_data == f"expense:{old.id.hex}"
+
+
+async def test_delete_expense_picker_no_expenses() -> None:
+    client = FakeBackendClient(expenses=[])
+    state = make_state()
+    message = make_message("/deleteexpense")
+
+    await h.cmd_delete_expense(message, state, client)
+
+    assert await state.get_state() is None
+    message.answer.assert_awaited_once_with("No expenses to delete yet.")
+
+
+async def test_delete_expense_picker_backend_error_shows_friendly_message() -> None:
+    class FailingListExpensesClient(FakeBackendClient):
+        async def list_expenses(self) -> list[ExpenseResponse]:
+            request = httpx.Request("GET", "http://test/expenses")
+            raise httpx.ConnectError("boom", request=request)
+
+    state = make_state()
+    message = make_message("/deleteexpense")
+
+    await h.cmd_delete_expense(message, state, FailingListExpensesClient())
+
+    assert await state.get_state() is None
+    assert "couldn't reach" in message.answer.await_args.args[0].lower()
+
+
+async def test_delete_expense_selected_shows_detail_view_with_confirm() -> None:
+    category = make_category("Groceries")
+    tag = make_tag("urgent")
+    expense = make_expense(
+        amount=1250,
+        comment="lunch",
+        category_id=category.id,
+        user_name="Alice",
+        tags=[tag],
+    )
+    client = FakeBackendClient(categories=[category], expenses=[expense])
+    state = make_state()
+    await h.cmd_delete_expense(make_message("/deleteexpense"), state, client)
+
+    callback = make_callback()
+    await h.on_delete_expense_selected(callback, ExpenseCallback(expense_id=expense.id), state)
+
+    assert await state.get_state() == DeleteExpense.confirm.state
+    callback.message.edit_text.assert_awaited_once()
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Groceries" in text
+    assert "12.50" in text
+    assert "lunch" in text
+    assert "Alice" in text
+    assert "urgent" in text
+    markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    assert [b.callback_data for b in markup.inline_keyboard[0]] == [
+        "expense:confirm",
+        "expense:cancel",
+    ]
+
+
+async def test_delete_expense_selected_unknown_id_reprompts() -> None:
+    client = FakeBackendClient(expenses=[make_expense()])
+    state = make_state()
+    await h.cmd_delete_expense(make_message("/deleteexpense"), state, client)
+
+    callback = make_callback()
+    await h.on_delete_expense_selected(callback, ExpenseCallback(expense_id=uuid4()), state)
+
+    assert await state.get_state() == DeleteExpense.select.state
+    callback.answer.assert_awaited_once()
+    assert callback.answer.await_args.kwargs.get("show_alert") is True
+
+
+async def test_delete_expense_confirmed_happy_path() -> None:
+    expense = make_expense()
+    client = FakeBackendClient(expenses=[expense])
+    state = make_state()
+    await state.set_state(DeleteExpense.confirm)
+    await state.update_data(delete_target_id=str(expense.id))
+
+    callback = make_callback()
+    await h.on_delete_expense_confirmed(callback, state, client)
+
+    assert await state.get_state() is None
+    assert client.deleted == [expense.id]
+    # Keyboard dropped before the delete text is shown (double-tap guard).
+    callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+    callback.message.edit_text.assert_awaited_once_with("Expense deleted.")
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_fragment"),
+    [(403, "permission"), (404, "no longer exists")],
+)
+async def test_delete_expense_confirmed_error_shows_friendly_message(
+    status_code: int, expected_fragment: str
+) -> None:
+    expense = make_expense()
+    client = FailingDeleteBackendClient(status_code, expenses=[expense])
+    state = make_state()
+    await state.set_state(DeleteExpense.confirm)
+    await state.update_data(delete_target_id=str(expense.id))
+
+    callback = make_callback()
+    await h.on_delete_expense_confirmed(callback, state, client)
+
+    text = callback.message.edit_text.await_args.args[0]
+    assert expected_fragment in text.lower()
+
+
+async def test_delete_expense_double_tap_issues_single_api_call() -> None:
+    expense = make_expense()
+    client = FakeBackendClient(expenses=[expense])
+    state = make_state()
+    await state.set_state(DeleteExpense.confirm)
+    await state.update_data(delete_target_id=str(expense.id))
+
+    first = make_callback()
+    second = make_callback()
+    await h.on_delete_expense_confirmed(first, state, client)
+    await h.on_delete_expense_confirmed(second, state, client)
+
+    assert client.deleted == [expense.id]
+    second.message.edit_reply_markup.assert_not_awaited()
+    second.message.edit_text.assert_not_awaited()
+
+
+async def test_delete_expense_cancelled_clears_state() -> None:
+    state = make_state()
+    await state.set_state(DeleteExpense.confirm)
+    await state.update_data(delete_target_id=str(uuid4()))
+
+    callback = make_callback()
+    await h.on_delete_expense_cancelled(callback, state)
+
+    assert await state.get_state() is None
+    callback.message.edit_text.assert_awaited_once_with("Cancelled.")
 
 
 # -- real-dispatch regression tests: catch router-registration-order bugs ---
@@ -442,3 +654,34 @@ async def test_expenses_command_reaches_list_handler_not_amount_catchall() -> No
         )
 
     mocked_answer.assert_awaited_once_with("No expenses yet.")
+
+
+async def test_deleteexpense_command_reaches_delete_handler_not_amount_catchall() -> None:
+    dp = make_router_dispatcher()
+    bot = Bot(token="42:TEST-token")
+    tg_id = 555
+    context = dp.fsm.resolve_context(bot, chat_id=tg_id, user_id=tg_id)
+    assert context is not None
+    await context.set_state(AddExpense.amount)
+
+    with patch.object(Message, "answer", new=AsyncMock()) as mocked_answer:
+        await dp.feed_update(
+            bot, make_text_update(1, tg_id, "/deleteexpense"), client=FakeBackendClient()
+        )
+
+    mocked_answer.assert_awaited_once_with("No expenses to delete yet.")
+
+
+async def test_cancel_command_reaches_cancel_handler_from_delete_select_state() -> None:
+    dp = make_router_dispatcher()
+    bot = Bot(token="42:TEST-token")
+    tg_id = 555
+    context = dp.fsm.resolve_context(bot, chat_id=tg_id, user_id=tg_id)
+    assert context is not None
+    await context.set_state(DeleteExpense.select)
+
+    with patch.object(Message, "answer", new=AsyncMock()) as mocked_answer:
+        await dp.feed_update(bot, make_text_update(1, tg_id, "/cancel"), client=FakeBackendClient())
+
+    assert await context.get_state() is None
+    mocked_answer.assert_awaited_once_with("Cancelled.")

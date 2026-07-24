@@ -141,7 +141,7 @@ family-timezone-correct "current month".
       proven by a direct-SQL @integration test. Model: sonnet.
 
 ### M2 — Bot
-- [ ] **U2.1 Expense picker + delete flow**: `/expenses` lines gain
+- [x] **U2.1 Expense picker + delete flow**: `/expenses` lines gain
       author (`user_name`, requirement #7) and category name; new
       inline-keyboard expense picker (recent N) → detail view →
       Delete-with-confirm (guard against double-tap: answer + drop
@@ -461,6 +461,45 @@ on U0.1/U0.2 and its own listed units.
   Supabase prod if any existing row already violates the new CHECK; needs a
   one-time prod check before deploying, no local way to verify).
 
+- D118 (2026-07-24, U2.1): no backend/contract changes needed — `client.py`
+  already wraps `get_expense`/`delete_expense` (U4.1) and `ExpenseResponse`
+  already carries `user_name` (U1.3) and `category_id`; the unit is pure
+  `bot/` addition. New `/deleteexpense` command (mirrors `/deletebudget`/
+  `/deletecategory` naming) drives a new `DeleteExpense` StatesGroup
+  (`select` → `confirm`) rather than folding the picker into `/expenses`
+  itself — `/expenses` stays the plain read-only list (now with category
+  name + author appended per line, both resolved via a `list_categories()`
+  call added alongside the existing `list_expenses()` fetch). Picker keyboard
+  (`expenses_keyboard`, `bot/keyboards.py`) takes `list[tuple[UUID, str]]`
+  (caller-formatted label) rather than a list of `ExpenseResponse` like
+  `categories_keyboard`/`budgets_keyboard` do with named entities — expenses
+  have no name, and money-formatting the label is `bot/handlers/expenses.py`'s
+  job (`_format_amount`), not `keyboards.py`'s; duplicating that formatting
+  one-liner into the supposedly-pure keyboards module would be worse than one
+  extra tuple param. Picker capped at 10 most-recent (`_MAX_PICKER_SHOWN`,
+  separate from `_MAX_EXPENSES_SHOWN=30` used by the text list) and sorted by
+  `created_at` descending in the handler itself — the backend doesn't yet
+  guarantee newest-first order (that's U2.5's `ORDER BY created_at DESC`,
+  still open), so "recent N" can't assume it. The detail view before delete
+  reuses the existing generic `confirm_keyboard()` (✅/❌) rather than a
+  bespoke keyboard — its `CONFIRM_CALLBACK`/`CANCEL_CALLBACK` string constants
+  are scoped to whichever `StatesGroup` state the filter matches, so reusing
+  them for `DeleteExpense.confirm` alongside `AddExpense.confirm` causes no
+  collision. Double-tap guard (AC): `on_delete_expense_confirmed` reads
+  `delete_target_id` from state, calls `client.delete_expense` (single trip,
+  unlike U1.4's fan-out — deletion has one actor, not N notification
+  recipients), then clears state and strips the keyboard (`edit_reply_markup
+  (reply_markup=None)`) *before* the delete call so a near-simultaneous second
+  tap has nothing to hit; a *replayed* handler call (state already cleared,
+  `delete_target_id` missing) is a no-op guard rather than a crash — this is
+  what the AC's double-tap test actually exercises (calling the handler twice
+  in sequence), since a real double-tap on an already-answered/keyboard-
+  stripped button wouldn't even re-reach aiogram's dispatch in practice.
+  `/cancel`'s existing `StateFilter(AddExpense)` registration widened to
+  `StateFilter(AddExpense, DeleteExpense)` (aiogram's `StateFilter` accepts
+  multiple `StatesGroup`s as varargs, matching any) so bailing out mid-picker
+  works the same as every other FSM flow in this file.
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -656,13 +695,44 @@ on U0.1/U0.2 and its own listed units.
   first pass (plan hygiene only, see D117) → addressed by this STATE entry
   itself; one real WARN (deploy-safety, unresolved — see Gotchas below)
   left for the human, no local way to check prod data.
-- Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands to
-  confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
-  (CP1…CP8), NOT strict milestone order. CP3 (family fan-out, needs U1.4 —
-  now done) and CP4 (`/expenses` author+category display + delete, needs
-  U1.3 — also done) are both live-testable now; U2.1 is the plan's next
-  coding unit. U2.2 landed early per D111; U2.1b and later M2/M3 units are
-  still open (U1.5, U1.6 now done — all of M1 is complete).
+- Done: U2.1 (2026-07-24) — `/expenses` lines now append `[category name]`
+  (looked up via a new `list_categories()` call alongside `list_expenses()`)
+  and ` by <user_name>` when present. New `/deleteexpense` command: picker
+  (10 most-recent, sorted client-side by `created_at` desc — D118) →
+  detail view (date/category/amount/comment/author/tags) with a Delete/Cancel
+  confirm (reuses `confirm_keyboard()`) → delete, with a double-tap guard
+  (drop keyboard + clear state before the `delete_expense` call; a replayed
+  call with no `delete_target_id` left in state is a no-op, D118). New
+  `DeleteExpense` StatesGroup (`bot/states.py`); `ExpenseCallback` +
+  `expenses_keyboard` (`bot/keyboards.py`, takes caller-formatted
+  `list[tuple[UUID, str]]`, D118); `/cancel` registration widened to cover
+  both `AddExpense` and `DeleteExpense` states. No backend/contract changes
+  (client already had `delete_expense`, `ExpenseResponse` already had
+  `user_name`). Tests: 2 new in `tests/test_bot_keyboards.py`
+  (`expenses_keyboard`, `ExpenseCallback` round-trip); in
+  `tests/test_bot_handlers_expenses.py` — list-view tests updated for the
+  new category+author format, 1 new (unknown-category placeholder), 1 new
+  (categories-fetch-failure friendly message); delete flow — picker
+  (recent-N + sort, empty, backend error), select (detail view content,
+  unknown id reprompt), confirm (happy path, 403/404 friendly messages via
+  `pytest.mark.parametrize`, double-tap → single `delete_expense` call),
+  cancel, plus 2 real-`Dispatcher` registration-order tests (`/deleteexpense`
+  reaches its handler not `AddExpense.amount`'s catch-all; `/cancel` reaches
+  the cancel handler from `DeleteExpense.select`). `tests/README.md` updated.
+  `verify.sh` green (438 non-integration tests) and
+  `bash scripts/integration_docker.sh` green (53 integration tests, unchanged
+  — no repo/service/API files touched by this unit). Not flagged RISKY in the
+  plan — no reviewer subagent run yet.
+- Next: CP4 (`/expenses` author+category display + delete, needs U1.3 +
+  U2.1 — both now done) is live-testable. Recommended: run the reviewer
+  subagent on U2.1 before/alongside CP4 (not flagged RISKY, but touches the
+  first delete-with-confirm bot flow — worth a second pair of eyes), then
+  CP0 live MVP test (if not already done) → CP1 → follow Live-test
+  checkpoints order (CP1…CP8), NOT strict milestone order. U2.1b (expense
+  edit flow) is the plan's next coding unit — same picker/detail-view shape
+  as U2.1 but ending in an edit FSM instead of delete. U2.2 landed early per
+  D111; later M2/M3 units are still open (U1.1–U1.6 now done — all of M1 is
+  complete).
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Stop-and-ask
   gates: U1.6 (migrations/versions/) done, human-approved; U2.4 (uv.lock)
   still open. MVP plan's pending items still stand: U4.4b reviewer pass

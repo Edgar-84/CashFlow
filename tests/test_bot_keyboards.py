@@ -13,10 +13,12 @@ from bot.keyboards import (
     TAGS_DONE_CALLBACK,
     BudgetCallback,
     CategoryCallback,
+    ExpenseCallback,
     TagCallback,
     budgets_keyboard,
     categories_keyboard,
     confirm_keyboard,
+    expenses_keyboard,
     tags_keyboard,
 )
 from models.budget_plan import BudgetPlanResponse
@@ -123,6 +125,23 @@ def test_budget_callback_round_trips_the_uuid() -> None:
     packed = BudgetCallback(budget_plan_id=plan.id).pack()
 
     assert BudgetCallback.unpack(packed).budget_plan_id == plan.id
+
+
+def test_expenses_keyboard_renders_one_button_per_item_labeled_by_caller() -> None:
+    id1, id2 = uuid4(), uuid4()
+
+    buttons = flatten(expenses_keyboard([(id1, "07-18 12.50"), (id2, "07-17 5.00")]))
+
+    assert [b.text for b in buttons] == ["07-18 12.50", "07-17 5.00"]
+    assert buttons[0].callback_data == f"expense:{id1.hex}"
+    assert buttons[1].callback_data == f"expense:{id2.hex}"
+
+
+def test_expense_callback_round_trips_the_uuid() -> None:
+    expense_id = uuid4()
+    packed = ExpenseCallback(expense_id=expense_id).pack()
+
+    assert ExpenseCallback.unpack(packed).expense_id == expense_id
 
 
 def test_confirm_keyboard_renders_confirm_and_cancel() -> None:
