@@ -1,7 +1,10 @@
 """Expense-creation FSM (bot/CLAUDE.md canonical flow):
 category -> amount -> [comment] -> [tags] -> confirm.
 Also hosts the `/expenses` list view (U4.3b, plan Decision log D39) — a
-plain command handler, no FSM state involved.
+plain command handler, no FSM state involved — and the `/deleteexpense`
+picker -> detail view -> delete-with-confirm flow (U2.1, `DeleteExpense`
+StatesGroup), which reuses `confirm_keyboard()`'s generic Confirm/Cancel
+buttons rather than a bespoke keyboard.
 
 FSM state stores fetched CategoryResponse/TagResponse objects directly (not
 just ids) so a callback (category pick, tag toggle) can look up display
@@ -35,12 +38,14 @@ from bot.keyboards import (
     CONFIRM_CALLBACK,
     TAGS_DONE_CALLBACK,
     CategoryCallback,
+    ExpenseCallback,
     TagCallback,
     categories_keyboard,
     confirm_keyboard,
+    expenses_keyboard,
     tags_keyboard,
 )
-from bot.states import AddExpense
+from bot.states import AddExpense, DeleteExpense
 from models.category import CategoryResponse
 from models.expense import ExpenseCreate, ExpenseResponse
 from models.tag import TagResponse
@@ -56,6 +61,7 @@ class ExpenseBackendClient(Protocol):
     async def list_tags(self) -> list[TagResponse]: ...
     async def create_expense(self, data: ExpenseCreate) -> ExpenseResponse: ...
     async def list_expenses(self) -> list[ExpenseResponse]: ...
+    async def delete_expense(self, expense_id: UUID) -> None: ...
 
 
 def parse_amount_to_minor_units(text: str) -> int:
@@ -246,13 +252,29 @@ async def on_cancel_command(message: Message, state: FSMContext) -> None:
 # TelegramBadRequest, surfacing as a raw error instead of a friendly message).
 _MAX_EXPENSES_SHOWN = 30
 _MAX_COMMENT_CHARS = 100
+# Telegram caps inline keyboards at ~100 buttons, but a picker this long would
+# be unusable to scroll — kept far below the cap (plan Risks section).
+_MAX_PICKER_SHOWN = 10
+
+_BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
 
 
-def _format_expenses_list(expenses: list[ExpenseResponse]) -> str:
+def _error_message(exc: httpx.HTTPStatusError) -> str:
+    if exc.response.status_code == 403:
+        return "You don't have permission to do that."
+    if exc.response.status_code == 404:
+        return "That expense no longer exists."
+    return "Something went wrong. Please try again."
+
+
+def _format_expenses_list(expenses: list[ExpenseResponse], category_names: dict[UUID, str]) -> str:
     lines = ["Your expenses:"]
     shown = expenses[:_MAX_EXPENSES_SHOWN]
     for expense in shown:
-        line = f"{expense.created_at:%Y-%m-%d} — {_format_amount(expense.amount)}"
+        category_name = category_names.get(expense.category_id, "Unknown")
+        line = f"{expense.created_at:%Y-%m-%d} — {_format_amount(expense.amount)} [{category_name}]"
+        if expense.user_name:
+            line += f" by {expense.user_name}"
         if expense.comment:
             comment = expense.comment
             if len(comment) > _MAX_COMMENT_CHARS:
@@ -270,24 +292,149 @@ async def cmd_list_expenses(message: Message, client: ExpenseBackendClient) -> N
         expenses = await client.list_expenses()
     except httpx.HTTPError:
         logger.exception("Failed to fetch expenses")
-        await message.answer("Couldn't reach the backend. Please try again in a moment.")
+        await message.answer(_BACKEND_UNREACHABLE)
         return
     if not expenses:
         await message.answer("No expenses yet.")
         return
-    await message.answer(_format_expenses_list(expenses))
+    try:
+        categories = await client.list_categories()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch categories")
+        await message.answer(_BACKEND_UNREACHABLE)
+        return
+    category_names = {category.id: category.name for category in categories}
+    await message.answer(_format_expenses_list(expenses, category_names))
+
+
+# -- delete flow: picker -> detail view -> delete-with-confirm ---------------
+
+
+def _format_expense_detail(expense: ExpenseResponse, category_name: str) -> str:
+    lines = [
+        f"Date: {expense.created_at:%Y-%m-%d}",
+        f"Category: {category_name}",
+        f"Amount: {_format_amount(expense.amount)}",
+    ]
+    if expense.comment:
+        lines.append(f"Comment: {expense.comment}")
+    if expense.user_name:
+        lines.append(f"Added by: {expense.user_name}")
+    if expense.tags:
+        lines.append(f"Tags: {', '.join(tag.name for tag in expense.tags)}")
+    return "\n".join(lines)
+
+
+async def cmd_delete_expense(
+    message: Message, state: FSMContext, client: ExpenseBackendClient
+) -> None:
+    try:
+        expenses = await client.list_expenses()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch expenses")
+        await message.answer(_BACKEND_UNREACHABLE)
+        return
+    if not expenses:
+        await message.answer("No expenses to delete yet.")
+        return
+    try:
+        categories = await client.list_categories()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch categories")
+        await message.answer(_BACKEND_UNREACHABLE)
+        return
+    category_names = {category.id: category.name for category in categories}
+    # Sorted here rather than relying on the backend's return order: U2.5 is
+    # the unit that adds `ORDER BY created_at DESC` repo-side (plan D40 flag),
+    # so "recent N" can't yet assume the API already returns newest-first.
+    recent = sorted(expenses, key=lambda expense: expense.created_at, reverse=True)
+    recent = recent[:_MAX_PICKER_SHOWN]
+    await state.set_state(DeleteExpense.select)
+    await state.update_data(
+        expenses_by_id={str(expense.id): expense for expense in recent},
+        category_names=category_names,
+    )
+    items = [
+        (expense.id, f"{expense.created_at:%m-%d} {_format_amount(expense.amount)}")
+        for expense in recent
+    ]
+    await message.answer("Pick an expense to delete:", reply_markup=expenses_keyboard(items))
+
+
+async def on_delete_expense_selected(
+    callback: CallbackQuery, callback_data: ExpenseCallback, state: FSMContext
+) -> None:
+    data = await state.get_data()
+    expenses_by_id: dict[str, ExpenseResponse] = data.get("expenses_by_id", {})
+    expense = expenses_by_id.get(str(callback_data.expense_id))
+    if expense is None:
+        await callback.answer("Unknown expense, please pick again.", show_alert=True)
+        return
+    category_names: dict[UUID, str] = data.get("category_names", {})
+    category_name = category_names.get(expense.category_id, "Unknown")
+    await state.update_data(delete_target_id=str(expense.id))
+    await state.set_state(DeleteExpense.confirm)
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            "Delete this expense?\n\n" + _format_expense_detail(expense, category_name),
+            reply_markup=confirm_keyboard(),
+        )
+
+
+async def on_delete_expense_confirmed(
+    callback: CallbackQuery, state: FSMContext, client: ExpenseBackendClient
+) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    target_id = data.get("delete_target_id")
+    # A double-tap replays this handler after the first tap already cleared
+    # state below — with no target left to act on, do nothing rather than
+    # issuing a second delete_expense call (plan AC: double-tap -> single
+    # API call; same guard shape U2.5 retrofits to the add-expense Confirm).
+    if target_id is None:
+        return
+    await state.clear()
+    if isinstance(callback.message, Message):
+        # Drop the keyboard before the API call so a near-simultaneous second
+        # tap has nothing left to hit.
+        await callback.message.edit_reply_markup(reply_markup=None)
+    try:
+        await client.delete_expense(UUID(target_id))
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Failed to delete expense")
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(_error_message(exc))
+        return
+    except httpx.HTTPError:
+        logger.exception("Failed to delete expense")
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(_BACKEND_UNREACHABLE)
+        return
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text("Expense deleted.")
+
+
+async def on_delete_expense_cancelled(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await callback.answer("Cancelled")
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text("Cancelled.")
 
 
 def create_router() -> Router:
     router = Router(name="expenses")
     router.message.register(cmd_add_expense, Command("add"))
     router.message.register(cmd_list_expenses, Command("expenses"))
+    router.message.register(cmd_delete_expense, Command("deleteexpense"))
     # /cancel must be registered before the catch-all per-state text handlers
     # below (on_amount_entered, on_comment_entered) — aiogram dispatches to the
     # first handler whose filters match in registration order, and those two
     # handlers have no command exclusion, so a later-registered /cancel handler
     # would never be reached while in the amount/comment states.
-    router.message.register(on_cancel_command, StateFilter(AddExpense), Command("cancel"))
+    router.message.register(
+        on_cancel_command, StateFilter(AddExpense, DeleteExpense), Command("cancel")
+    )
     router.callback_query.register(
         on_category_chosen, AddExpense.category, CategoryCallback.filter()
     )
@@ -299,5 +446,14 @@ def create_router() -> Router:
     router.callback_query.register(on_confirm, AddExpense.confirm, F.data == CONFIRM_CALLBACK)
     router.callback_query.register(
         on_cancel_callback, StateFilter(AddExpense), F.data == CANCEL_CALLBACK
+    )
+    router.callback_query.register(
+        on_delete_expense_selected, DeleteExpense.select, ExpenseCallback.filter()
+    )
+    router.callback_query.register(
+        on_delete_expense_confirmed, DeleteExpense.confirm, F.data == CONFIRM_CALLBACK
+    )
+    router.callback_query.register(
+        on_delete_expense_cancelled, DeleteExpense.confirm, F.data == CANCEL_CALLBACK
     )
     return router

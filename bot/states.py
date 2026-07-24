@@ -38,3 +38,8 @@ class BudgetManage(StatesGroup):
     update_amount = State()
     update_threshold = State()
     delete_select = State()
+
+
+class DeleteExpense(StatesGroup):
+    select = State()
+    confirm = State()

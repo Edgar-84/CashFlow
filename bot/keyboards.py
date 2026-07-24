@@ -29,6 +29,10 @@ class BudgetCallback(CallbackData, prefix="budget"):
     budget_plan_id: UUID
 
 
+class ExpenseCallback(CallbackData, prefix="expense"):
+    expense_id: UUID
+
+
 TAGS_DONE_CALLBACK = "tags:done"
 CONFIRM_CALLBACK = "expense:confirm"
 CANCEL_CALLBACK = "expense:cancel"
@@ -69,6 +73,19 @@ def budgets_keyboard(
         name = category_names.get(plan.category_id, "Unknown")
         builder.button(text=name, callback_data=BudgetCallback(budget_plan_id=plan.id))
     builder.adjust(2)
+    return builder.as_markup()
+
+
+def expenses_keyboard(items: list[tuple[UUID, str]]) -> InlineKeyboardMarkup:
+    """Recent-expense picker (U2.1) — labeled by the caller-formatted
+    "date amount" string since expenses have no name to display (unlike
+    categories_keyboard/budgets_keyboard, which show entities with a name).
+    One button per row: labels are longer than a category/tag name and
+    Telegram truncates wide multi-column rows unpredictably."""
+    builder = InlineKeyboardBuilder()
+    for expense_id, label in items:
+        builder.button(text=label, callback_data=ExpenseCallback(expense_id=expense_id))
+    builder.adjust(1)
     return builder.as_markup()
 
 
