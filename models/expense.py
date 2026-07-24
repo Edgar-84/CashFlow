@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from models.tag import TagResponse
 
@@ -13,11 +13,16 @@ class ExpenseBase(BaseModel):
 
 
 class ExpenseCreate(ExpenseBase):
+    # gt=0 lives here, not on Base: ExpenseResponse also inherits Base
+    # (four-schema pattern) — a Base-level constraint would make reading
+    # back a pre-existing zero-or-negative row raise ValidationError, not
+    # just reject new writes (same reasoning as BudgetPlanCreate, D112).
+    amount: int = Field(gt=0)
     tag_ids: list[UUID] = []
 
 
 class ExpenseUpdate(BaseModel):
-    amount: int | None = None
+    amount: int | None = Field(default=None, gt=0)
     comment: str | None = None
     category_id: UUID | None = None
     tag_ids: list[UUID] | None = None

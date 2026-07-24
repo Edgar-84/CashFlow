@@ -132,7 +132,7 @@ family-timezone-correct "current month".
       override row observably changes a subsequent PermissionChecker
       decision (end-to-end assert). RISKY → reviewer subagent
       (permissions). /effort high.
-- [ ] **U1.6 amount > 0 migration** ⚠ STOP-AND-ASK GATE: new Alembic
+- [x] **U1.6 amount > 0 migration** ⚠ STOP-AND-ASK GATE: new Alembic
       revision adding `CHECK (amount > 0)` to `budget_plans` AND
       `expenses` — `migrations/versions/` is on the do-not-edit list, the
       session must get explicit human approval before creating the file.
@@ -426,6 +426,41 @@ on U0.1/U0.2 and its own listed units.
   covers `check_limit`/`budget_plan_repo.list`/`category_repo.get`/
   `user_repo.list` failures as one best-effort unit (root CLAUDE.md D3).
 
+- D117 (2026-07-24, U1.6, HUMAN sign-off on the migrations/versions/ gate):
+  DB `CHECK (amount > 0)` added to both `expenses` and `budget_plans` via a
+  new Alembic migration (`b4d1f8a5c240_add_amount_check_constraints`), named
+  constraints `expenses_amount_positive`/`budget_plans_amount_positive` (also
+  named explicitly in `docs/SCHEMA.sql` so a DB bootstrapped directly from it,
+  as `scripts/integration_docker.sh` does, matches Alembic's constraint names
+  exactly — a reviewer NIT, fixed same session). Beyond the Contracts bullet
+  (which named only `BudgetPlanCreate.amount`), `BudgetPlanUpdate.amount`
+  (closes D109), `ExpenseCreate.amount`, and `ExpenseUpdate.amount` all gained
+  `Field(gt=0)` too — since the CHECK now also applies to `expenses`, leaving
+  its models unvalidated would mean an invalid POST/PATCH surfaces as a raw
+  DB error (500) instead of a clean 422, inconsistent with this unit's own AC.
+  Both new constraints stay off `ExpenseBase`/`BudgetPlanBase` (and therefore
+  off `*Response`), same D112 reasoning: a Base-level constraint would break
+  reading back any row written before this migration existed. This
+  superseded `test_check_limit_zero_amount_plan_returns_none`
+  (`tests/test_budget_plan_repo.py`) — its precondition (a raw-SQL
+  zero-amount `budget_plans` row) is no longer constructible once the CHECK
+  exists; replaced with `test_zero_amount_plan_rejected_by_db_check`, which
+  proves the CHECK directly via `pytest.raises(asyncpg.CheckViolationError)`
+  (a symmetric `test_zero_or_negative_amount_rejected_by_db_check` was added
+  for `expenses`). Each raw-SQL attempt in these tests runs inside its own
+  `async with db_conn.transaction():` (a savepoint, since the outer `db_conn`
+  fixture already holds an open transaction) — without it, a CHECK violation
+  aborts the whole test's transaction and the next attempt raises
+  `InFailedSQLTransactionError` instead of the expected error. Reviewed by
+  the reviewer subagent: REQUEST_CHANGES on the first pass (plan checkbox/
+  STATE/Decision log not yet updated at review time, migration-gate approval
+  unconfirmable from the diff alone — both addressed by this STATE/Decision
+  log update itself, human approval already obtained beforehand per this
+  unit's transcript) plus one real WARN not fixed here (see the Gotchas
+  deploy-safety flag above — this unit's migration will hard-fail against
+  Supabase prod if any existing row already violates the new CHECK; needs a
+  one-time prod check before deploying, no local way to verify).
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -596,21 +631,51 @@ on U0.1/U0.2 and its own listed units.
   already; `get`/`update`/`delete` do two sequential repo round trips instead
   of one JOINed query, mirrors `UserService`'s existing pattern, fine at
   family-app scale).
+- Done: U1.6 (2026-07-24, human-approved STOP-AND-ASK GATE) — new Alembic
+  migration `b4d1f8a5c240_add_amount_check_constraints` adds
+  `CHECK (amount > 0)` (named `expenses_amount_positive`/
+  `budget_plans_amount_positive`) to both `expenses` and `budget_plans`;
+  `docs/SCHEMA.sql` updated to match, same constraint names. Model-level:
+  `BudgetPlanUpdate.amount`, `ExpenseCreate.amount`, `ExpenseUpdate.amount`
+  all gained `Field(gt=0)` (D117 — beyond the Contracts bullet, which named
+  only `BudgetPlanCreate.amount`; `ExpenseBase`/`BudgetPlanBase`/`*Response`
+  stay unconstrained, D112 reasoning). Tests: 6 new `ValidationError` cases
+  in `tests/test_models.py`; `test_check_limit_zero_amount_plan_returns_none`
+  (`tests/test_budget_plan_repo.py`) replaced with
+  `test_zero_amount_plan_rejected_by_db_check` (its old precondition is now
+  DB-impossible) plus a symmetric `test_zero_or_negative_amount_rejected_by_
+  db_check` added to `tests/test_expense_repo.py` — both prove the CHECK via
+  `pytest.raises(asyncpg.CheckViolationError)` with a per-attempt savepoint;
+  2 new API-level 422 tests in `tests/test_expenses_api.py`, 1 in
+  `tests/test_budgets_api.py`. `tests/README.md` updated. `verify.sh` green
+  (428 non-integration tests) and `bash scripts/integration_docker.sh` green
+  (53 integration tests, via direct `SCHEMA.sql` apply — the actual
+  Alembic upgrade→downgrade→upgrade round-trip only runs in CI per D18, and
+  the reviewer subagent additionally hand-verified it manually against a
+  live Postgres). Reviewed by the reviewer subagent: REQUEST_CHANGES on
+  first pass (plan hygiene only, see D117) → addressed by this STATE entry
+  itself; one real WARN (deploy-safety, unresolved — see Gotchas below)
+  left for the human, no local way to check prod data.
 - Next: CP0 live MVP test (if not already done) → CP1 (re-run CP0 commands to
   confirm U0.1+U0.2 broke nothing) → follow Live-test checkpoints order
   (CP1…CP8), NOT strict milestone order. CP3 (family fan-out, needs U1.4 —
   now done) and CP4 (`/expenses` author+category display + delete, needs
   U1.3 — also done) are both live-testable now; U2.1 is the plan's next
-  coding unit. U2.2 landed early per D111; U1.6, U2.1b and later are
-  still open (U1.5 now done).
-- Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Two
-  stop-and-ask gates: U1.6 (migrations/versions/) and U2.4 (uv.lock).
-  MVP plan's pending items still stand: U4.4b reviewer pass never ran;
-  MVP U6.1 not implemented (U5.1 landed on master, PR #25). New packages
-  need `__init__.py` (MVP D7). Never name a repo method after a builtin
-  used in later annotations (MVP D22). `family_tz` is now wired into
-  `statistics_service`'s default bounds only (D114) — budget/expense
+  coding unit. U2.2 landed early per D111; U2.1b and later M2/M3 units are
+  still open (U1.5, U1.6 now done — all of M1 is complete).
+- Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Stop-and-ask
+  gates: U1.6 (migrations/versions/) done, human-approved; U2.4 (uv.lock)
+  still open. MVP plan's pending items still stand: U4.4b reviewer pass
+  never ran; MVP U6.1 not implemented (U5.1 landed on master, PR #25). New
+  packages need `__init__.py` (MVP D7). Never name a repo method after a
+  builtin used in later annotations (MVP D22). `family_tz` is now wired
+  into `statistics_service`'s default bounds only (D114) — budget/expense
   notification-check bounds still default to UTC (not currently listed as
-  in-scope for any unit). `BudgetPlanUpdate.amount` still lacks
-  `Field(gt=0)` — U1.6 needs to decide whether to add it for PATCH 422s
-  (D109).
+  in-scope for any unit). `BudgetPlanUpdate.amount` now has `Field(gt=0)`
+  (U1.6, closes D109). **Deploy-safety flag (raised by U1.6's reviewer
+  pass, not yet checked):** the new `CHECK (amount > 0)` migration will
+  hard-fail `alembic upgrade head` against Supabase prod if any existing
+  row already has `amount <= 0` — run `SELECT count(*) FROM expenses WHERE
+  amount <= 0` and the same for `budget_plans` against prod before
+  deploying this migration; if any exist, they must be fixed/removed
+  first (dev DB has none, seed.sql only contains positive amounts).

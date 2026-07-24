@@ -146,20 +146,27 @@ async def test_check_limit_fill_percentage(
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
-async def test_check_limit_zero_amount_plan_returns_none(db_conn: asyncpg.Connection) -> None:
-    """models/budget_plan.py's `amount: int` has no positivity constraint;
-    guards against a ZeroDivisionError rather than crashing."""
+async def test_zero_amount_plan_rejected_by_db_check(db_conn: asyncpg.Connection) -> None:
+    """DB CHECK (amount > 0) on budget_plans (U1.6) — a zero/negative amount
+    row can no longer exist, closing the gap `check_limit`'s `<= 0 → None`
+    guard used to tolerate (plan Decision log D112)."""
     account_id = await make_account(db_conn)
     category_id = await make_category(db_conn, account_id=account_id)
-    await make_budget_plan(db_conn, account_id=account_id, category_id=category_id, amount=0)
 
-    july_start = datetime(2026, 7, 1, tzinfo=UTC)
-    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    # each attempt runs in its own savepoint: a CHECK violation aborts the
+    # current (sub)transaction, so without this the second attempt would
+    # raise InFailedSQLTransactionError instead of the expected error.
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with db_conn.transaction():
+            await make_budget_plan(
+                db_conn, account_id=account_id, category_id=category_id, amount=0
+            )
 
-    repo = BudgetPlanRepository(db_conn)
-    result = await repo.check_limit(account_id, category_id, start=july_start, end=august_start)
-
-    assert result is None
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with db_conn.transaction():
+            await make_budget_plan(
+                db_conn, account_id=account_id, category_id=category_id, amount=-100
+            )
 
 
 @pytest.mark.integration

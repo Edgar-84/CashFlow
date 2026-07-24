@@ -16,15 +16,16 @@ class BudgetPlanBase(BaseModel):
 
 class BudgetPlanCreate(BudgetPlanBase):
     # gt=0 lives here, not on Base: BudgetPlanResponse also inherits Base
-    # (four-schema pattern), and the DB has no CHECK(amount > 0) yet (U1.6) —
-    # a Base-level constraint made every read of a pre-existing/legacy
-    # zero-or-negative row raise ValidationError, not just new writes (found
-    # via CI on PR #27, plan Decision log D112).
+    # (four-schema pattern) — a Base-level constraint made every read of a
+    # pre-existing/legacy zero-or-negative row raise ValidationError, not
+    # just new writes (found via CI on PR #27, plan Decision log D112).
+    # The DB now has CHECK(amount > 0) too (U1.6), but rows written before
+    # that migration could still violate it, so Response must stay lenient.
     amount: int = Field(gt=0)
 
 
 class BudgetPlanUpdate(BaseModel):
-    amount: int | None = None
+    amount: int | None = Field(default=None, gt=0)
     period: Period | None = None
     notify_threshold: int | None = Field(default=None, ge=0, le=100)
 

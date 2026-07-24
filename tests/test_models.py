@@ -114,6 +114,18 @@ def test_expense_models_require_category_id() -> None:
             }
         )
 
+    with pytest.raises(ValueError):
+        ExpenseCreate(amount=0, category_id=category_id)
+
+    with pytest.raises(ValueError):
+        ExpenseCreate(amount=-100, category_id=category_id)
+
+    with pytest.raises(ValueError):
+        ExpenseUpdate(amount=0)
+
+    with pytest.raises(ValueError):
+        ExpenseUpdate(amount=-100)
+
 
 def test_budget_plan_models() -> None:
     category_id = uuid4()
@@ -142,6 +154,12 @@ def test_budget_plan_models() -> None:
 
     with pytest.raises(ValueError):
         BudgetPlanCreate(category_id=category_id, amount=-100)
+
+    with pytest.raises(ValueError):
+        BudgetPlanUpdate(amount=0)
+
+    with pytest.raises(ValueError):
+        BudgetPlanUpdate(amount=-100)
 
     with pytest.raises(ValueError):
         BudgetPlanResponse.model_validate(
