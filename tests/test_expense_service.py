@@ -129,6 +129,18 @@ class FakeTagRepo:
         return self._tags.get(id)
 
 
+class FakeUserRepo:
+    """`list(account_id=...)` — the account's members for notification fan-out
+    (plan Decision log D104)."""
+
+    def __init__(self, users: list[UserResponse] | None = None) -> None:
+        self._users = list(users or [])
+
+    async def list(self, **filters: Any) -> list[UserResponse]:
+        account_id = filters.get("account_id")
+        return [u for u in self._users if u.account_id == account_id]
+
+
 class FakeNotificationService:
     def __init__(self) -> None:
         self.sent: list[tuple[UserResponse, CategoryResponse, float]] = []
@@ -146,12 +158,27 @@ class RaisingNotificationService:
         raise RuntimeError("boom")
 
 
+class RaisingNotificationServiceForUser:
+    """Fails the send to one specific recipient, succeeds for everyone else —
+    proves fan-out (D104) is per-recipient best-effort, not all-or-nothing."""
+
+    def __init__(self, failing_user_id: UUID) -> None:
+        self._failing_user_id = failing_user_id
+        self.sent: list[tuple[UserResponse, CategoryResponse, float]] = []
+
+    async def send(self, user: UserResponse, category: CategoryResponse, fill_pct: float) -> None:
+        if user.id == self._failing_user_id:
+            raise RuntimeError("Bot API 403")
+        self.sent.append((user, category, fill_pct))
+
+
 def make_service(
     repo: FakeExpenseRepo,
     *,
     budget_plan_repo: Any = None,
     category_repo: Any = None,
     tag_repo: Any = None,
+    user_repo: Any = None,
     notification_service: Any = None,
 ) -> ExpenseService:
     return ExpenseService(
@@ -159,6 +186,7 @@ def make_service(
         budget_plan_repo if budget_plan_repo is not None else FakeBudgetPlanRepo(),
         category_repo if category_repo is not None else FakeCategoryRepo(),
         tag_repo if tag_repo is not None else FakeTagRepo(),
+        user_repo if user_repo is not None else FakeUserRepo(),
         notification_service if notification_service is not None else FakeNotificationService(),
     )
 
@@ -402,6 +430,7 @@ async def test_create_notifies_when_threshold_crossed() -> None:
         FakeExpenseRepo([]),
         budget_plan_repo=budget_plan_repo,
         category_repo=FakeCategoryRepo([category]),
+        user_repo=FakeUserRepo([caller]),
         notification_service=notification_service,
     )
     data = ExpenseCreate(amount=500, category_id=category_id)
@@ -427,6 +456,7 @@ async def test_create_notifies_exactly_once_at_threshold() -> None:
         FakeExpenseRepo([]),
         budget_plan_repo=FakeBudgetPlanRepo(fill_pct=80.0, notify_threshold=80),
         category_repo=FakeCategoryRepo([category]),
+        user_repo=FakeUserRepo([caller]),
         notification_service=notification_service,
     )
     data = ExpenseCreate(amount=500, category_id=category_id)
@@ -486,6 +516,7 @@ async def test_create_still_succeeds_when_notification_send_raises() -> None:
         FakeExpenseRepo([]),
         budget_plan_repo=FakeBudgetPlanRepo(fill_pct=90.0, notify_threshold=80),
         category_repo=FakeCategoryRepo([category]),
+        user_repo=FakeUserRepo([caller]),
         notification_service=RaisingNotificationService(),
     )
     data = ExpenseCreate(amount=500, category_id=category_id)
@@ -526,6 +557,82 @@ async def test_create_passes_account_scoped_bounds_to_check_limit() -> None:
     await service.create(data, caller)
 
     assert budget_plan_repo.check_limit_calls == [(account_id, category.id)]
+
+
+# --- U1.4: notification fan-out to all members (plan Decision log D104) ---
+
+
+async def test_create_notifies_all_account_members() -> None:
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    other_member = make_caller(account_id=account_id)
+    category_id = uuid4()
+    category = CategoryResponse(
+        id=category_id, name="Groceries", account_id=account_id, created_at=datetime.now(UTC)
+    )
+    notification_service = FakeNotificationService()
+    service = make_service(
+        FakeExpenseRepo([]),
+        budget_plan_repo=FakeBudgetPlanRepo(fill_pct=85.0, notify_threshold=80),
+        category_repo=FakeCategoryRepo([category]),
+        user_repo=FakeUserRepo([caller, other_member]),
+        notification_service=notification_service,
+    )
+    data = ExpenseCreate(amount=500, category_id=category_id)
+
+    await service.create(data, caller)
+
+    assert len(notification_service.sent) == 2
+    assert {sent_user.id for sent_user, _, _ in notification_service.sent} == {
+        caller.id,
+        other_member.id,
+    }
+
+
+async def test_create_notify_failure_for_one_member_does_not_block_others_or_expense() -> None:
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    other_member = make_caller(account_id=account_id)
+    category_id = uuid4()
+    category = CategoryResponse(
+        id=category_id, name="Groceries", account_id=account_id, created_at=datetime.now(UTC)
+    )
+    notification_service = RaisingNotificationServiceForUser(failing_user_id=caller.id)
+    service = make_service(
+        FakeExpenseRepo([]),
+        budget_plan_repo=FakeBudgetPlanRepo(fill_pct=85.0, notify_threshold=80),
+        category_repo=FakeCategoryRepo([category]),
+        user_repo=FakeUserRepo([caller, other_member]),
+        notification_service=notification_service,
+    )
+    data = ExpenseCreate(amount=500, category_id=category_id)
+
+    created = await service.create(data, caller)  # must not raise despite caller's send failing
+
+    assert created.amount == 500
+    assert [sent_user.id for sent_user, _, _ in notification_service.sent] == [other_member.id]
+
+
+async def test_create_notifies_single_member_account_once_no_dupes() -> None:
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category_id = uuid4()
+    category = CategoryResponse(
+        id=category_id, name="Groceries", account_id=account_id, created_at=datetime.now(UTC)
+    )
+    notification_service = FakeNotificationService()
+    service = make_service(
+        FakeExpenseRepo([]),
+        budget_plan_repo=FakeBudgetPlanRepo(fill_pct=85.0, notify_threshold=80),
+        category_repo=FakeCategoryRepo([category]),
+        user_repo=FakeUserRepo([caller]),
+        notification_service=notification_service,
+    )
+    data = ExpenseCreate(amount=500, category_id=category_id)
+
+    await service.create(data, caller)
+
+    assert len(notification_service.sent) == 1
 
 
 # --- U1.1: cross-account validation (closes MVP D33/D23) ------------------
