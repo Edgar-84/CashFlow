@@ -123,3 +123,30 @@ async def test_get_by_user_and_resource_scopes_by_user(db_conn: asyncpg.Connecti
     result = await repo.get_by_user_and_resource(user.id, Resource.BUDGET_PLANS)
 
     assert result is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_by_account_returns_only_that_accounts_rows(
+    db_conn: asyncpg.Connection,
+) -> None:
+    account_id = await make_account(db_conn)
+    other_account_id = await make_account(db_conn)
+    user = await make_user(db_conn, account_id=account_id, tg_id=1)
+    other_user = await make_user(db_conn, account_id=other_account_id, tg_id=2)
+    repo = PermissionRepository(db_conn)
+    own_row = await repo.create({"user_id": user.id, "resource": Resource.EXPENSES.value})
+    await repo.create({"user_id": other_user.id, "resource": Resource.TAGS.value})
+
+    result = await repo.list_by_account(account_id)
+
+    assert [row.id for row in result] == [own_row.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_by_account_returns_empty_when_no_rows(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    repo = PermissionRepository(db_conn)
+
+    assert await repo.list_by_account(account_id) == []
