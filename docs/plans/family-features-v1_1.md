@@ -202,7 +202,7 @@ family-timezone-correct "current month".
       except the repo change.
 
 ### M3 — Smoke
-- [ ] **U3.1 e2e smoke extension (@integration)**: extends MVP U5.1's
+- [x] **U3.1 e2e smoke extension (@integration)**: extends MVP U5.1's
       scenario — member A adds expense → member B ALSO receives the
       threshold notification (fan-out); statistics with explicit
       start/end match seeded sums; foreign-account category on create →
@@ -626,6 +626,29 @@ on U0.1/U0.2 and its own listed units.
   unit's summary line or AC, and changing it wasn't needed by any caller
   (statistics drill-down sums/renders the whole set, order-independent).
 
+- D124 (2026-07-25, U3.1): split MVP U5.1's single scenario function into
+  three focused test functions sharing one enriched `smoke_fixtures`
+  fixture, rather than growing one function further — each U3.1 AC
+  (fan-out, statistics filtering, foreign-category 404) is an independent
+  invariant, not a continuation of the same golden-path narrative, and
+  tests/CLAUDE.md's "test behavior, not implementation" favors one behavior
+  per test for independent diagnosability. The statistics AC seeds two
+  backdated (fixed 2020-01) expenses instead of asserting against a
+  "now"-bounded window around the notification-triggering expense —
+  deterministic (no wall-clock-timing assumption a CI runner could flake
+  on) and it actually proves `start`/`end` filter (data inside vs. outside
+  the window), not just that the one existing row happens to match. The
+  backdated expenses fall well outside `services.period.month_bounds()`'s
+  "current month", so they can't perturb the first test's fill_pct
+  assertion (90%). The foreign-category-404 AC seeds a second, fully
+  unrelated account+category (no users/expenses/budget_plan needed) —
+  mirrors the MVP U1.1 cross-account 404 pattern
+  (`test_create_expense_with_foreign_category_is_404` in
+  `tests/test_expenses_api.py`) but through the real stack via
+  `BackendClient`, asserting on the raised `httpx.HTTPStatusError`'s
+  `response.status_code` since `_request`'s `raise_for_status()` converts
+  the API's 404 into an exception rather than a return value.
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -977,12 +1000,31 @@ on U0.1/U0.2 and its own listed units.
   Units entry was not followed (whole unit done at the session's default
   tier) since the unit was small enough to do as one pass rather than
   split by file.
-- Next: all of M2 is done. CP4–CP8 (see Live-test checkpoints section) are
-  all live-testable now — CP8 specifically covers this unit's `/start`,
-  `/help`, newest-first list, and double-tap guard. Recommended: CP0 live
+- Done: U3.1 (2026-07-25) — `tests/test_e2e_smoke.py`'s MVP U5.1 scenario
+  function split into three (D124): `test_add_expense_appears_in_list_and_
+  fires_budget_notification_for_every_member` (renamed, now asserts 2
+  Telegram requests — one per account member — instead of 1),
+  `test_statistics_by_period_with_explicit_bounds_matches_seeded_sum`,
+  `test_create_expense_with_foreign_account_category_is_404`. All three
+  share one enriched `smoke_fixtures` fixture: a second member (`user_b`),
+  two backdated (2020-01) expenses summing to 1_200, and a second,
+  unrelated account+category. `tests/README.md`'s e2e-smoke section
+  updated (renamed header, three rows). No production code changed — pure
+  test extension, confirming behavior (fan-out D104, cross-account 404
+  D105) already implemented by U1.4/U1.1. Green via
+  `bash scripts/integration_docker.sh` (60 passed: 57 + 3 new, one test net
+  removed/renamed) and `bash scripts/verify.sh` (494 unit tests unaffected,
+  integration marker excluded). M3 done — this was the plan's last open
+  unit.
+- Next: all of M2 and M3 are done — nothing left in this plan's Units
+  checklist. CP4–CP8 (see Live-test checkpoints section) are all
+  live-testable now — CP8 specifically covers U2.5's `/start`, `/help`,
+  newest-first list, double-tap guard, plus this unit's automated smoke
+  green (no separate live-test step for U3.1 itself, it's the automated
+  scenario). Recommended: CP0 live
   MVP test (if not already done) → CP1 → follow Live-test checkpoints order
-  (CP1…CP8), NOT strict milestone order. Only M3 (U3.1 e2e smoke,
-  `@integration`) remains open in this plan.
+  (CP1…CP8), NOT strict milestone order. Nothing remains open in this plan's
+  Units checklist — CP0–CP8 are the only remaining (manual, human-run) work.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Stop-and-ask
   gates: U1.6 (migrations/versions/) done, human-approved; U2.4's
   uv.lock gate no longer applies (D121 — matplotlib PNG approach dropped

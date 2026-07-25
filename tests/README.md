@@ -790,7 +790,7 @@ in this period." without calling the formatter at all.
 
 ---
 
-## E2e smoke (`test_e2e_smoke.py`) — U5.1, `@pytest.mark.integration`, excluded from default `verify.sh`
+## E2e smoke (`test_e2e_smoke.py`) — U5.1 + U3.1, `@pytest.mark.integration`, excluded from default `verify.sh`
 Real FastAPI app on a real Postgres pool (`main.lifespan`) driven through
 `bot.client.BackendClient` — no fakes for expenses/budgets/DB. Only the
 outbound Telegram call inside `NotificationService` is swapped for a
@@ -799,4 +799,6 @@ the test needs neither a live bot token nor network access.
 
 | Test | Checks |
 |---|---|
-| `test_add_expense_appears_in_list_and_fires_budget_notification` | Bot client creates an expense against the real API/DB, the expense appears in `list_expenses`, and crossing the budget's `notify_threshold` fires exactly one Telegram notification with the category name and fill percentage (U5.1 AC) |
+| `test_add_expense_appears_in_list_and_fires_budget_notification_for_every_member` | Bot client creates an expense against the real API/DB, the expense appears in `list_expenses`, and crossing the budget's `notify_threshold` fires a Telegram notification to EVERY account member, not just the one who added the expense (U5.1 AC + U3.1 fan-out AC, plan D104) |
+| `test_statistics_by_period_with_explicit_bounds_matches_seeded_sum` | `statistics_by_period(start, end)` with an explicit window actually filters by it — total matches the sum of two backdated expenses seeded inside the window, ignoring any "now" expense outside it (U3.1 AC) |
+| `test_create_expense_with_foreign_account_category_is_404` | Creating an expense with another account's `category_id` raises `httpx.HTTPStatusError` with status 404, never leaking cross-account data (U3.1 AC, plan D105) |
