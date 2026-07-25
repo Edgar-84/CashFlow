@@ -29,10 +29,18 @@ from aiogram.types import Chat, Message, Update
 from aiogram.types import User as TelegramUser
 
 from bot.handlers import expenses as h
-from bot.keyboards import CategoryCallback, ExpenseCallback, TagCallback
-from bot.states import AddExpense, DeleteExpense
+from bot.keyboards import (
+    EDIT_FIELD_AMOUNT_CALLBACK,
+    EDIT_FIELD_CATEGORY_CALLBACK,
+    EDIT_FIELD_COMMENT_CALLBACK,
+    EDIT_FIELD_TAGS_CALLBACK,
+    CategoryCallback,
+    ExpenseCallback,
+    TagCallback,
+)
+from bot.states import AddExpense, DeleteExpense, EditExpense
 from models.category import CategoryResponse
-from models.expense import ExpenseCreate, ExpenseResponse
+from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.tag import TagResponse
 
 
@@ -76,6 +84,7 @@ class FakeBackendClient:
         self.expenses = expenses if expenses is not None else []
         self.created: list[ExpenseCreate] = []
         self.deleted: list[UUID] = []
+        self.updated: list[tuple[UUID, ExpenseUpdate]] = []
 
     async def list_categories(self) -> list[CategoryResponse]:
         return self.categories
@@ -90,6 +99,14 @@ class FakeBackendClient:
     async def list_expenses(self) -> list[ExpenseResponse]:
         return self.expenses
 
+    async def update_expense(self, expense_id: UUID, data: ExpenseUpdate) -> ExpenseResponse:
+        self.updated.append((expense_id, data))
+        existing = next(
+            (e for e in self.expenses if e.id == expense_id), make_expense(id=expense_id)
+        )
+        update_fields = data.model_dump(exclude_unset=True)
+        return existing.model_copy(update=update_fields)
+
     async def delete_expense(self, expense_id: UUID) -> None:
         self.deleted.append(expense_id)
 
@@ -98,6 +115,17 @@ class FailingBackendClient(FakeBackendClient):
     async def create_expense(self, data: ExpenseCreate) -> ExpenseResponse:
         request = httpx.Request("POST", "http://test/expenses")
         response = httpx.Response(500, request=request)
+        raise httpx.HTTPStatusError("boom", request=request, response=response)
+
+
+class FailingUpdateBackendClient(FakeBackendClient):
+    def __init__(self, status_code: int, expenses: list[ExpenseResponse] | None = None) -> None:
+        super().__init__(expenses=expenses)
+        self._status_code = status_code
+
+    async def update_expense(self, expense_id: UUID, data: ExpenseUpdate) -> ExpenseResponse:
+        request = httpx.Request("PATCH", f"http://test/expenses/{expense_id}")
+        response = httpx.Response(self._status_code, request=request)
         raise httpx.HTTPStatusError("boom", request=request, response=response)
 
 
@@ -589,6 +617,268 @@ async def test_delete_expense_cancelled_clears_state() -> None:
     callback.message.edit_text.assert_awaited_once_with("Cancelled.")
 
 
+# -- edit flow: picker -> detail view -> field -> new value -> update -------
+
+
+async def test_edit_expense_picker_shows_recent_expenses() -> None:
+    category = make_category("Groceries")
+    old = make_expense(
+        amount=100, category_id=category.id, created_at=datetime(2026, 1, 1, tzinfo=UTC)
+    )
+    recent = make_expense(
+        amount=1250, category_id=category.id, created_at=datetime(2026, 7, 18, tzinfo=UTC)
+    )
+    client = FakeBackendClient(categories=[category], expenses=[old, recent])
+    state = make_state()
+    message = make_message("/editexpense")
+
+    await h.cmd_edit_expense(message, state, client)
+
+    assert await state.get_state() == EditExpense.select.state
+    markup = message.answer.await_args.kwargs["reply_markup"]
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert buttons[0].callback_data == f"expense:{recent.id.hex}"
+    assert buttons[1].callback_data == f"expense:{old.id.hex}"
+
+
+async def test_edit_expense_picker_no_expenses() -> None:
+    client = FakeBackendClient(expenses=[])
+    state = make_state()
+    message = make_message("/editexpense")
+
+    await h.cmd_edit_expense(message, state, client)
+
+    assert await state.get_state() is None
+    message.answer.assert_awaited_once_with("No expenses to edit yet.")
+
+
+async def test_edit_expense_picker_backend_error_shows_friendly_message() -> None:
+    class FailingListExpensesClient(FakeBackendClient):
+        async def list_expenses(self) -> list[ExpenseResponse]:
+            request = httpx.Request("GET", "http://test/expenses")
+            raise httpx.ConnectError("boom", request=request)
+
+    state = make_state()
+    message = make_message("/editexpense")
+
+    await h.cmd_edit_expense(message, state, FailingListExpensesClient())
+
+    assert await state.get_state() is None
+    assert "couldn't reach" in message.answer.await_args.args[0].lower()
+
+
+async def test_edit_expense_selected_shows_detail_view_with_field_picker() -> None:
+    category = make_category("Groceries")
+    expense = make_expense(amount=1250, category_id=category.id)
+    client = FakeBackendClient(categories=[category], expenses=[expense])
+    state = make_state()
+    await h.cmd_edit_expense(make_message("/editexpense"), state, client)
+
+    callback = make_callback()
+    await h.on_edit_expense_selected(callback, ExpenseCallback(expense_id=expense.id), state)
+
+    assert await state.get_state() == EditExpense.field.state
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Groceries" in text
+    assert "12.50" in text
+    markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert labels == ["Amount", "Category", "Comment", "Tags"]
+
+
+async def test_edit_expense_selected_unknown_id_reprompts() -> None:
+    client = FakeBackendClient(expenses=[make_expense()])
+    state = make_state()
+    await h.cmd_edit_expense(make_message("/editexpense"), state, client)
+
+    callback = make_callback()
+    await h.on_edit_expense_selected(callback, ExpenseCallback(expense_id=uuid4()), state)
+
+    assert await state.get_state() == EditExpense.select.state
+    callback.answer.assert_awaited_once()
+    assert callback.answer.await_args.kwargs.get("show_alert") is True
+
+
+async def test_edit_amount_walkthrough_updates_expense() -> None:
+    expense = make_expense(amount=1000)
+    client = FakeBackendClient(expenses=[expense])
+    state = make_state()
+    await state.set_state(EditExpense.field)
+    await state.update_data(edit_target_id=str(expense.id))
+
+    field_callback = make_callback()
+    field_callback.data = EDIT_FIELD_AMOUNT_CALLBACK
+    await h.on_edit_field_chosen(field_callback, state, client)
+    assert await state.get_state() == EditExpense.amount.state
+    field_callback.message.edit_text.assert_awaited_once()
+
+    amount_message = make_message("15.00")
+    await h.on_edit_amount_entered(amount_message, state, client)
+
+    assert await state.get_state() is None
+    assert client.updated == [(expense.id, ExpenseUpdate(amount=1500))]
+    assert "15.00" in amount_message.answer.await_args.args[0]
+
+
+async def test_edit_amount_invalid_reprompts_and_stays_in_amount_state() -> None:
+    expense = make_expense()
+    client = FakeBackendClient(expenses=[expense])
+    state = make_state()
+    await state.set_state(EditExpense.amount)
+    await state.update_data(edit_target_id=str(expense.id))
+
+    message = make_message("not a number")
+    await h.on_edit_amount_entered(message, state, client)
+
+    assert await state.get_state() == EditExpense.amount.state
+    assert client.updated == []
+
+
+async def test_edit_comment_walkthrough_updates_expense() -> None:
+    expense = make_expense(comment="old comment")
+    client = FakeBackendClient(expenses=[expense])
+    state = make_state()
+    await state.set_state(EditExpense.field)
+    await state.update_data(edit_target_id=str(expense.id))
+
+    field_callback = make_callback()
+    field_callback.data = EDIT_FIELD_COMMENT_CALLBACK
+    await h.on_edit_field_chosen(field_callback, state, client)
+    assert await state.get_state() == EditExpense.comment.state
+
+    comment_message = make_message("new comment")
+    await h.on_edit_comment_entered(comment_message, state, client)
+
+    assert await state.get_state() is None
+    assert client.updated == [(expense.id, ExpenseUpdate(comment="new comment"))]
+
+
+async def test_edit_category_walkthrough_updates_expense() -> None:
+    old_category = make_category("Groceries")
+    new_category = make_category("Utilities")
+    expense = make_expense(category_id=old_category.id)
+    client = FakeBackendClient(categories=[old_category, new_category], expenses=[expense])
+    state = make_state()
+    await state.set_state(EditExpense.field)
+    await state.update_data(edit_target_id=str(expense.id))
+
+    field_callback = make_callback()
+    field_callback.data = EDIT_FIELD_CATEGORY_CALLBACK
+    await h.on_edit_field_chosen(field_callback, state, client)
+    assert await state.get_state() == EditExpense.category.state
+
+    category_callback = make_callback()
+    await h.on_edit_category_chosen(
+        category_callback, CategoryCallback(category_id=new_category.id), state, client
+    )
+
+    assert await state.get_state() is None
+    assert client.updated == [(expense.id, ExpenseUpdate(category_id=new_category.id))]
+
+
+async def test_edit_field_category_backend_error_shows_friendly_message() -> None:
+    class FailingCategoriesClient(FakeBackendClient):
+        async def list_categories(self) -> list[CategoryResponse]:
+            request = httpx.Request("GET", "http://test/categories")
+            raise httpx.ConnectError("boom", request=request)
+
+    expense = make_expense()
+    state = make_state()
+    await state.set_state(EditExpense.field)
+    await state.update_data(edit_target_id=str(expense.id))
+
+    field_callback = make_callback()
+    field_callback.data = EDIT_FIELD_CATEGORY_CALLBACK
+    await h.on_edit_field_chosen(field_callback, state, FailingCategoriesClient(expenses=[expense]))
+
+    assert "couldn't reach" in field_callback.message.edit_text.await_args.args[0].lower()
+
+
+async def test_edit_field_tags_backend_error_shows_friendly_message() -> None:
+    class FailingTagsClient(FakeBackendClient):
+        async def list_tags(self) -> list[TagResponse]:
+            request = httpx.Request("GET", "http://test/tags")
+            raise httpx.ConnectError("boom", request=request)
+
+    expense = make_expense()
+    state = make_state()
+    await state.set_state(EditExpense.field)
+    await state.update_data(edit_target_id=str(expense.id))
+
+    field_callback = make_callback()
+    field_callback.data = EDIT_FIELD_TAGS_CALLBACK
+    await h.on_edit_field_chosen(field_callback, state, FailingTagsClient(expenses=[expense]))
+
+    assert "couldn't reach" in field_callback.message.edit_text.await_args.args[0].lower()
+
+
+async def test_edit_tags_preselected_toggle_then_done_updates_expense() -> None:
+    kept_tag = make_tag("urgent")
+    new_tag = make_tag("home")
+    expense = make_expense(tags=[kept_tag])
+    client = FakeBackendClient(tags=[kept_tag, new_tag], expenses=[expense])
+    state = make_state()
+    await state.set_state(EditExpense.select)
+    await state.update_data(expenses_by_id={str(expense.id): expense})
+    await state.update_data(edit_target_id=str(expense.id))
+    await state.set_state(EditExpense.field)
+
+    field_callback = make_callback()
+    field_callback.data = EDIT_FIELD_TAGS_CALLBACK
+    await h.on_edit_field_chosen(field_callback, state, client)
+
+    assert await state.get_state() == EditExpense.tags.state
+    assert set((await state.get_data())["selected_tag_ids"]) == {str(kept_tag.id)}
+    markup = field_callback.message.edit_text.await_args.kwargs["reply_markup"]
+    texts = [b.text for row in markup.inline_keyboard for b in row]
+    assert any(t.startswith("✅") and "urgent" in t for t in texts)
+
+    toggle_callback = make_callback()
+    await h.on_tag_toggled(toggle_callback, TagCallback(tag_id=new_tag.id), state)
+    assert set((await state.get_data())["selected_tag_ids"]) == {str(kept_tag.id), str(new_tag.id)}
+
+    done_callback = make_callback()
+    await h.on_edit_tags_done(done_callback, state, client)
+
+    assert await state.get_state() is None
+    [(updated_id, update)] = client.updated
+    assert updated_id == expense.id
+    assert update.tag_ids is not None
+    assert set(update.tag_ids) == {kept_tag.id, new_tag.id}
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_fragment"),
+    [(403, "permission"), (404, "no longer exists")],
+)
+async def test_edit_update_error_shows_friendly_message(
+    status_code: int, expected_fragment: str
+) -> None:
+    expense = make_expense()
+    client = FailingUpdateBackendClient(status_code, expenses=[expense])
+    state = make_state()
+    await state.set_state(EditExpense.amount)
+    await state.update_data(edit_target_id=str(expense.id))
+
+    message = make_message("15.00")
+    await h.on_edit_amount_entered(message, state, client)
+
+    text = message.answer.await_args.args[0]
+    assert expected_fragment in text.lower()
+
+
+async def test_edit_expense_cancel_mid_flow_clears_state() -> None:
+    state = make_state()
+    await state.set_state(EditExpense.field)
+    await state.update_data(edit_target_id=str(uuid4()))
+
+    message = make_message("/cancel")
+    await h.on_cancel_command(message, state)
+
+    assert await state.get_state() is None
+    assert await state.get_data() == {}
+
+
 # -- real-dispatch regression tests: catch router-registration-order bugs ---
 
 
@@ -679,6 +969,37 @@ async def test_cancel_command_reaches_cancel_handler_from_delete_select_state() 
     context = dp.fsm.resolve_context(bot, chat_id=tg_id, user_id=tg_id)
     assert context is not None
     await context.set_state(DeleteExpense.select)
+
+    with patch.object(Message, "answer", new=AsyncMock()) as mocked_answer:
+        await dp.feed_update(bot, make_text_update(1, tg_id, "/cancel"), client=FakeBackendClient())
+
+    assert await context.get_state() is None
+    mocked_answer.assert_awaited_once_with("Cancelled.")
+
+
+async def test_editexpense_command_reaches_edit_handler_not_amount_catchall() -> None:
+    dp = make_router_dispatcher()
+    bot = Bot(token="42:TEST-token")
+    tg_id = 555
+    context = dp.fsm.resolve_context(bot, chat_id=tg_id, user_id=tg_id)
+    assert context is not None
+    await context.set_state(AddExpense.amount)
+
+    with patch.object(Message, "answer", new=AsyncMock()) as mocked_answer:
+        await dp.feed_update(
+            bot, make_text_update(1, tg_id, "/editexpense"), client=FakeBackendClient()
+        )
+
+    mocked_answer.assert_awaited_once_with("No expenses to edit yet.")
+
+
+async def test_cancel_command_reaches_cancel_handler_from_edit_field_state() -> None:
+    dp = make_router_dispatcher()
+    bot = Bot(token="42:TEST-token")
+    tg_id = 555
+    context = dp.fsm.resolve_context(bot, chat_id=tg_id, user_id=tg_id)
+    assert context is not None
+    await context.set_state(EditExpense.field)
 
     with patch.object(Message, "answer", new=AsyncMock()) as mocked_answer:
         await dp.feed_update(bot, make_text_update(1, tg_id, "/cancel"), client=FakeBackendClient())

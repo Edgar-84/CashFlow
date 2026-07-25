@@ -9,6 +9,10 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from bot.keyboards import (
     CANCEL_CALLBACK,
     CONFIRM_CALLBACK,
+    EDIT_FIELD_AMOUNT_CALLBACK,
+    EDIT_FIELD_CATEGORY_CALLBACK,
+    EDIT_FIELD_COMMENT_CALLBACK,
+    EDIT_FIELD_TAGS_CALLBACK,
     SELECTED_PREFIX,
     TAGS_DONE_CALLBACK,
     BudgetCallback,
@@ -18,6 +22,7 @@ from bot.keyboards import (
     budgets_keyboard,
     categories_keyboard,
     confirm_keyboard,
+    edit_field_keyboard,
     expenses_keyboard,
     tags_keyboard,
 )
@@ -148,3 +153,15 @@ def test_confirm_keyboard_renders_confirm_and_cancel() -> None:
     buttons = flatten(confirm_keyboard())
 
     assert [b.callback_data for b in buttons] == [CONFIRM_CALLBACK, CANCEL_CALLBACK]
+
+
+def test_edit_field_keyboard_renders_the_four_editable_fields() -> None:
+    buttons = flatten(edit_field_keyboard())
+
+    assert [b.text for b in buttons] == ["Amount", "Category", "Comment", "Tags"]
+    assert [b.callback_data for b in buttons] == [
+        EDIT_FIELD_AMOUNT_CALLBACK,
+        EDIT_FIELD_CATEGORY_CALLBACK,
+        EDIT_FIELD_COMMENT_CALLBACK,
+        EDIT_FIELD_TAGS_CALLBACK,
+    ]

@@ -531,6 +531,7 @@ match on).
 | `test_expenses_keyboard_renders_one_button_per_item_labeled_by_caller` | One button per `(id, label)` pair, one per row, callback_data = `expense:<uuid hex>` (U2.1 AC) |
 | `test_expense_callback_round_trips_the_uuid` | `ExpenseCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` |
+| `test_edit_field_keyboard_renders_the_four_editable_fields` | Amount/Category/Comment/Tags buttons carry the four `editfield:*` callback constants, in order (U2.1b AC) |
 
 ## Bot tests (`test_bot_handlers_expenses.py`) → [`bot/handlers/expenses.py`](../bot/handlers/expenses.py)
 Hermetic — a `FakeBackendClient` stands in for `bot/client.py`'s `BackendClient`
@@ -542,10 +543,16 @@ Message/CallbackQuery objects and a real `FSMContext` over aiogram's
 handler calls can't see (U4.3 AC: FSM walkthrough — happy path, cancel
 mid-flow, invalid amount input re-prompts; amount parsed to minor units in one
 helper with its own tests). Also covers the `/expenses` list view (U4.3b) —
-a plain command handler, no FSM/real-dispatch tests needed — and the U2.1
+a plain command handler, no FSM/real-dispatch tests needed — the U2.1
 `/deleteexpense` picker → detail view → delete-with-confirm `DeleteExpense`
 FSM (double-tap guard: a replayed confirm call after state is already
-cleared must not issue a second `delete_expense`).
+cleared must not issue a second `delete_expense`), and the U2.1b
+`/editexpense` picker → detail view → field picker → new value → update
+`EditExpense` FSM (one field edited per flow: amount/comment are plain text
+re-entry with an invalid-amount re-prompt like `/add`'s amount step;
+category re-picks via the existing `categories_keyboard`; tags reuses
+`on_tag_toggled` — generic across `AddExpense.tags`/`EditExpense.tags` — but
+pre-selects the expense's current tags instead of starting empty).
 
 | Test | Checks |
 |---|---|
@@ -581,6 +588,22 @@ cleared must not issue a second `delete_expense`).
 | `test_expenses_command_reaches_list_handler_not_amount_catchall` | Through a real `Dispatcher`: `/expenses` while in `AddExpense.amount` reaches `cmd_list_expenses`, not the catch-all `on_amount_entered` (review fix, D39-precedent registration-order regression test) |
 | `test_deleteexpense_command_reaches_delete_handler_not_amount_catchall` | Through a real `Dispatcher`: `/deleteexpense` while in `AddExpense.amount` reaches `cmd_delete_expense`, not the catch-all `on_amount_entered` (U2.1 AC: registration-order test, D39/D40 precedent) |
 | `test_cancel_command_reaches_cancel_handler_from_delete_select_state` | Through a real `Dispatcher`: `/cancel` while in `DeleteExpense.select` reaches `on_cancel_command` (proves the widened `StateFilter(AddExpense, DeleteExpense)` registration) |
+| `test_edit_expense_picker_shows_recent_expenses` | `/editexpense` shows the 10 most recent expenses newest-first, same sort as the delete picker (U2.1b AC) |
+| `test_edit_expense_picker_no_expenses` | `/editexpense` with no expenses shows "No expenses to edit yet." and never enters the FSM |
+| `test_edit_expense_picker_backend_error_shows_friendly_message` | A `list_expenses` transport failure shows a human message instead of raising |
+| `test_edit_expense_selected_shows_detail_view_with_field_picker` | Picking an expense shows its detail plus an Amount/Category/Comment/Tags field-picker keyboard (U2.1b AC: picker → detail → field) |
+| `test_edit_expense_selected_unknown_id_reprompts` | A stale/unknown `expense_id` in the callback re-prompts instead of crashing, stays in `EditExpense.select` |
+| `test_edit_amount_walkthrough_updates_expense` | Amount field → new amount text → `update_expense` called with only `amount` set, state cleared, confirmation shows the new value (U2.1b AC) |
+| `test_edit_amount_invalid_reprompts_and_stays_in_amount_state` | Unparseable amount text re-prompts and stays in `EditExpense.amount`, no `update_expense` call (U2.1b AC) |
+| `test_edit_comment_walkthrough_updates_expense` | Comment field → new comment text → `update_expense` called with only `comment` set (U2.1b AC) |
+| `test_edit_category_walkthrough_updates_expense` | Category field → picking a category → `update_expense` called with only `category_id` set (U2.1b AC) |
+| `test_edit_field_category_backend_error_shows_friendly_message` | A `list_categories` transport failure while picking the category field shows a human message instead of raising |
+| `test_edit_field_tags_backend_error_shows_friendly_message` | A `list_tags` transport failure while picking the tags field shows a human message instead of raising (review fix — this path had no coverage) |
+| `test_edit_tags_preselected_toggle_then_done_updates_expense` | Tags field starts pre-selected with the expense's current tags (not empty, unlike `/add`'s tag step); toggling then Done calls `update_expense` with the full new `tag_ids` set (U2.1b AC) |
+| `test_edit_update_error_shows_friendly_message` | 403/404 from `update_expense` show "permission"/"no longer exists" messages, not a traceback (U2.1b AC, parametrized) |
+| `test_edit_expense_cancel_mid_flow_clears_state` | `/cancel` from `EditExpense.field` clears FSM state and data (U2.1b AC) |
+| `test_editexpense_command_reaches_edit_handler_not_amount_catchall` | Through a real `Dispatcher`: `/editexpense` while in `AddExpense.amount` reaches `cmd_edit_expense`, not the catch-all `on_amount_entered` (U2.1b AC: registration-order test) |
+| `test_cancel_command_reaches_cancel_handler_from_edit_field_state` | Through a real `Dispatcher`: `/cancel` while in `EditExpense.field` reaches `on_cancel_command` (proves the widened `StateFilter(AddExpense, DeleteExpense, EditExpense)` registration) |
 
 ## Bot tests (`test_bot_handlers_categories.py`) → [`bot/handlers/categories.py`](../bot/handlers/categories.py)
 Hermetic — a `FakeCategoryBackendClient` stands in for `bot/client.py`'s
