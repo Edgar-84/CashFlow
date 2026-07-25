@@ -20,6 +20,11 @@ commands' handlers aren't state-filtered and keep working normally regardless.
 `/cancel` is still wired up (unlike the expense flows, it can't discard
 anything) purely so it does something recognizable rather than being
 silently swallowed: it re-renders the last period view.
+
+`/chart` (plus the "📊 Chart" button, U2.4) reuses the same preset/bounds
+machinery to render a text category-breakdown (`bot/charts.py`) instead of
+the plain totals list — no image, no new dependency (plan Decision log D121
+supersedes the original matplotlib-PNG plan, D101).
 """
 
 import logging
@@ -35,9 +40,11 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from bot.charts import render_category_breakdown
 from bot.keyboards import (
     STATISTICS_BY_CATEGORY_CALLBACK,
     STATISTICS_BY_TAG_CALLBACK,
+    STATISTICS_CHART_CALLBACK,
     STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK,
     STATISTICS_PERIOD_LAST_MONTH_CALLBACK,
     STATISTICS_PERIOD_THIS_MONTH_CALLBACK,
@@ -78,6 +85,7 @@ class StatisticsBackendClient(Protocol):
 
 _BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
 _EMPTY_PERIOD = "No expenses in this period."
+_NOTHING_TO_CHART = "Nothing to chart in this period."
 _DEFAULT_PRESET = STATISTICS_PERIOD_THIS_MONTH_CALLBACK
 
 _PRESET_CALLBACKS = {
@@ -178,10 +186,58 @@ async def _render_full_view(
     await reply("\n".join(lines), reply_markup=statistics_keyboard(preset))
 
 
+async def _render_chart(
+    reply: Callable[..., Awaitable[object]],
+    state: FSMContext,
+    client: StatisticsBackendClient,
+    preset: str,
+) -> None:
+    """Fetch the by-category breakdown for `preset` (same bounds computation
+    as `_render_full_view`, U2.3) and render it via
+    `bot/charts.py::render_category_breakdown` — reuses the period-picker
+    keyboard so the period can still be switched from the chart view."""
+    bounds = preset_bounds(preset)
+    start, end = bounds if bounds else (None, None)
+    try:
+        by_category = await client.statistics_by_category(start=start, end=end)
+        categories = await client.list_categories()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch statistics")
+        await reply(_BACKEND_UNREACHABLE)
+        return
+
+    await state.set_state(Statistics.view)
+    await state.update_data(preset=preset)
+
+    if not by_category or sum(item.total for item in by_category) == 0:
+        await reply(_NOTHING_TO_CHART, reply_markup=statistics_keyboard(preset))
+        return
+
+    category_names = {category.id: category.name for category in categories}
+    totals = [(category_names.get(item.category_id, "Unknown"), item.total) for item in by_category]
+    text = render_category_breakdown(totals)
+    await reply(text, reply_markup=statistics_keyboard(preset))
+
+
 async def cmd_statistics(
     message: Message, state: FSMContext, client: StatisticsBackendClient
 ) -> None:
     await _render_full_view(message.answer, state, client, _DEFAULT_PRESET)
+
+
+async def cmd_chart(message: Message, state: FSMContext, client: StatisticsBackendClient) -> None:
+    preset = (await state.get_data()).get("preset", _DEFAULT_PRESET)
+    await _render_chart(message.answer, state, client, preset)
+
+
+async def on_chart_clicked(
+    callback: CallbackQuery, state: FSMContext, client: StatisticsBackendClient
+) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
+    preset = (await state.get_data()).get("preset", _DEFAULT_PRESET)
+    await _render_chart(callback.message.edit_text, state, client, preset)
 
 
 async def on_period_selected(
@@ -311,6 +367,7 @@ async def on_cancel_command(
 def create_router() -> Router:
     router = Router(name="statistics")
     router.message.register(cmd_statistics, Command("statistics"))
+    router.message.register(cmd_chart, Command("chart"))
     router.message.register(on_cancel_command, StateFilter(Statistics), Command("cancel"))
     router.callback_query.register(
         on_period_selected, Statistics.view, F.data.in_(_PRESET_CALLBACKS)
@@ -320,6 +377,9 @@ def create_router() -> Router:
     )
     router.callback_query.register(
         on_by_tag_clicked, Statistics.view, F.data == STATISTICS_BY_TAG_CALLBACK
+    )
+    router.callback_query.register(
+        on_chart_clicked, Statistics.view, F.data == STATISTICS_CHART_CALLBACK
     )
     router.callback_query.register(
         on_category_drilldown, Statistics.category, CategoryCallback.filter()

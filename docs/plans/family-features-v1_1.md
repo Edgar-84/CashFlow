@@ -176,7 +176,7 @@ family-timezone-correct "current month".
       AC: fake-client tests — preset switch re-renders with the right
       bounds sent, category and tag drill-down send the right filter,
       empty result message; callback-data formats locked by tests.
-- [ ] **U2.4 Category breakdown message** (supersedes the PNG-chart
+- [x] **U2.4 Category breakdown message** (supersedes the PNG-chart
       approach, human decision D121 — no new dependency, no `uv.lock`
       change): new `bot/charts.py` `render_category_breakdown(totals:
       list[tuple[str, int]]) -> str` (pure function, no I/O) formats one
@@ -576,6 +576,34 @@ on U0.1/U0.2 and its own listed units.
   App ships (leaves CP6 with no visual breakdown in the interim,
   full/N-quarters cost).
 
+- D122 (2026-07-25, U2.4): `bot/charts.py::_format_amount` is a private
+  one-line duplicate of `bot/handlers/statistics.py::_format_amount` rather
+  than a shared import — `render_category_breakdown`'s own contract says
+  "pure function, no I/O", and `bot/charts.py` is meant to stay a standalone,
+  trivially-unit-testable module; importing a private helper out of a
+  handlers module (or the reverse) would create a cross-module dependency
+  for one line of `Decimal` formatting, same precedent as D118/D119's
+  "duplication is fine below shared-extraction size". `handlers/statistics.py`
+  gained a mirroring `_render_chart()` helper (parallel to U2.3's
+  `_render_full_view()`): fetches `statistics_by_category` for the currently
+  active preset (from FSM state data, defaulting to "this month" — identical
+  lookup to `on_cancel_command`), then either shows `_NOTHING_TO_CHART` (no
+  categories, or every category's total is 0 — checked before calling the
+  formatter, per this unit's own AC) or calls `render_category_breakdown` and
+  sends the result with `statistics_keyboard(preset)` still attached, so the
+  period-preset row keeps working from the chart view (tapping a preset from
+  there routes through the existing `on_period_selected` → `_render_full_view`
+  path, i.e. back to the plain breakdown, not another chart — accepted, the
+  AC only asked for `/chart`/the button to *enter* the chart view reusing the
+  preset/bounds machinery, not for a parallel "chart mode" that persists
+  across preset switches). New `STATISTICS_CHART_CALLBACK` ("statistics:chart")
+  button appended as its own row below "By category…"/"By tag…" in
+  `statistics_keyboard()` (existing `test_statistics_keyboard_renders_presets_
+  and_drilldown_entries` updated for the extra button, same test file as the
+  other two entry points). `cmd_chart`/`on_chart_clicked` registered without a
+  `StateFilter` for the command (same as `cmd_statistics`) and scoped to
+  `Statistics.view` for the callback (same as the other view-level buttons).
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -873,15 +901,40 @@ on U0.1/U0.2 and its own listed units.
   pattern, unchanged from before U2.3) and no explicit year-rollover test for
   the "last 3 months" preset specifically (the shared `divmod` logic is
   covered by the "last month" rollover test and verified by hand).
+- Done: U2.4 (2026-07-25) — new `bot/charts.py::render_category_breakdown(
+  totals: list[tuple[str, int]]) -> str` (pure function, no I/O): one line
+  per category — name, minor-unit amount, a 10-char Unicode block bar, and
+  its rounded % share of the grand total — sorted by amount descending
+  (supersedes the matplotlib PNG approach, D121). `bot/handlers/statistics.py`
+  gained `/chart` (`cmd_chart`) and a "📊 Chart" button (`on_chart_clicked`,
+  `STATISTICS_CHART_CALLBACK`) via a new `_render_chart()` helper mirroring
+  `_render_full_view()` — both reuse the currently active preset from FSM
+  state (same lookup as `on_cancel_command`) and `preset_bounds()`, so the
+  chart is fetched for the exact same window `/statistics` would show (D122).
+  A zero-total or empty `by_category` result shows "Nothing to chart in this
+  period." without calling `render_category_breakdown` at all (AC). No
+  contract/backend changes — `statistics_by_category` already existed since
+  U0.2/U1.2. Tests: 6 new in `tests/test_bot_charts.py` (one line per
+  category, sorted descending, formatted amount, percentages sum to ~100%
+  with rounding tolerated, includes a block-bar character, empty input →
+  empty string); 9 new in `tests/test_bot_handlers_statistics.py` (renders
+  breakdown, reuses the active preset's exact bounds, defaults to "this
+  month", zero-total/no-categories → "Nothing to chart..." without invoking
+  the formatter — proven via `monkeypatch.setattr`, backend-error message,
+  `Statistics.view` state set with the preset recorded, button click renders
+  via `edit_text` with the keyboard still attached); 1 updated in
+  `tests/test_bot_keyboards.py` (`test_statistics_keyboard_renders_presets_
+  and_drilldown_entries` extended for the new button). `tests/README.md`
+  updated (new `test_bot_charts.py` section + new statistics-handler rows).
+  `verify.sh` green (491 non-integration tests). Not flagged RISKY in the
+  plan — no reviewer subagent run.
 - Next: CP4 (`/expenses` author+category display + delete, needs U1.3 +
   U2.1 — both done), CP5 (edit expense, needs U2.1b — done), and CP6 (period
-  statistics — needs U1.2 + U2.3, both done; U2.4's category-breakdown
-  message is CP6's other half, still open) are all live-testable now.
-  Recommended: CP0 live MVP test (if not already done) → CP1 → follow
-  Live-test checkpoints order (CP1…CP8), NOT strict milestone order.
-  Remaining M2 units: U2.4 category-breakdown message (no ask-gate, D121 —
-  matplotlib PNG approach superseded before implementation) and U2.5
-  polish; M3 (U3.1 smoke) still open (all of M1 done).
+  statistics + category-breakdown chart, needs U1.2 + U2.3 + U2.4 — all done)
+  are all live-testable now. Recommended: CP0 live MVP test (if not already
+  done) → CP1 → follow Live-test checkpoints order (CP1…CP8), NOT strict
+  milestone order. Remaining M2 units: U2.5 polish; M3 (U3.1 smoke) still
+  open (all of M1 done).
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Stop-and-ask
   gates: U1.6 (migrations/versions/) done, human-approved; U2.4's
   uv.lock gate no longer applies (D121 — matplotlib PNG approach dropped

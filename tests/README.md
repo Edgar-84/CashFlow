@@ -532,8 +532,21 @@ match on).
 | `test_expense_callback_round_trips_the_uuid` | `ExpenseCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` |
 | `test_edit_field_keyboard_renders_the_four_editable_fields` | Amount/Category/Comment/Tags buttons carry the four `editfield:*` callback constants, in order (U2.1b AC) |
-| `test_statistics_keyboard_renders_presets_and_drilldown_entries` | Three period-preset buttons + "By category…"/"By tag…" render with the locked `statperiod:*`/`statistics:by_*` callback-data (U2.3 AC) |
+| `test_statistics_keyboard_renders_presets_and_drilldown_entries` | Three period-preset buttons + "By category…"/"By tag…"/"📊 Chart" render with the locked `statperiod:*`/`statistics:by_*`/`statistics:chart` callback-data (U2.3 AC, chart button added U2.4) |
 | `test_statistics_keyboard_marks_the_active_preset_only` | Only the currently-active preset gets the ✅ label prefix |
+
+## Bot tests (`test_bot_charts.py`) → [`bot/charts.py`](../bot/charts.py)
+Pure function, no fakes needed — `render_category_breakdown` takes
+`list[tuple[str, int]]` in and returns a formatted message, no I/O (U2.4 AC).
+
+| Test | Checks |
+|---|---|
+| `test_render_category_breakdown_one_line_per_category` | One rendered line per input category |
+| `test_render_category_breakdown_sorted_by_amount_descending` | Highest-spend category renders first (AC) |
+| `test_render_category_breakdown_includes_formatted_amount` | Minor-unit amount formatted as `NNN.NN` (existing `_format_amount` pattern) |
+| `test_render_category_breakdown_percentages_sum_to_roughly_100` | Per-category percentages sum to ~100% with rounding tolerated (AC) |
+| `test_render_category_breakdown_includes_a_block_bar` | Each line includes a Unicode block-bar character |
+| `test_render_category_breakdown_empty_input_returns_empty_string` | No categories → empty string, not a crash |
 
 ## Bot tests (`test_bot_handlers_expenses.py`) → [`bot/handlers/expenses.py`](../bot/handlers/expenses.py)
 Hermetic — a `FakeBackendClient` stands in for `bot/client.py`'s `BackendClient`
@@ -721,7 +734,11 @@ the currently active preset's bounds. These states are callback-only (no
 text entry), so abandoning a picker mid-pick is harmless — other commands'
 handlers aren't state-filtered and keep working; `/cancel` is still wired up
 (review fix) purely to re-render the last period view rather than being
-silently swallowed.
+silently swallowed. U2.4 adds `/chart` + the "📊 Chart" button: same
+preset/bounds reuse as the rest of this module, renders
+`bot/charts.py::render_category_breakdown` instead of the plain breakdown
+list; a zero-total (or empty) `by_category` result shows "Nothing to chart
+in this period." without calling the formatter at all.
 
 | Test | Checks |
 |---|---|
@@ -750,6 +767,14 @@ silently swallowed.
 | `test_by_period_backend_error_shows_friendly_message_on_drilldown` | A transport failure during drill-down shows a human message instead of raising |
 | `test_cancel_command_rerenders_the_last_period_view` | `/cancel` re-renders the summary for the currently stored preset (not a discard — there's nothing destructive to undo) |
 | `test_cancel_command_defaults_to_this_month_with_no_prior_preset` | `/cancel` with no `preset` in state data falls back to "this month" |
+| `test_chart_command_renders_category_breakdown` | `/chart` renders one line per category sorted by amount descending, via `render_category_breakdown` (U2.4 AC) |
+| `test_chart_command_reuses_the_currently_active_preset_bounds` | `/chart` fetches with the exact same bounds `preset_bounds()` gives `/statistics` for the stored preset (U2.4 AC: period-picker reuse) |
+| `test_chart_command_defaults_to_this_month_with_no_prior_preset` | `/chart` with no prior preset in state sends no `start`/`end`, same default as `/statistics` |
+| `test_chart_command_zero_total_shows_nothing_to_chart_without_formatting` | A zero-total `by_category` result shows "Nothing to chart..." and never calls `render_category_breakdown` (U2.4 AC) |
+| `test_chart_command_no_categories_shows_nothing_to_chart` | An empty `by_category` result (no expenses at all) shows the same message |
+| `test_chart_command_backend_error_shows_friendly_message` | A `statistics_by_category` transport failure shows a human message instead of raising |
+| `test_chart_command_sets_view_state_with_the_active_preset` | `/chart` leaves FSM state in `Statistics.view` with the preset recorded, so the period-picker keyboard keeps working afterward |
+| `test_chart_button_clicked_renders_the_chart_via_edit_text` | The "📊 Chart" button on `/statistics` renders the same breakdown in place (`edit_text`), keeping the period-picker keyboard |
 
 ---
 
