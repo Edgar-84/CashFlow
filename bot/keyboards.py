@@ -42,6 +42,18 @@ EDIT_FIELD_CATEGORY_CALLBACK = "editfield:category"
 EDIT_FIELD_COMMENT_CALLBACK = "editfield:comment"
 EDIT_FIELD_TAGS_CALLBACK = "editfield:tags"
 
+STATISTICS_PERIOD_THIS_MONTH_CALLBACK = "statperiod:this_month"
+STATISTICS_PERIOD_LAST_MONTH_CALLBACK = "statperiod:last_month"
+STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK = "statperiod:last_3_months"
+STATISTICS_BY_CATEGORY_CALLBACK = "statistics:by_category"
+STATISTICS_BY_TAG_CALLBACK = "statistics:by_tag"
+
+_STATISTICS_PERIOD_PRESETS = [
+    (STATISTICS_PERIOD_THIS_MONTH_CALLBACK, "This month"),
+    (STATISTICS_PERIOD_LAST_MONTH_CALLBACK, "Last month"),
+    (STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK, "Last 3 months"),
+]
+
 SELECTED_PREFIX = "✅ "
 
 
@@ -103,6 +115,22 @@ def edit_field_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Comment", callback_data=EDIT_FIELD_COMMENT_CALLBACK)
     builder.button(text="Tags", callback_data=EDIT_FIELD_TAGS_CALLBACK)
     builder.adjust(2)
+    return builder.as_markup()
+
+
+def statistics_keyboard(active_preset_callback: str) -> InlineKeyboardMarkup:
+    """Period-preset row (active one marked) + drill-down entry points (U2.3).
+    Presets are plain string callback-data (fixed set, like TAGS_DONE_CALLBACK)
+    rather than a CallbackData factory since there's no id to carry."""
+    builder = InlineKeyboardBuilder()
+    for callback_data, label in _STATISTICS_PERIOD_PRESETS:
+        text = f"{SELECTED_PREFIX}{label}" if callback_data == active_preset_callback else label
+        builder.button(text=text, callback_data=callback_data)
+    builder.adjust(3)
+    builder.row(
+        InlineKeyboardButton(text="By category…", callback_data=STATISTICS_BY_CATEGORY_CALLBACK),
+        InlineKeyboardButton(text="By tag…", callback_data=STATISTICS_BY_TAG_CALLBACK),
+    )
     return builder.as_markup()
 
 

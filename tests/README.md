@@ -532,6 +532,8 @@ match on).
 | `test_expense_callback_round_trips_the_uuid` | `ExpenseCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` |
 | `test_edit_field_keyboard_renders_the_four_editable_fields` | Amount/Category/Comment/Tags buttons carry the four `editfield:*` callback constants, in order (U2.1b AC) |
+| `test_statistics_keyboard_renders_presets_and_drilldown_entries` | Three period-preset buttons + "By category…"/"By tag…" render with the locked `statperiod:*`/`statistics:by_*` callback-data (U2.3 AC) |
+| `test_statistics_keyboard_marks_the_active_preset_only` | Only the currently-active preset gets the ✅ label prefix |
 
 ## Bot tests (`test_bot_handlers_expenses.py`) → [`bot/handlers/expenses.py`](../bot/handlers/expenses.py)
 Hermetic — a `FakeBackendClient` stands in for `bot/client.py`'s `BackendClient`
@@ -707,9 +709,19 @@ registration-order class of bug as `test_bot_handlers_categories.py`
 
 ## Bot tests (`test_bot_handlers_statistics.py`) → [`bot/handlers/statistics.py`](../bot/handlers/statistics.py)
 Hermetic — a `FakeStatisticsBackendClient` stands in for `bot/client.py`'s
-`BackendClient`; handlers are called directly with mock `Message` objects. No
-FSM, no input: `/statistics` is a single command rendering the current-month
-period total plus category/tag breakdowns (U4.5 AC).
+`BackendClient`; handlers are called directly with mock `Message`/
+`CallbackQuery` objects and a real `FSMContext` over aiogram's
+`MemoryStorage`. `/statistics` renders the current-month period total plus
+category/tag breakdowns (U4.5 AC). U2.3 adds the period-picker + drill-down:
+period presets (this month default/last month/last 3 months, `Statistics.view`
+state) and "By category…"/"By tag…" pickers (`Statistics.category`/
+`Statistics.tag` states, reusing the generic `CategoryCallback`/`TagCallback`)
+that re-render the by-period total filtered to the chosen category/tag using
+the currently active preset's bounds. These states are callback-only (no
+text entry), so abandoning a picker mid-pick is harmless — other commands'
+handlers aren't state-filtered and keep working; `/cancel` is still wired up
+(review fix) purely to re-render the last period view rather than being
+silently swallowed.
 
 | Test | Checks |
 |---|---|
@@ -719,6 +731,25 @@ period total plus category/tag breakdowns (U4.5 AC).
 | `test_statistics_omits_breakdown_sections_when_empty` | No "By category:"/"By tag:" headers when either list is empty |
 | `test_statistics_unknown_category_falls_back_to_placeholder` | A category id absent from the fetched category list still renders, as "Unknown" |
 | `test_statistics_backend_error_shows_friendly_message` | A transport failure on any of the three statistics calls shows a human message instead of raising |
+| `test_statistics_empty_period_shows_empty_message` | A zero-total period renders "No expenses in this period." (U2.3 AC) |
+| `test_preset_bounds_this_month_is_none` | `preset_bounds()` returns `None` for "this month" (send no params, backend default applies) |
+| `test_preset_bounds_last_month_spans_the_prior_calendar_month` | "Last month" resolves to the previous calendar month's UTC bounds |
+| `test_preset_bounds_last_month_handles_january_rollover` | "Last month" from January correctly rolls back to December of the prior year |
+| `test_preset_bounds_last_3_months_spans_three_calendar_months_back` | "Last 3 months" resolves to a 3-calendar-month UTC window |
+| `test_on_period_selected_sends_the_computed_bounds` | Tapping "Last month" sends the computed `start`/`end` to `statistics_by_period`, no category/tag filter (U2.3 AC) |
+| `test_on_period_selected_this_month_sends_no_bounds` | Tapping "This month" sends no `start`/`end` |
+| `test_on_period_selected_marks_the_new_preset_active_in_the_keyboard` | The re-rendered keyboard marks the newly-selected preset active |
+| `test_by_category_clicked_shows_the_category_picker` | "By category…" shows a category-name picker |
+| `test_by_category_clicked_with_no_categories_keeps_the_statistics_keyboard` | No categories on the account → an informative message that keeps the period-preset keyboard, instead of a dead-end screen (review fix) |
+| `test_by_tag_clicked_shows_the_tag_picker` | "By tag…" shows a tag-name picker |
+| `test_by_tag_clicked_with_no_tags_keeps_the_statistics_keyboard` | Same dead-end fix, for the tag picker |
+| `test_category_drilldown_sends_the_category_filter_and_current_bounds` | Picking a category sends `category_id` plus the currently active preset's bounds, and renders that category's name + filtered total (U2.3 AC) |
+| `test_tag_drilldown_sends_the_tag_filter` | Picking a tag sends `tag_id` and renders that tag's name + filtered total (U2.3 AC) |
+| `test_drilldown_empty_result_shows_empty_message` | A zero-total filtered result also shows "No expenses in this period." (U2.3 AC) |
+| `test_drilldown_returns_state_to_view_so_presets_work_again` | After a drill-down, FSM state returns to `Statistics.view` so preset/drill-down buttons keep working |
+| `test_by_period_backend_error_shows_friendly_message_on_drilldown` | A transport failure during drill-down shows a human message instead of raising |
+| `test_cancel_command_rerenders_the_last_period_view` | `/cancel` re-renders the summary for the currently stored preset (not a discard — there's nothing destructive to undo) |
+| `test_cancel_command_defaults_to_this_month_with_no_prior_preset` | `/cancel` with no `preset` in state data falls back to "this month" |
 
 ---
 

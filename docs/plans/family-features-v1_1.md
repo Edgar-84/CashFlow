@@ -30,10 +30,11 @@ family-timezone-correct "current month".
 - Sequencing vs the MVP plan: finish MVP **U5.1** (e2e smoke) BEFORE
   starting this plan; MVP **U6.1** (CD) stays last overall so the pipeline
   only ever auto-deploys the finished V1.1 (human may reorder).
-- Two human sign-off gates baked in: U1.6 adds a file under
-  `migrations/versions/` and U2.4 changes `uv.lock` (matplotlib) — both on
-  root CLAUDE.md's do-not-edit-without-asking list. The implementing
-  session STOPS and asks before touching them.
+- One human sign-off gate baked in: U1.6 adds a file under
+  `migrations/versions/` — on root CLAUDE.md's do-not-edit-without-asking
+  list. The implementing session STOPS and asks before touching it.
+  (U2.4 originally needed a second gate for `uv.lock`/matplotlib; dropped
+  before implementation — D121.)
 
 ## Contracts (U0) — additive deltas only
 - `config.Settings`: `family_tz: str = "UTC"` (IANA name, e.g.
@@ -65,9 +66,10 @@ family-timezone-correct "current month".
 - Permissions API reuses existing `PermissionCreate/Update/Response`
   (MVP U0.2) — no new models. Admin-only via existing `require_admin`
   (MVP D27).
-- New `bot/charts.py`: `render_category_pie(totals:
-  list[tuple[str, int]]) -> bytes` (PNG; names + minor-unit sums in,
-  bytes out; pure function, no I/O).
+- New `bot/charts.py`: `render_category_breakdown(totals:
+  list[tuple[str, int]]) -> str` (text; names + minor-unit sums in,
+  formatted message out; pure function, no I/O — supersedes the
+  matplotlib PNG contract, D121).
 
 ## Units
 
@@ -166,7 +168,7 @@ family-timezone-correct "current month".
       AC: fake-client tests — add/update/delete happy paths, duplicate →
       "already exists" message, permission-denied message, invalid
       amount/threshold re-prompts, cancel; registration-order test.
-- [ ] **U2.3 Statistics period picker + drill-down** (requirement #6):
+- [x] **U2.3 Statistics period picker + drill-down** (requirement #6):
       `/statistics` gains inline buttons — period presets (this month
       default / last month / last 3 months) and "by category…"/"by tag…"
       pickers that re-render the by-period total filtered to the chosen
@@ -174,18 +176,21 @@ family-timezone-correct "current month".
       AC: fake-client tests — preset switch re-renders with the right
       bounds sent, category and tag drill-down send the right filter,
       empty result message; callback-data formats locked by tests.
-- [ ] **U2.4 Pie chart PNG** ⚠ STOP-AND-ASK GATE (human decision D101):
-      `uv add matplotlib` changes `uv.lock` (do-not-edit list) — get
-      explicit approval first. New `bot/charts.py`
-      `render_category_pie()` (Agg backend, no display); `/chart` command
-      (and a "📊 chart" button on `/statistics`) sends the PNG via
-      `BufferedInputFile` with a period-picker caption reusing U2.3's
-      presets.
-      AC: unit test — returned bytes start with the PNG magic number,
-      one slice per category, zero-total → "nothing to chart" message
-      without rendering; handler test with fake client (no Telegram
-      network); verify.sh green with matplotlib imported nowhere outside
-      `bot/charts.py`.
+- [ ] **U2.4 Category breakdown message** (supersedes the PNG-chart
+      approach, human decision D121 — no new dependency, no `uv.lock`
+      change): new `bot/charts.py` `render_category_breakdown(totals:
+      list[tuple[str, int]]) -> str` (pure function, no I/O) formats one
+      line per category — name, minor-unit amount (existing
+      `_format_amount` pattern), percentage of total, and a Unicode block
+      bar (e.g. `█████░░░░░ 62%`) — sorted by amount descending. `/chart`
+      command (and a "📊 chart" button on `/statistics`) sends this as a
+      plain message, reusing U2.3's period-picker presets/bounds — no
+      `BufferedInputFile`, no image.
+      AC: unit test — one line per category, percentages sum to ~100%
+      (rounding tolerated), sorted descending, zero-total → "nothing to
+      chart" message without calling the formatter; handler test with
+      fake client (no Telegram network) proves the period-picker reuse
+      (same presets/bounds as `/statistics`).
 - [ ] **U2.5 Bot polish**: `/start` + `/help` (command list per role-
       agnostic text); `ExpenseRepository.list`/`get_by_period` gain
       `ORDER BY created_at DESC` (closes MVP D40 flag — repo-level, the
@@ -228,9 +233,9 @@ on U0.1/U0.2 and its own listed units.
 - **CP4 — who added what + delete** = U1.3 + U2.1: /expenses shows
   author + category; pick an expense → delete it.
 - **CP5 — edit expense** = U2.1b: fix an amount/comment from Telegram.
-- **CP6 — period statistics + chart** = U1.2 + U2.3 + U2.4 (U2.4 has the
-  uv.lock ask-gate): switch period presets, drill into a category/tag,
-  get the pie-chart PNG.
+- **CP6 — period statistics + breakdown** = U1.2 + U2.3 + U2.4 (no
+  ask-gate, D121): switch period presets, drill into a category/tag, get
+  the text category-breakdown message.
 - **CP7 — hardening, API-only testing** = U1.1 + U1.5 + U1.6 (U1.6 has
   the migrations ask-gate): foreign-account ids → 404 via curl;
   permissions CRUD via curl changes a member's live bot behavior;
@@ -242,9 +247,6 @@ on U0.1/U0.2 and its own listed units.
 - `zoneinfo` on `python:3.13-slim`: Debian slim may lack system tzdata —
   if `ZoneInfo("Europe/...")` raises in-container, add the `tzdata` pip
   package (needs the same uv.lock sign-off as U2.4; check during U0.1).
-- matplotlib in the single shared image (MVP D40: one image for api+bot)
-  adds ~30–60MB for the api service too — accepted for V1.1; revisit only
-  if image size becomes a deploy problem.
 - Telegram send failures during fan-out (member never pressed /start on
   the prod bot → 403 from Bot API) — U1.4's per-recipient best-effort
   handles it, but log fields must NEVER include the exception object
@@ -265,9 +267,10 @@ on U0.1/U0.2 and its own listed units.
   wave into it would bury its STATE. Rejected: extending the MVP plan
   with an M5.5 milestone (original proposal, superseded by the 8-point
   requirements list).
-- D101 (2026-07-19, HUMAN): category diagram = real PNG pie chart via
-  matplotlib rendered bot-side, sent as a photo. Rejected: text
-  percentage bars (no dependency, but not the asked-for "circle"),
+- D101 (2026-07-19, HUMAN; **superseded by D121**): category diagram =
+  real PNG pie chart via matplotlib rendered bot-side, sent as a photo.
+  Rejected: text percentage bars (no dependency, but not the asked-for
+  "circle"),
   deferring the chart to the V2 Mini App. Backend stays JSON-only so the
   Mini App can render its own charts later (root CLAUDE.md HTTP-only
   rule). uv.lock change gated on explicit human sign-off at U2.4.
@@ -540,6 +543,38 @@ on U0.1/U0.2 and its own listed units.
   scopes each registration to its own current FSM state. `/cancel`'s
   `StateFilter` widened again, to `StateFilter(AddExpense, DeleteExpense,
   EditExpense)`.
+- D120 (2026-07-25, U2.3, accepted risk flagged by reviewer): the "this
+  month" preset sends no `start`/`end` at all, so the backend applies its
+  family-tz-correct default (`services/period.py::month_bounds`, D107/D114);
+  "last month"/"last 3 months" need explicit bounds, computed in the bot in
+  **plain UTC** (`preset_bounds()`) rather than family-tz — importing
+  `services/period.py` into `bot/` would violate bot/CLAUDE.md's zero-
+  business-logic/pure-HTTP-client rule, and the API contract (U0.2/U1.2)
+  only accepts explicit ISO-8601 `start`/`end`, not a tz-aware "N months
+  back" hint the backend could resolve itself (that would be a Contracts
+  change, out of scope for this unit). Accepted consequence: for a
+  non-UTC `family_tz`, up to `|UTC offset|` hours of expenses near a month
+  boundary can be double-counted or dropped between "this month" and "last
+  month" — a display discrepancy only, no data corruption, and it self-heals
+  each time the boundary is crossed. Revisit if family_tz ever needs to be
+  precise here: either give the API a "months back" param and let
+  `month_bounds` compute it, or accept `family_tz` as a bot-side setting for
+  local calendar math.
+- D121 (2026-07-25, HUMAN): supersedes D101 — U2.4 switches from a
+  matplotlib-rendered PNG pie chart to a text category-breakdown message
+  (Unicode block bars), dropping the `uv.lock`/matplotlib dependency and
+  its STOP-AND-ASK gate entirely. Driven by a scale/investment
+  discussion: the family bot's request volume makes matplotlib's runtime
+  cost a non-issue, but the V2 Mini App (Non-goals) will own real
+  client-side charting once it ships, making a bot-side rendering
+  pipeline a throwaway investment — not worth ~30-60MB added to the
+  shared api+bot image (former Risks entry, now moot) or the
+  event-loop-blocking concern of calling a synchronous render from an
+  async handler (would have needed `asyncio.to_thread`). Rejected: keep
+  the PNG approach (viable, but spends the dependency weight on a feature
+  with a known short shelf life), defer the chart entirely until the Mini
+  App ships (leaves CP6 with no visual breakdown in the interim,
+  full/N-quarters cost).
 
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
@@ -799,25 +834,69 @@ on U0.1/U0.2 and its own listed units.
   `verify.sh` to 456 non-integration tests) and one NIT not fixed
   (`cmd_edit_expense`'s picker-fetch block duplicates `cmd_delete_expense`'s
   almost verbatim — already the deliberate D119 tradeoff, not revisited).
+- Done: U2.3 (2026-07-25) — `/statistics` gains a period-picker + drill-down.
+  New `Statistics` StatesGroup (`view`/`category`/`tag`, `bot/states.py`);
+  `bot/keyboards.py` gained `statistics_keyboard(active_preset)` (3 preset
+  buttons, ✅-marks the active one, + "By category…"/"By tag…" row) and
+  plain-string callback constants (`STATISTICS_PERIOD_*`,
+  `STATISTICS_BY_CATEGORY/TAG_CALLBACK` — no `CallbackData` factory needed,
+  same pattern as `TAGS_DONE_CALLBACK`). `bot/handlers/statistics.py`:
+  `preset_bounds()` computes UTC calendar-month bounds for "last month"/
+  "last 3 months" (pure function, its own tests incl. Dec→Jan rollover);
+  "this month" sends no `start`/`end` so the backend's family-tz default
+  applies (D120 — see Decision log for the accepted UTC-vs-family-tz
+  boundary tradeoff this creates). `_render_full_view()` is the shared
+  fetch+render used by `cmd_statistics`, `on_period_selected`, and
+  `on_cancel_command`. Drill-down (`on_category_drilldown`/
+  `on_tag_drilldown`) reuses the existing generic `CategoryCallback`/
+  `TagCallback` — scoped to `Statistics.category`/`Statistics.tag` states so
+  no collision with `AddExpense`/`EditExpense`/`BudgetManage`/
+  `CategoryManage`/`TagManage`'s own registrations of the same callback
+  prefixes — reads the active preset back from FSM state data to reuse its
+  bounds, then returns state to `Statistics.view`. No contract/backend
+  changes (client.py already had the params since U0.2). Tests: 22 new/
+  updated in `tests/test_bot_handlers_statistics.py`, 2 new in
+  `tests/test_bot_keyboards.py`. `tests/README.md` updated. `verify.sh`
+  green (477 non-integration tests). Not flagged RISKY in the plan —
+  reviewed by the reviewer subagent same session: **APPROVE**. One WARN
+  addressed by recording it as an accepted risk rather than a code change
+  (D120 — the UTC-vs-family-tz boundary mismatch; fixing it properly would
+  mean either a Contracts change or importing `services/` into `bot/`,
+  both out of this unit's scope). Two NITs fixed: empty categories/tags on
+  drill-down entry now keep the period-preset keyboard visible instead of
+  leaving a dead-end screen (`test_by_category_clicked_with_no_categories_
+  keeps_the_statistics_keyboard` / the tag equivalent), and `/cancel` is now
+  wired for `Statistics.*` states (unlike the expense flows it can't discard
+  anything, so it just re-renders the last period view rather than being
+  silently swallowed). Two NITs not fixed: no `asyncio.gather` for the
+  independent fetches in `_render_full_view`/drilldown handlers (pre-existing
+  pattern, unchanged from before U2.3) and no explicit year-rollover test for
+  the "last 3 months" preset specifically (the shared `divmod` logic is
+  covered by the "last month" rollover test and verified by hand).
 - Next: CP4 (`/expenses` author+category display + delete, needs U1.3 +
-  U2.1 — both done) and CP5 (edit expense, needs U2.1b — now done) are both
-  live-testable. Recommended: run the reviewer subagent on U2.1 and U2.1b
-  (neither flagged RISKY, but both are bot FSM flows worth a second pair of
-  eyes — U2.1b especially for the four-branch field-edit dispatch and the
-  tag-preselection logic), then CP0 live MVP test (if not already done) →
-  CP1 → follow Live-test checkpoints order (CP1…CP8), NOT strict milestone
-  order. U2.2 landed early per D111; remaining M2 units (U2.3 statistics
-  picker, U2.4 pie chart — uv.lock ask-gate, U2.5 polish) and M3 (U3.1
-  smoke) are still open (all of M1 done).
+  U2.1 — both done), CP5 (edit expense, needs U2.1b — done), and CP6 (period
+  statistics — needs U1.2 + U2.3, both done; U2.4's category-breakdown
+  message is CP6's other half, still open) are all live-testable now.
+  Recommended: CP0 live MVP test (if not already done) → CP1 → follow
+  Live-test checkpoints order (CP1…CP8), NOT strict milestone order.
+  Remaining M2 units: U2.4 category-breakdown message (no ask-gate, D121 —
+  matplotlib PNG approach superseded before implementation) and U2.5
+  polish; M3 (U3.1 smoke) still open (all of M1 done).
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Stop-and-ask
-  gates: U1.6 (migrations/versions/) done, human-approved; U2.4 (uv.lock)
-  still open. MVP plan's pending items still stand: U4.4b reviewer pass
+  gates: U1.6 (migrations/versions/) done, human-approved; U2.4's
+  uv.lock gate no longer applies (D121 — matplotlib PNG approach dropped
+  before implementation, replaced by a text breakdown). MVP plan's
+  pending items still stand: U4.4b reviewer pass
   never ran; MVP U6.1 not implemented (U5.1 landed on master, PR #25). New
   packages need `__init__.py` (MVP D7). Never name a repo method after a
   builtin used in later annotations (MVP D22). `family_tz` is now wired
   into `statistics_service`'s default bounds only (D114) — budget/expense
   notification-check bounds still default to UTC (not currently listed as
-  in-scope for any unit). `BudgetPlanUpdate.amount` now has `Field(gt=0)`
+  in-scope for any unit). U2.3's "last month"/"last 3 months" bot-side
+  presets compute bounds in plain UTC, not `family_tz` (D120, accepted risk
+  — a non-UTC family sees a small display discrepancy right at month
+  boundaries between these presets and the family-tz-correct "this month"
+  default). `BudgetPlanUpdate.amount` now has `Field(gt=0)`
   (U1.6, closes D109). **Deploy-safety flag (raised by U1.6's reviewer
   pass, not yet checked):** the new `CHECK (amount > 0)` migration will
   hard-fail `alembic upgrade head` against Supabase prod if any existing

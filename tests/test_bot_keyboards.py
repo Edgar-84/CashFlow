@@ -14,6 +14,11 @@ from bot.keyboards import (
     EDIT_FIELD_COMMENT_CALLBACK,
     EDIT_FIELD_TAGS_CALLBACK,
     SELECTED_PREFIX,
+    STATISTICS_BY_CATEGORY_CALLBACK,
+    STATISTICS_BY_TAG_CALLBACK,
+    STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK,
+    STATISTICS_PERIOD_LAST_MONTH_CALLBACK,
+    STATISTICS_PERIOD_THIS_MONTH_CALLBACK,
     TAGS_DONE_CALLBACK,
     BudgetCallback,
     CategoryCallback,
@@ -24,6 +29,7 @@ from bot.keyboards import (
     confirm_keyboard,
     edit_field_keyboard,
     expenses_keyboard,
+    statistics_keyboard,
     tags_keyboard,
 )
 from models.budget_plan import BudgetPlanResponse
@@ -164,4 +170,32 @@ def test_edit_field_keyboard_renders_the_four_editable_fields() -> None:
         EDIT_FIELD_CATEGORY_CALLBACK,
         EDIT_FIELD_COMMENT_CALLBACK,
         EDIT_FIELD_TAGS_CALLBACK,
+    ]
+
+
+def test_statistics_keyboard_renders_presets_and_drilldown_entries() -> None:
+    buttons = flatten(statistics_keyboard(STATISTICS_PERIOD_THIS_MONTH_CALLBACK))
+
+    assert [b.callback_data for b in buttons] == [
+        STATISTICS_PERIOD_THIS_MONTH_CALLBACK,
+        STATISTICS_PERIOD_LAST_MONTH_CALLBACK,
+        STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK,
+        STATISTICS_BY_CATEGORY_CALLBACK,
+        STATISTICS_BY_TAG_CALLBACK,
+    ]
+    assert [b.text for b in buttons][:3] == [
+        f"{SELECTED_PREFIX}This month",
+        "Last month",
+        "Last 3 months",
+    ]
+    assert [b.text for b in buttons][3:] == ["By category…", "By tag…"]
+
+
+def test_statistics_keyboard_marks_the_active_preset_only() -> None:
+    buttons = flatten(statistics_keyboard(STATISTICS_PERIOD_LAST_MONTH_CALLBACK))
+
+    assert [b.text for b in buttons][:3] == [
+        "This month",
+        f"{SELECTED_PREFIX}Last month",
+        "Last 3 months",
     ]
