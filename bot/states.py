@@ -52,3 +52,9 @@ class EditExpense(StatesGroup):
     category = State()
     comment = State()
     tags = State()
+
+
+class Statistics(StatesGroup):
+    view = State()
+    category = State()
+    tag = State()
