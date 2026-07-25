@@ -47,6 +47,7 @@ STATISTICS_PERIOD_LAST_MONTH_CALLBACK = "statperiod:last_month"
 STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK = "statperiod:last_3_months"
 STATISTICS_BY_CATEGORY_CALLBACK = "statistics:by_category"
 STATISTICS_BY_TAG_CALLBACK = "statistics:by_tag"
+STATISTICS_CHART_CALLBACK = "statistics:chart"
 
 _STATISTICS_PERIOD_PRESETS = [
     (STATISTICS_PERIOD_THIS_MONTH_CALLBACK, "This month"),
@@ -131,6 +132,7 @@ def statistics_keyboard(active_preset_callback: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="By category…", callback_data=STATISTICS_BY_CATEGORY_CALLBACK),
         InlineKeyboardButton(text="By tag…", callback_data=STATISTICS_BY_TAG_CALLBACK),
     )
+    builder.row(InlineKeyboardButton(text="📊 Chart", callback_data=STATISTICS_CHART_CALLBACK))
     return builder.as_markup()
 
 

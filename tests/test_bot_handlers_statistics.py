@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import httpx
+import pytest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message as TelegramMessage
@@ -23,6 +24,7 @@ from bot.handlers import statistics as h
 from bot.keyboards import (
     STATISTICS_BY_CATEGORY_CALLBACK,
     STATISTICS_BY_TAG_CALLBACK,
+    STATISTICS_CHART_CALLBACK,
     STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK,
     STATISTICS_PERIOD_LAST_MONTH_CALLBACK,
     STATISTICS_PERIOD_THIS_MONTH_CALLBACK,
@@ -64,6 +66,7 @@ class FakeStatisticsBackendClient:
         self.categories = categories if categories is not None else []
         self.tags = tags if tags is not None else []
         self.by_period_calls: list[dict[str, object]] = []
+        self.by_category_calls: list[dict[str, object]] = []
 
     async def statistics_by_period(
         self,
@@ -80,6 +83,7 @@ class FakeStatisticsBackendClient:
     async def statistics_by_category(
         self, start: datetime | None = None, end: datetime | None = None
     ) -> list[CategoryTotal]:
+        self.by_category_calls.append({"start": start, "end": end})
         return self.by_category
 
     async def statistics_by_tag(
@@ -462,3 +466,129 @@ async def test_cancel_command_defaults_to_this_month_with_no_prior_preset() -> N
 
     call = client.by_period_calls[0]
     assert call["start"] is None and call["end"] is None
+
+
+# -- /chart (U2.4) -------------------------------------------------------------
+
+
+async def test_chart_command_renders_category_breakdown() -> None:
+    groceries = make_category("Groceries")
+    rent = make_category("Rent")
+    client = FakeStatisticsBackendClient(
+        by_category=[
+            CategoryTotal(category_id=groceries.id, total=5000),
+            CategoryTotal(category_id=rent.id, total=20000),
+        ],
+        categories=[groceries, rent],
+    )
+    message = make_message()
+
+    await h.cmd_chart(message, make_state(), client)
+
+    text = message.answer.await_args.args[0]
+    assert text.index("Rent") < text.index("Groceries")
+    assert "200.00" in text and "50.00" in text
+
+
+async def test_chart_command_reuses_the_currently_active_preset_bounds() -> None:
+    """Proves the AC's "period-picker reuse" — /chart fetches with the exact
+    same bounds `preset_bounds()` would give `/statistics` for the same
+    preset, taken from the same FSM state key."""
+    client = FakeStatisticsBackendClient(
+        by_category=[CategoryTotal(category_id=uuid4(), total=100)]
+    )
+    message = make_message()
+    state = make_state()
+    await state.update_data(preset=STATISTICS_PERIOD_LAST_MONTH_CALLBACK)
+
+    await h.cmd_chart(message, state, client)
+
+    expected_bounds = h.preset_bounds(STATISTICS_PERIOD_LAST_MONTH_CALLBACK)
+    assert expected_bounds is not None
+    expected_start, expected_end = expected_bounds
+    call = client.by_category_calls[0]
+    assert call["start"] == expected_start
+    assert call["end"] == expected_end
+
+
+async def test_chart_command_defaults_to_this_month_with_no_prior_preset() -> None:
+    client = FakeStatisticsBackendClient(
+        by_category=[CategoryTotal(category_id=uuid4(), total=100)]
+    )
+    message = make_message()
+
+    await h.cmd_chart(message, make_state(), client)
+
+    call = client.by_category_calls[0]
+    assert call["start"] is None and call["end"] is None
+
+
+async def test_chart_command_zero_total_shows_nothing_to_chart_without_formatting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    formatter_calls: list[object] = []
+
+    def fake_render(totals: object) -> str:
+        formatter_calls.append(totals)
+        return ""
+
+    monkeypatch.setattr(h, "render_category_breakdown", fake_render)
+    client = FakeStatisticsBackendClient(by_category=[CategoryTotal(category_id=uuid4(), total=0)])
+    message = make_message()
+
+    await h.cmd_chart(message, make_state(), client)
+
+    assert "Nothing to chart" in message.answer.await_args.args[0]
+    assert formatter_calls == []
+
+
+async def test_chart_command_no_categories_shows_nothing_to_chart() -> None:
+    client = FakeStatisticsBackendClient(by_category=[])
+    message = make_message()
+
+    await h.cmd_chart(message, make_state(), client)
+
+    assert "Nothing to chart" in message.answer.await_args.args[0]
+
+
+async def test_chart_command_backend_error_shows_friendly_message() -> None:
+    class FailingClient(FakeStatisticsBackendClient):
+        async def statistics_by_category(
+            self, start: datetime | None = None, end: datetime | None = None
+        ) -> list[CategoryTotal]:
+            request = httpx.Request("GET", "http://test/statistics/by-category")
+            raise httpx.ConnectError("boom", request=request)
+
+    message = make_message()
+
+    await h.cmd_chart(message, make_state(), FailingClient())
+
+    assert "couldn't reach" in message.answer.await_args.args[0].lower()
+
+
+async def test_chart_command_sets_view_state_with_the_active_preset() -> None:
+    client = FakeStatisticsBackendClient(
+        by_category=[CategoryTotal(category_id=uuid4(), total=100)]
+    )
+    message = make_message()
+    state = make_state()
+
+    await h.cmd_chart(message, state, client)
+
+    assert await state.get_state() == Statistics.view.state
+    assert (await state.get_data())["preset"] == STATISTICS_PERIOD_THIS_MONTH_CALLBACK
+
+
+async def test_chart_button_clicked_renders_the_chart_via_edit_text() -> None:
+    client = FakeStatisticsBackendClient(
+        by_category=[CategoryTotal(category_id=uuid4(), total=100)]
+    )
+    message = make_message()
+    callback = make_callback(STATISTICS_CHART_CALLBACK, message)
+
+    await h.on_chart_clicked(callback, make_state(), client)
+
+    callback.answer.assert_awaited_once()
+    message.edit_text.assert_awaited_once()
+    markup = message.edit_text.await_args.kwargs["reply_markup"]
+    assert markup is not None

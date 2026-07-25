@@ -16,6 +16,7 @@ from bot.keyboards import (
     SELECTED_PREFIX,
     STATISTICS_BY_CATEGORY_CALLBACK,
     STATISTICS_BY_TAG_CALLBACK,
+    STATISTICS_CHART_CALLBACK,
     STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK,
     STATISTICS_PERIOD_LAST_MONTH_CALLBACK,
     STATISTICS_PERIOD_THIS_MONTH_CALLBACK,
@@ -182,13 +183,14 @@ def test_statistics_keyboard_renders_presets_and_drilldown_entries() -> None:
         STATISTICS_PERIOD_LAST_3_MONTHS_CALLBACK,
         STATISTICS_BY_CATEGORY_CALLBACK,
         STATISTICS_BY_TAG_CALLBACK,
+        STATISTICS_CHART_CALLBACK,
     ]
     assert [b.text for b in buttons][:3] == [
         f"{SELECTED_PREFIX}This month",
         "Last month",
         "Last 3 months",
     ]
-    assert [b.text for b in buttons][3:] == ["By category…", "By tag…"]
+    assert [b.text for b in buttons][3:] == ["By category…", "By tag…", "📊 Chart"]
 
 
 def test_statistics_keyboard_marks_the_active_preset_only() -> None:
