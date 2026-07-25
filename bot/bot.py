@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher
 
 from bot.handlers.budgets import create_router as create_budgets_router
 from bot.handlers.categories import create_router as create_categories_router
+from bot.handlers.common import create_router as create_common_router
 from bot.handlers.expenses import create_router as create_expenses_router
 from bot.handlers.statistics import create_router as create_statistics_router
 from bot.handlers.tags import create_router as create_tags_router
@@ -28,6 +29,7 @@ def create_dispatcher(
     # event_from_user (see bot/middlewares.py docstring).
     dp.update.outer_middleware(AllowlistMiddleware(http_client, allowed_tg_ids, internal_token))
     # Feature routers (bot/handlers/) are registered here as M4 units land (U4.3+).
+    dp.include_router(create_common_router())
     dp.include_router(create_expenses_router())
     dp.include_router(create_categories_router())
     dp.include_router(create_tags_router())

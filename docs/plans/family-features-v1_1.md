@@ -191,7 +191,7 @@ family-timezone-correct "current month".
       chart" message without calling the formatter; handler test with
       fake client (no Telegram network) proves the period-picker reuse
       (same presets/bounds as `/statistics`).
-- [ ] **U2.5 Bot polish**: `/start` + `/help` (command list per role-
+- [x] **U2.5 Bot polish**: `/start` + `/help` (command list per role-
       agnostic text); `ExpenseRepository.list`/`get_by_period` gain
       `ORDER BY created_at DESC` (closes MVP D40 flag — repo-level, the
       one non-bot file); add-expense Confirm double-tap guard (clear
@@ -604,6 +604,28 @@ on U0.1/U0.2 and its own listed units.
   `StateFilter` for the command (same as `cmd_statistics`) and scoped to
   `Statistics.view` for the callback (same as the other view-level buttons).
 
+- D123 (2026-07-25, U2.5): new `bot/handlers/common.py` (not folded into an
+  existing handler module — `/start`/`/help` have no FSM state and no
+  backend calls, so they don't belong with any single feature area; the
+  module list in `bot/CLAUDE.md`'s Structure section gets a one-line update
+  in spirit, not touched here since it's a doc file outside this unit's
+  scope). `/help`'s text is a static, role-agnostic command list built by
+  hand from every router's registered commands (not generated) — the AC
+  only asks that `/help` render, and every account member sees the same
+  commands regardless of role (permission errors on individual commands
+  still surface from the API per-call, MVP D27). The add-expense Confirm
+  double-tap guard mirrors `on_delete_expense_confirmed`'s shape (U2.1)
+  exactly: `state.clear()` + `edit_reply_markup(reply_markup=None)` moved
+  before the `create_expense` call, gated on a data key (`category_id`)
+  that's only present before the first tap clears it — a second near-
+  simultaneous callback finds no `category_id` and returns without calling
+  the backend. `ExpenseRepository.list`/`get_by_period` both gained
+  `ORDER BY expenses.created_at DESC` (previously `list` had no ORDER BY at
+  all — insertion-order-ish but not guaranteed; `get_by_period` was
+  ascending). `get_by_category` was left ascending — not named in this
+  unit's summary line or AC, and changing it wasn't needed by any caller
+  (statistics drill-down sums/renders the whole set, order-independent).
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -928,13 +950,39 @@ on U0.1/U0.2 and its own listed units.
   updated (new `test_bot_charts.py` section + new statistics-handler rows).
   `verify.sh` green (491 non-integration tests). Not flagged RISKY in the
   plan — no reviewer subagent run.
-- Next: CP4 (`/expenses` author+category display + delete, needs U1.3 +
-  U2.1 — both done), CP5 (edit expense, needs U2.1b — done), and CP6 (period
-  statistics + category-breakdown chart, needs U1.2 + U2.3 + U2.4 — all done)
-  are all live-testable now. Recommended: CP0 live MVP test (if not already
-  done) → CP1 → follow Live-test checkpoints order (CP1…CP8), NOT strict
-  milestone order. Remaining M2 units: U2.5 polish; M3 (U3.1 smoke) still
-  open (all of M1 done).
+- Done: U2.5 (2026-07-25) — new `bot/handlers/common.py`: `/start`
+  (`cmd_start`, sends `WELCOME_TEXT`) and `/help` (`cmd_help`, sends the
+  static `HELP_TEXT` command list covering every registered command across
+  all handler modules); router registered in `bot/bot.py` (D123 — new
+  standalone module, no FSM state/backend calls so it doesn't fit any
+  existing feature-area handler file). `ExpenseRepository.list()` and
+  `get_by_period()` both gained `ORDER BY expenses.created_at DESC`
+  (closes MVP D40; `get_by_category` deliberately left unchanged, not
+  named by this unit — see D123). Add-expense `on_confirm`'s double-tap
+  guard now mirrors `on_delete_expense_confirmed` (U2.1): `state.clear()` +
+  `edit_reply_markup(reply_markup=None)` moved before the `create_expense`
+  call, gated on the `category_id` state key going missing after the first
+  tap clears it (closes MVP D39 reviewer NIT). Tests: 2 new in
+  `tests/test_bot_handlers_common.py` (/start and /help render, AC); 1 new
+  in `tests/test_bot_handlers_expenses.py`
+  (`test_add_expense_confirm_double_tap_issues_single_api_call`, AC); 2 new
+  `@integration` in `tests/test_expense_repo.py`
+  (`test_list_orders_newest_first`, `test_get_by_period_orders_newest_first`,
+  AC) — confirmed via `bash scripts/integration_docker.sh` (55 passed,
+  includes the two new tests) since verify.sh's fast gate excludes the
+  `integration` marker. `tests/README.md` updated (new common-handler
+  section + new expense-repo/expense-handler rows). `verify.sh` green (494
+  non-integration tests). Not flagged RISKY in the plan — no reviewer
+  subagent run; "Model: haiku-friendly except the repo change" from the
+  Units entry was not followed (whole unit done at the session's default
+  tier) since the unit was small enough to do as one pass rather than
+  split by file.
+- Next: all of M2 is done. CP4–CP8 (see Live-test checkpoints section) are
+  all live-testable now — CP8 specifically covers this unit's `/start`,
+  `/help`, newest-first list, and double-tap guard. Recommended: CP0 live
+  MVP test (if not already done) → CP1 → follow Live-test checkpoints order
+  (CP1…CP8), NOT strict milestone order. Only M3 (U3.1 e2e smoke,
+  `@integration`) remains open in this plan.
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Stop-and-ask
   gates: U1.6 (migrations/versions/) done, human-approved; U2.4's
   uv.lock gate no longer applies (D121 — matplotlib PNG approach dropped

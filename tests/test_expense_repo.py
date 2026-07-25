@@ -384,6 +384,69 @@ async def test_get_populates_user_name(db_conn: asyncpg.Connection) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
+async def test_list_orders_newest_first(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    oldest = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        created_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+    newest = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        created_at=datetime(2026, 7, 3, tzinfo=UTC),
+    )
+    middle = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        created_at=datetime(2026, 7, 2, tzinfo=UTC),
+    )
+
+    results = await repo.list(account_id=account_id)
+
+    assert [e.id for e in results] == [newest.id, middle.id, oldest.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_get_by_period_orders_newest_first(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    july_start = datetime(2026, 7, 1, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    oldest = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        created_at=datetime(2026, 7, 10, tzinfo=UTC),
+    )
+    newest = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        created_at=datetime(2026, 7, 20, tzinfo=UTC),
+    )
+
+    results = await repo.get_by_period(account_id, july_start, august_start)
+
+    assert [e.id for e in results] == [newest.id, oldest.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
 async def test_list_populates_user_name(db_conn: asyncpg.Connection) -> None:
     account_id = await make_account(db_conn)
     category_id = await make_category(db_conn, account_id=account_id)

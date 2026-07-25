@@ -94,7 +94,7 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
             {self._SELECT_WITH_AUTHOR}
             WHERE expenses.account_id = $1
               AND expenses.created_at >= $2 AND expenses.created_at < $3
-            ORDER BY expenses.created_at
+            ORDER BY expenses.created_at DESC
             """,
             account_id,
             start,
@@ -137,9 +137,12 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
             columns = list(filters.keys())
             where = " AND ".join(f"expenses.{col} = ${i}" for i, col in enumerate(columns, start=1))
             rows = await self._conn.fetch(
-                f"{self._SELECT_WITH_AUTHOR} WHERE {where}", *filters.values()
+                f"{self._SELECT_WITH_AUTHOR} WHERE {where} ORDER BY expenses.created_at DESC",
+                *filters.values(),
             )
         else:
-            rows = await self._conn.fetch(self._SELECT_WITH_AUTHOR)
+            rows = await self._conn.fetch(
+                f"{self._SELECT_WITH_AUTHOR} ORDER BY expenses.created_at DESC"
+            )
         expenses = [self._model.model_validate(dict(row)) for row in rows]
         return await self._attach_tags(expenses)

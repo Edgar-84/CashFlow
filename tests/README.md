@@ -70,6 +70,8 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 | `test_get_by_period_respects_month_boundaries_across_timezones` | `get_by_period()` bounds are instant-based (`>=`/`<`), correct regardless of the caller's UTC offset (D20) |
 | `test_sum_by_category_month_known_sums` | `sum_by_category_month()` sums match hand-computed totals; result values are `int`, not `Decimal` |
 | `test_get_by_period_scopes_by_account` | `get_by_period()` excludes another account's expenses |
+| `test_list_orders_newest_first` | `list()` returns rows newest-`created_at`-first regardless of insertion order (U2.5 AC) |
+| `test_get_by_period_orders_newest_first` | `get_by_period()` returns rows newest-`created_at`-first (U2.5 AC) |
 | `test_sum_by_category_month_scopes_by_account` | `sum_by_category_month()` excludes another account's expenses |
 | `test_create_with_duplicate_tag_ids_rolls_back_whole_expense` | A PK violation on duplicate `tag_ids` rolls back the whole `create()` — no partial expense left behind (D21) |
 | `test_get_populates_user_name` | `create()`/`get()` populate `user_name` via the `users.name` LEFT JOIN (D102) |
@@ -501,6 +503,15 @@ Hermetic — no real Telegram/network; middleware called directly with a fake
 | `test_injected_client_carries_headers_for_the_calling_tg_id` | The injected `BackendClient`'s requests carry that tg_id's `X-Telegram-User-Id` and the configured `X-Internal-Token` |
 | `test_dropped_update_is_logged` | Dropping a non-allowlisted update logs a `WARNING` record naming the tg_id |
 
+## Bot tests (`test_bot_handlers_common.py`) → [`bot/handlers/common.py`](../bot/handlers/common.py)
+Hermetic — no FSM state, no backend calls, so no fakes needed (U2.5 AC:
+/start and /help render).
+
+| Test | Checks |
+|---|---|
+| `test_start_renders_welcome_message` | `/start` sends `WELCOME_TEXT` (AC) |
+| `test_help_renders_command_list` | `/help` sends `HELP_TEXT`, which lists commands from every feature area (AC) |
+
 ## Bot tests (`test_bot_bot.py`) → [`bot/bot.py`](../bot/bot.py)
 Hermetic — no real Telegram/network; updates fed through the full dispatcher
 stack via `dp.feed_update` with a `MockTransport`-backed http client (U4.2 AC:
@@ -574,6 +585,7 @@ pre-selects the expense's current tags instead of starting empty).
 | `test_parse_amount_to_minor_units_valid` | `"12.50"`/`"12,50"`/`"1 234,56"`/`"1\xa0234.00"`/plain-integer/whitespace inputs all parse to the correct minor-units `int` (AC) |
 | `test_parse_amount_to_minor_units_invalid` | Non-numeric, negative, zero, multi-separator, empty/blank input all raise `ValueError` |
 | `test_happy_path_full_flow_creates_expense` | Full walkthrough (category → amount → comment → tags → confirm) ends in a `create_expense` call with the right `ExpenseCreate` and state cleared (AC) |
+| `test_add_expense_confirm_double_tap_issues_single_api_call` | Calling `on_confirm` twice (simulating a double-tap) issues exactly one `create_expense` call; keyboard dropped before the call, second tap is a no-op (U2.5 AC) |
 | `test_no_categories_never_starts_flow` | `/add` with no categories shows a message and never enters the FSM |
 | `test_no_tags_skips_tag_step_straight_to_confirm` | No tags on the account → flow goes straight from comment to confirm |
 | `test_invalid_amount_reprompts_and_stays_in_amount_state` | Unparseable amount text re-prompts and stays in `AddExpense.amount` (AC) |
