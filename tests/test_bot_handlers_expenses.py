@@ -239,6 +239,32 @@ async def test_happy_path_full_flow_creates_expense() -> None:
     confirm_callback.message.edit_text.assert_awaited_once()
 
 
+async def test_add_expense_confirm_double_tap_issues_single_api_call() -> None:
+    category = make_category()
+    client = FakeBackendClient(categories=[category])
+    state = make_state()
+    await state.set_state(AddExpense.confirm)
+    await state.update_data(
+        category_id=str(category.id),
+        category_name=category.name,
+        amount=1000,
+        comment=None,
+        selected_tag_ids=[],
+    )
+
+    first = make_callback()
+    second = make_callback()
+    await h.on_confirm(first, state, client)
+    await h.on_confirm(second, state, client)
+
+    assert len(client.created) == 1
+    # Keyboard dropped before the create call (double-tap guard, mirrors
+    # on_delete_expense_confirmed).
+    first.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+    second.message.edit_reply_markup.assert_not_awaited()
+    second.message.edit_text.assert_not_awaited()
+
+
 async def test_no_categories_never_starts_flow() -> None:
     client = FakeBackendClient(categories=[])
     state = make_state()

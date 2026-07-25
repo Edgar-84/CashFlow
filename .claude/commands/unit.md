@@ -25,7 +25,15 @@ Implement exactly ONE unit from an approved plan.
    if any decision was made, refresh STATE.
 8. Report: files changed, decisions, verify result, plus a drafted commit
    message (task-methodology skill's commit message format) and a drafted
-   PR body (task-methodology skill's PR body template) ready for the human
-   to use as-is. Do NOT commit and do NOT open the PR yourself.
+   PR body (task-methodology skill's PR body template). Do NOT commit and
+   do NOT open the PR yet — the human reviews the diff first.
+9. Ask: "Prepare PR for this unit?" If the human confirms, stage exactly
+   the files touched by this unit (never `git add -A`), commit with the
+   drafted message, push the branch (`-u origin <branch>` if not already
+   tracking), and open the PR with the drafted body — run commit/push/PR
+   as one uninterrupted sequence without pausing for approval between
+   them (git commit/push are pre-approved for this project in
+   .claude/settings.local.json). If the human declines, wants edits, or
+   doesn't respond with a clear yes, do nothing further.
 
 Arguments (unit id + plan file): $ARGUMENTS

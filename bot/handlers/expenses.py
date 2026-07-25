@@ -222,25 +222,35 @@ async def on_tags_done(callback: CallbackQuery, state: FSMContext) -> None:
 async def on_confirm(
     callback: CallbackQuery, state: FSMContext, client: ExpenseBackendClient
 ) -> None:
+    await callback.answer()
     data = await state.get_data()
+    category_id = data.get("category_id")
+    # A double-tap replays this handler after the first tap already cleared
+    # state below — with no data left to build a create call from, do nothing
+    # rather than issuing a second create_expense call (plan AC: double-tap ->
+    # single API call; same guard shape as on_delete_expense_confirmed, U2.1).
+    if category_id is None:
+        return
     expense_create = ExpenseCreate(
         amount=data["amount"],
         comment=data.get("comment"),
-        category_id=UUID(data["category_id"]),
+        category_id=UUID(category_id),
         tag_ids=[UUID(tid) for tid in data.get("selected_tag_ids", [])],
     )
-    await callback.answer()
+    await state.clear()
+    if isinstance(callback.message, Message):
+        # Drop the keyboard before the API call so a near-simultaneous second
+        # tap has nothing left to hit.
+        await callback.message.edit_reply_markup(reply_markup=None)
     try:
         expense = await client.create_expense(expense_create)
     except httpx.HTTPError:
         logger.exception("Failed to create expense")
-        await state.clear()
         if isinstance(callback.message, Message):
             await callback.message.edit_text(
                 "Something went wrong saving the expense. Please try again with /add."
             )
         return
-    await state.clear()
     if isinstance(callback.message, Message):
         await callback.message.edit_text(f"Expense saved: {_format_amount(expense.amount)}")
 
