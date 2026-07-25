@@ -151,7 +151,7 @@ family-timezone-correct "current month".
       detail → delete happy path, 403/404 → human message, double-tap →
       single API call; real-Dispatcher registration-order test
       (MVP D39/D40 precedent).
-- [ ] **U2.1b Expense edit flow** (split from U2.1 — same rationale as
+- [x] **U2.1b Expense edit flow** (split from U2.1 — same rationale as
       MVP D43): from the detail view, `EditExpense` FSM: pick field
       (amount/category/comment/tags) → enter/select new value →
       `client.update_expense`. `/cancel` registered before per-state
@@ -500,6 +500,47 @@ on U0.1/U0.2 and its own listed units.
   multiple `StatesGroup`s as varargs, matching any) so bailing out mid-picker
   works the same as every other FSM flow in this file.
 
+- D119 (2026-07-25, U2.1b): edit flow edits exactly ONE field per invocation
+  (pick field → enter/select value → `update_expense` → done), not a
+  multi-field batch like U2.2's budget-update flow — matches this unit's AC
+  wording literally ("pick field ... → enter/select new value →
+  `client.update_expense`", singular), and keeps the unit small (contrast
+  U2.2, which explicitly batches amount+threshold in one update). New
+  `/editexpense` command drives a new `EditExpense` StatesGroup (`select` →
+  `field` → one of `amount`/`category`/`comment`/`tags`). The picker
+  (recent-N, client-side sort by `created_at` desc) and detail-view
+  formatting are duplicated from `cmd_delete_expense`/`_format_expense_detail`
+  rather than factored into a shared helper — extracting one would mean
+  touching U2.1's already-shipped, already-tested delete flow, which this
+  unit's scope doesn't call for; the duplication is ~15 lines, not the
+  one-line case D118 already reasoned about. The four field-edit branches
+  live in one `on_edit_field_chosen` handler keyed on `callback.data` (a
+  plain string, not a `CallbackData` factory — there's no id to carry)
+  rather than four separate registrations, since amount/comment are trivial
+  one-liners and category/tags both need a client fetch first; a single
+  `_finish_edit(reply, state, client, update)` helper does the actual
+  `update_expense` call plus success/error message from any of the four
+  paths, parameterized on a `reply` callable so it works from both a
+  `Message.answer` (amount/comment, text-entry paths) and a
+  `CallbackQuery.message.edit_text` (category/tags, callback paths) call
+  site. Tags editing pre-selects the expense's *current* tags (read off the
+  `ExpenseResponse.tags` already sitting in `expenses_by_id` state data from
+  the picker step) rather than starting empty like `/add`'s tag step —
+  editing is a correction to existing data, not authoring new data, so
+  showing the current selection is the correct UX default. `on_tag_toggled`
+  (existing, from the add-expense flow) is reused as-is for
+  `EditExpense.tags` — it was already fully generic over the `tags`/
+  `selected_tag_ids` state-data keys with no `AddExpense`-specific
+  reference, so no fork was needed; the "Done" step differs (`on_tags_done`
+  moves to `AddExpense.confirm` and shows a summary, `on_edit_tags_done`
+  calls `_finish_edit` directly) so that part gets its own handler.
+  `TAGS_DONE_CALLBACK` (`"tags:done"`) is reused across both states the same
+  way `CONFIRM_CALLBACK`/`CANCEL_CALLBACK` are already reused across
+  `AddExpense`/`DeleteExpense` — no collision since aiogram's `StateFilter`
+  scopes each registration to its own current FSM state. `/cancel`'s
+  `StateFilter` widened again, to `StateFilter(AddExpense, DeleteExpense,
+  EditExpense)`.
+
 ## STATE (handoff)
 - Done: U0.1 (2026-07-21) — `config.family_tz` (default `"UTC"`), new
   `services/period.py::month_bounds(now, tz)`; `budget_service`,
@@ -723,16 +764,51 @@ on U0.1/U0.2 and its own listed units.
   `bash scripts/integration_docker.sh` green (53 integration tests, unchanged
   — no repo/service/API files touched by this unit). Not flagged RISKY in the
   plan — no reviewer subagent run yet.
+- Done: U2.1b (2026-07-25) — new `/editexpense` command: same picker (recent
+  N, sorted client-side) as `/deleteexpense` → detail view, but with an
+  Amount/Category/Comment/Tags field-picker keyboard (`edit_field_keyboard()`,
+  `bot/keyboards.py`) instead of Delete/Cancel → one of four value-entry
+  steps → `client.update_expense` → done (D119: exactly one field per
+  invocation, no loop back to the field picker). New `EditExpense`
+  StatesGroup (`select`/`field`/`amount`/`category`/`comment`/`tags`,
+  `bot/states.py`). Amount/comment re-entry are plain text (amount reuses
+  `parse_amount_to_minor_units` with the same invalid-input re-prompt as
+  `/add`'s amount step); category re-picks via the existing
+  `categories_keyboard`; tags reuses the existing (already-generic)
+  `on_tag_toggled` but pre-selects the expense's current tags instead of
+  starting empty (D119). A single `_finish_edit()` helper performs the
+  `update_expense` call and success/403/404/backend-unreachable messaging
+  for all four field branches. `/cancel` `StateFilter` widened to
+  `StateFilter(AddExpense, DeleteExpense, EditExpense)`. No backend/contract
+  changes (client already had `update_expense` since U4.1). Tests: 1 new in
+  `tests/test_bot_keyboards.py` (`edit_field_keyboard`); 16 new in
+  `tests/test_bot_handlers_expenses.py` — picker (recent-N+sort, empty,
+  backend error), select (field-picker detail view, unknown id reprompt),
+  per-field walkthroughs (amount, invalid-amount reprompt, comment,
+  category, category-fetch error, tags-with-preselection+toggle+done),
+  update-error messages (403/404, parametrized), cancel mid-flow, plus 2
+  real-`Dispatcher` registration-order tests (`/editexpense` reaches its
+  handler not `AddExpense.amount`'s catch-all; `/cancel` reaches the cancel
+  handler from `EditExpense.field`). `tests/README.md` updated. `verify.sh`
+  green (455 non-integration tests). No repo/service/API files touched —
+  `integration_docker.sh` not re-run (same reasoning as U2.1). Not flagged
+  RISKY in the plan — reviewed by the reviewer subagent same session:
+  **APPROVE**, one WARN fixed (the tags-field-picker's `list_tags()`
+  failure path had no test, unlike the category-field equivalent — added
+  `test_edit_field_tags_backend_error_shows_friendly_message`, bringing
+  `verify.sh` to 456 non-integration tests) and one NIT not fixed
+  (`cmd_edit_expense`'s picker-fetch block duplicates `cmd_delete_expense`'s
+  almost verbatim — already the deliberate D119 tradeoff, not revisited).
 - Next: CP4 (`/expenses` author+category display + delete, needs U1.3 +
-  U2.1 — both now done) is live-testable. Recommended: run the reviewer
-  subagent on U2.1 before/alongside CP4 (not flagged RISKY, but touches the
-  first delete-with-confirm bot flow — worth a second pair of eyes), then
-  CP0 live MVP test (if not already done) → CP1 → follow Live-test
-  checkpoints order (CP1…CP8), NOT strict milestone order. U2.1b (expense
-  edit flow) is the plan's next coding unit — same picker/detail-view shape
-  as U2.1 but ending in an edit FSM instead of delete. U2.2 landed early per
-  D111; later M2/M3 units are still open (U1.1–U1.6 now done — all of M1 is
-  complete).
+  U2.1 — both done) and CP5 (edit expense, needs U2.1b — now done) are both
+  live-testable. Recommended: run the reviewer subagent on U2.1 and U2.1b
+  (neither flagged RISKY, but both are bot FSM flows worth a second pair of
+  eyes — U2.1b especially for the four-branch field-edit dispatch and the
+  tag-preselection logic), then CP0 live MVP test (if not already done) →
+  CP1 → follow Live-test checkpoints order (CP1…CP8), NOT strict milestone
+  order. U2.2 landed early per D111; remaining M2 units (U2.3 statistics
+  picker, U2.4 pie chart — uv.lock ask-gate, U2.5 polish) and M3 (U3.1
+  smoke) are still open (all of M1 done).
 - Gotchas: decision ids start at D100 (MVP plan owns D1–D45). Stop-and-ask
   gates: U1.6 (migrations/versions/) done, human-approved; U2.4 (uv.lock)
   still open. MVP plan's pending items still stand: U4.4b reviewer pass

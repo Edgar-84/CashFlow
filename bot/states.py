@@ -43,3 +43,12 @@ class BudgetManage(StatesGroup):
 class DeleteExpense(StatesGroup):
     select = State()
     confirm = State()
+
+
+class EditExpense(StatesGroup):
+    select = State()
+    field = State()
+    amount = State()
+    category = State()
+    comment = State()
+    tags = State()

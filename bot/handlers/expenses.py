@@ -1,10 +1,13 @@
 """Expense-creation FSM (bot/CLAUDE.md canonical flow):
 category -> amount -> [comment] -> [tags] -> confirm.
 Also hosts the `/expenses` list view (U4.3b, plan Decision log D39) — a
-plain command handler, no FSM state involved — and the `/deleteexpense`
+plain command handler, no FSM state involved — the `/deleteexpense`
 picker -> detail view -> delete-with-confirm flow (U2.1, `DeleteExpense`
 StatesGroup), which reuses `confirm_keyboard()`'s generic Confirm/Cancel
-buttons rather than a bespoke keyboard.
+buttons rather than a bespoke keyboard, and the `/editexpense` picker ->
+detail view -> field picker -> new value -> update flow (U2.1b,
+`EditExpense` StatesGroup) — one field edited per flow, no loop back to
+the field picker.
 
 FSM state stores fetched CategoryResponse/TagResponse objects directly (not
 just ids) so a callback (category pick, tag toggle) can look up display
@@ -23,6 +26,7 @@ per test in tests/test_bot_bot.py).
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Protocol
 from uuid import UUID
@@ -36,18 +40,23 @@ from aiogram.types import CallbackQuery, Message
 from bot.keyboards import (
     CANCEL_CALLBACK,
     CONFIRM_CALLBACK,
+    EDIT_FIELD_AMOUNT_CALLBACK,
+    EDIT_FIELD_CATEGORY_CALLBACK,
+    EDIT_FIELD_COMMENT_CALLBACK,
+    EDIT_FIELD_TAGS_CALLBACK,
     TAGS_DONE_CALLBACK,
     CategoryCallback,
     ExpenseCallback,
     TagCallback,
     categories_keyboard,
     confirm_keyboard,
+    edit_field_keyboard,
     expenses_keyboard,
     tags_keyboard,
 )
-from bot.states import AddExpense, DeleteExpense
+from bot.states import AddExpense, DeleteExpense, EditExpense
 from models.category import CategoryResponse
-from models.expense import ExpenseCreate, ExpenseResponse
+from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.tag import TagResponse
 
 logger = logging.getLogger(__name__)
@@ -61,6 +70,7 @@ class ExpenseBackendClient(Protocol):
     async def list_tags(self) -> list[TagResponse]: ...
     async def create_expense(self, data: ExpenseCreate) -> ExpenseResponse: ...
     async def list_expenses(self) -> list[ExpenseResponse]: ...
+    async def update_expense(self, expense_id: UUID, data: ExpenseUpdate) -> ExpenseResponse: ...
     async def delete_expense(self, expense_id: UUID) -> None: ...
 
 
@@ -422,18 +432,202 @@ async def on_delete_expense_cancelled(callback: CallbackQuery, state: FSMContext
         await callback.message.edit_text("Cancelled.")
 
 
+# -- edit flow: picker -> detail view -> field -> new value -> update -------
+
+_EDIT_FIELD_CALLBACKS = {
+    EDIT_FIELD_AMOUNT_CALLBACK,
+    EDIT_FIELD_CATEGORY_CALLBACK,
+    EDIT_FIELD_COMMENT_CALLBACK,
+    EDIT_FIELD_TAGS_CALLBACK,
+}
+
+
+async def cmd_edit_expense(
+    message: Message, state: FSMContext, client: ExpenseBackendClient
+) -> None:
+    try:
+        expenses = await client.list_expenses()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch expenses")
+        await message.answer(_BACKEND_UNREACHABLE)
+        return
+    if not expenses:
+        await message.answer("No expenses to edit yet.")
+        return
+    try:
+        categories = await client.list_categories()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch categories")
+        await message.answer(_BACKEND_UNREACHABLE)
+        return
+    category_names = {category.id: category.name for category in categories}
+    # Same "recent N, sorted client-side" pattern as cmd_delete_expense (D118)
+    # — the backend doesn't guarantee newest-first order yet (U2.5).
+    recent = sorted(expenses, key=lambda expense: expense.created_at, reverse=True)
+    recent = recent[:_MAX_PICKER_SHOWN]
+    await state.set_state(EditExpense.select)
+    await state.update_data(
+        expenses_by_id={str(expense.id): expense for expense in recent},
+        category_names=category_names,
+    )
+    items = [
+        (expense.id, f"{expense.created_at:%m-%d} {_format_amount(expense.amount)}")
+        for expense in recent
+    ]
+    await message.answer("Pick an expense to edit:", reply_markup=expenses_keyboard(items))
+
+
+async def on_edit_expense_selected(
+    callback: CallbackQuery, callback_data: ExpenseCallback, state: FSMContext
+) -> None:
+    data = await state.get_data()
+    expenses_by_id: dict[str, ExpenseResponse] = data.get("expenses_by_id", {})
+    expense = expenses_by_id.get(str(callback_data.expense_id))
+    if expense is None:
+        await callback.answer("Unknown expense, please pick again.", show_alert=True)
+        return
+    category_names: dict[UUID, str] = data.get("category_names", {})
+    category_name = category_names.get(expense.category_id, "Unknown")
+    await state.update_data(edit_target_id=str(expense.id))
+    await state.set_state(EditExpense.field)
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            "What do you want to edit?\n\n" + _format_expense_detail(expense, category_name),
+            reply_markup=edit_field_keyboard(),
+        )
+
+
+async def on_edit_field_chosen(
+    callback: CallbackQuery, state: FSMContext, client: ExpenseBackendClient
+) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
+    if callback.data == EDIT_FIELD_AMOUNT_CALLBACK:
+        await state.set_state(EditExpense.amount)
+        await callback.message.edit_text("Enter the new amount (e.g. 12.50 or 12,50):")
+        return
+    if callback.data == EDIT_FIELD_COMMENT_CALLBACK:
+        await state.set_state(EditExpense.comment)
+        await callback.message.edit_text("Enter the new comment:")
+        return
+    if callback.data == EDIT_FIELD_CATEGORY_CALLBACK:
+        try:
+            categories = await client.list_categories()
+        except httpx.HTTPError:
+            logger.exception("Failed to fetch categories")
+            await callback.message.edit_text(_BACKEND_UNREACHABLE)
+            return
+        await state.set_state(EditExpense.category)
+        await callback.message.edit_text(
+            "Choose a new category:", reply_markup=categories_keyboard(categories)
+        )
+        return
+    # EDIT_FIELD_TAGS_CALLBACK
+    data = await state.get_data()
+    expenses_by_id: dict[str, ExpenseResponse] = data.get("expenses_by_id", {})
+    target = expenses_by_id.get(str(data.get("edit_target_id")))
+    try:
+        tags = await client.list_tags()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch tags")
+        await callback.message.edit_text(_BACKEND_UNREACHABLE)
+        return
+    selected = {str(tag.id) for tag in (target.tags if target else [])}
+    await state.update_data(tags=tags, selected_tag_ids=list(selected))
+    await state.set_state(EditExpense.tags)
+    await callback.message.edit_text(
+        "Pick tags (tap Done when finished):",
+        reply_markup=tags_keyboard(tags, {UUID(tid) for tid in selected}),
+    )
+
+
+async def _finish_edit(
+    reply: Callable[[str], Awaitable[object]],
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    update: ExpenseUpdate,
+) -> None:
+    data = await state.get_data()
+    target_id = data.get("edit_target_id")
+    await state.clear()
+    if target_id is None:
+        return
+    try:
+        expense = await client.update_expense(UUID(target_id), update)
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Failed to update expense")
+        await reply(_error_message(exc))
+        return
+    except httpx.HTTPError:
+        logger.exception("Failed to update expense")
+        await reply(_BACKEND_UNREACHABLE)
+        return
+    await reply(f"Expense updated: {_format_amount(expense.amount)}")
+
+
+async def on_edit_amount_entered(
+    message: Message, state: FSMContext, client: ExpenseBackendClient
+) -> None:
+    try:
+        amount = parse_amount_to_minor_units(message.text or "")
+    except ValueError:
+        await message.answer("That doesn't look like a valid amount. Try again (e.g. 12.50):")
+        return
+    await _finish_edit(message.answer, state, client, ExpenseUpdate(amount=amount))
+
+
+async def on_edit_comment_entered(
+    message: Message, state: FSMContext, client: ExpenseBackendClient
+) -> None:
+    await _finish_edit(message.answer, state, client, ExpenseUpdate(comment=message.text))
+
+
+async def on_edit_category_chosen(
+    callback: CallbackQuery,
+    callback_data: CategoryCallback,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
+    await _finish_edit(
+        callback.message.edit_text,
+        state,
+        client,
+        ExpenseUpdate(category_id=callback_data.category_id),
+    )
+
+
+async def on_edit_tags_done(
+    callback: CallbackQuery, state: FSMContext, client: ExpenseBackendClient
+) -> None:
+    await callback.answer()
+    if not isinstance(callback.message, Message):
+        return
+    data = await state.get_data()
+    selected_ids = [UUID(tid) for tid in data.get("selected_tag_ids", [])]
+    await _finish_edit(
+        callback.message.edit_text, state, client, ExpenseUpdate(tag_ids=selected_ids)
+    )
+
+
 def create_router() -> Router:
     router = Router(name="expenses")
     router.message.register(cmd_add_expense, Command("add"))
     router.message.register(cmd_list_expenses, Command("expenses"))
     router.message.register(cmd_delete_expense, Command("deleteexpense"))
+    router.message.register(cmd_edit_expense, Command("editexpense"))
     # /cancel must be registered before the catch-all per-state text handlers
-    # below (on_amount_entered, on_comment_entered) — aiogram dispatches to the
-    # first handler whose filters match in registration order, and those two
-    # handlers have no command exclusion, so a later-registered /cancel handler
-    # would never be reached while in the amount/comment states.
+    # below (on_amount_entered, on_comment_entered, on_edit_amount_entered,
+    # on_edit_comment_entered) — aiogram dispatches to the first handler whose
+    # filters match in registration order, and those handlers have no command
+    # exclusion, so a later-registered /cancel handler would never be reached
+    # while in one of those states.
     router.message.register(
-        on_cancel_command, StateFilter(AddExpense, DeleteExpense), Command("cancel")
+        on_cancel_command, StateFilter(AddExpense, DeleteExpense, EditExpense), Command("cancel")
     )
     router.callback_query.register(
         on_category_chosen, AddExpense.category, CategoryCallback.filter()
@@ -455,5 +649,20 @@ def create_router() -> Router:
     )
     router.callback_query.register(
         on_delete_expense_cancelled, DeleteExpense.confirm, F.data == CANCEL_CALLBACK
+    )
+    router.callback_query.register(
+        on_edit_expense_selected, EditExpense.select, ExpenseCallback.filter()
+    )
+    router.callback_query.register(
+        on_edit_field_chosen, EditExpense.field, F.data.in_(_EDIT_FIELD_CALLBACKS)
+    )
+    router.message.register(on_edit_amount_entered, EditExpense.amount)
+    router.message.register(on_edit_comment_entered, EditExpense.comment)
+    router.callback_query.register(
+        on_edit_category_chosen, EditExpense.category, CategoryCallback.filter()
+    )
+    router.callback_query.register(on_tag_toggled, EditExpense.tags, TagCallback.filter())
+    router.callback_query.register(
+        on_edit_tags_done, EditExpense.tags, F.data == TAGS_DONE_CALLBACK
     )
     return router

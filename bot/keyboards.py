@@ -37,6 +37,11 @@ TAGS_DONE_CALLBACK = "tags:done"
 CONFIRM_CALLBACK = "expense:confirm"
 CANCEL_CALLBACK = "expense:cancel"
 
+EDIT_FIELD_AMOUNT_CALLBACK = "editfield:amount"
+EDIT_FIELD_CATEGORY_CALLBACK = "editfield:category"
+EDIT_FIELD_COMMENT_CALLBACK = "editfield:comment"
+EDIT_FIELD_TAGS_CALLBACK = "editfield:tags"
+
 SELECTED_PREFIX = "✅ "
 
 
@@ -86,6 +91,18 @@ def expenses_keyboard(items: list[tuple[UUID, str]]) -> InlineKeyboardMarkup:
     for expense_id, label in items:
         builder.button(text=label, callback_data=ExpenseCallback(expense_id=expense_id))
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def edit_field_keyboard() -> InlineKeyboardMarkup:
+    """Field picker for the expense-edit flow (U2.1b) — plain string
+    callback-data (no id to carry), unlike expenses_keyboard/CategoryCallback."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Amount", callback_data=EDIT_FIELD_AMOUNT_CALLBACK)
+    builder.button(text="Category", callback_data=EDIT_FIELD_CATEGORY_CALLBACK)
+    builder.button(text="Comment", callback_data=EDIT_FIELD_COMMENT_CALLBACK)
+    builder.button(text="Tags", callback_data=EDIT_FIELD_TAGS_CALLBACK)
+    builder.adjust(2)
     return builder.as_markup()
 
 
