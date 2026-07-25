@@ -1,0 +1,62 @@
+name: Deploy
+
+# CD (D42): on push to master, build+push the image to GHCR tagged
+# `latest` + `<sha>` (the sha tag is the rollback path), then SSH to the
+# server and pull+recreate. The CI workflow's `verify`/`integration` jobs
+# already gate every PR into master, so this only ever deploys a
+# smoke-tested master.
+
+on:
+  push:
+    branches: [master]
+
+env:
+  IMAGE: ghcr.io/edgar-84/cashflow
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Add `platforms: linux/arm64` here if the server is a t4g
+          # (Graviton/ARM) instance (D42) — omitted since the instance
+          # type isn't decided yet; default is the runner's linux/amd64.
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/bot
+            docker compose pull
+            docker compose up -d

@@ -174,7 +174,7 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
 
 ## Milestone M6 — Deployment (CD)
 
-- [ ] **U6.1 CD flow: GitHub Actions → GHCR → EC2** (design locked in D42;
+- [x] **U6.1 CD flow: GitHub Actions → GHCR → EC2** (design locked in D42;
       only hard prerequisite is U4.3a, but sequenced after M5 so the
       pipeline only ever auto-deploys a smoke-tested master):
       1. `docker-compose.prod.yml`: the three services change to
@@ -1536,6 +1536,44 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   text. Green via `bash scripts/integration_docker.sh` (46 integration
   tests: 45 + 1 new) and the full suite; verify.sh unaffected (integration
   marker excluded, 347 unit tests still green) — M5 done.
+- D47 (U6.1): implementation notes on top of D42, no design changes.
+  Logging rotation sized `max-size: 10m` / `max-file: 3` per service — D42
+  didn't pin values; revisit if disk fills faster than expected. The build
+  step omits `platforms: linux/arm64` (D42: add it if the instance is
+  t4g/Graviton) because the actual EC2 instance type isn't chosen yet —
+  flag for revisit once it is; if ARM, add that line to
+  `.github/workflows/deploy.yml`. The build-and-push job authenticates to
+  GHCR with the workflow's own `GITHUB_TOKEN` (via `docker/login-action`,
+  `packages: write` permission) rather than a PAT — sufficient for pushing
+  from Actions; the separate read-only PAT from D42 point 6 is still
+  needed for the server's own `docker login` to pull.
+- Done: U6.1 (`docker-compose.prod.yml`: all three services' `image:`
+  changed to `${CASHFLOW_IMAGE:-cashflow:prod}` [keeping `build: .`] plus a
+  shared `x-logging` json-file rotation block; `.github/workflows/deploy.yml`
+  new — `build-and-push` job pushes `ghcr.io/edgar-84/cashflow:latest` +
+  `:<sha>` via `docker/build-push-action` on push to master, `deploy` job
+  SSHes in [`appleboy/ssh-action`, repo secrets `SSH_HOST`/`SSH_USER`/
+  `SSH_PRIVATE_KEY`] and runs `docker compose pull && up -d`; README gained
+  a "Deployment" section — one-time server bootstrap [EC2, docker install,
+  `/opt/bot/` layout, `.env` `chmod 600`, `CASHFLOW_IMAGE` var, GHCR PAT
+  login, GitHub secrets] and day-2 ops [rollback via sha tag, config-change
+  via `--force-recreate`, migrations note, logs]). AC verified: `docker
+  compose -f docker-compose.prod.yml config` resolves `image` to
+  `cashflow:prod` with no var and to the GHCR value with `CASHFLOW_IMAGE`
+  set; both workflow YAMLs lint-clean via `docker run rhysd/actionlint`;
+  verify.sh green, no Python changes (494 unit tests). M6 (Deployment/CD)
+  done — all M0-M6 units in this plan are now checked off.
+- Next: none — this plan's units (M0-M6) are all implemented. What remains
+  is the human-executed, README-documented server bootstrap (EC2 launch,
+  docker install, `/opt/bot/.env`, GHCR PAT login, GitHub repo secrets)
+  before CD can actually deploy anywhere; none of that is automatable from
+  here. Further work is V2 scope (root CLAUDE.md "Out of scope") or lives
+  in the sibling `family-features-v1_1.md` plan.
+- Gotchas: same as the U5.1 entry above (still current) — plus: the deploy
+  workflow (`.github/workflows/deploy.yml`) is untested against a live
+  GHCR/EC2 target since server bootstrap hasn't happened yet; its
+  correctness rests on `docker compose config` resolution + actionlint,
+  not an actual deploy run.
 
 
 ## Deferred decisions (tracked, not forgotten)
