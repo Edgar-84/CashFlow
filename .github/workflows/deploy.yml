@@ -50,6 +50,21 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     steps:
+      - uses: actions/checkout@v4
+
+      # Compose file is code, not secret config — sync it from the repo on
+      # every deploy so server-side config can never drift from master.
+      # .env is deliberately NOT touched here: it's hand-written, holds
+      # secrets, and is never checked into the repo.
+      - name: Copy compose file to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.prod.yml"
+          target: "/opt/bot"
+
       - name: SSH deploy
         uses: appleboy/ssh-action@v1
         with:
@@ -58,6 +73,6 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/bot
-            docker compose pull
-            docker compose up -d
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
             docker image prune -f

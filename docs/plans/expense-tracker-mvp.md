@@ -1552,7 +1552,22 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   layers on every deploy with no cleanup story. `-f` alone (not `-a`)
   only removes untagged images, so cached rollback tags (`<sha>`) are
   untouched; any tag not cached locally still re-pulls from GHCR on
-  demand.
+  demand. Second pre-merge addition (PR review): the original design only
+  ever updated the *image* on the server — `docker-compose.prod.yml`
+  itself had no sync path, so a future edit to that file (new service,
+  healthcheck, logging config) would silently never reach the server.
+  Fixed by adding an `appleboy/scp-action` step to the `deploy` job
+  (needs its own `actions/checkout@v4` — jobs don't share a prior job's
+  checkout) that copies `docker-compose.prod.yml` to `/opt/bot/` on every
+  deploy, same filename as the repo (no rename to `docker-compose.yml` —
+  avoids a name mismatch between repo and server); the SSH script and
+  README's manual commands all now pass `-f docker-compose.prod.yml`
+  explicitly rather than relying on compose's default-filename lookup.
+  `.env` is deliberately excluded from this sync (secrets, hand-written,
+  never in the repo). This also simplified the README bootstrap sequence:
+  the old manual "copy the compose file" step is gone, and "first run" is
+  now just "the next push to master" instead of a manual command — CD's
+  first-ever run bootstraps the whole stack.
 - Done: U6.1 (`docker-compose.prod.yml`: all three services' `image:`
   changed to `${CASHFLOW_IMAGE:-cashflow:prod}` [keeping `build: .`] plus a
   shared `x-logging` json-file rotation block; `.github/workflows/deploy.yml`
