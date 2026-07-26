@@ -134,6 +134,11 @@ procedure — not automated.
   master apply automatically — no separate migration step.
 - **Logs**: `docker compose logs -f [api|bot|migrate]`. Each service logs
   to json-file with rotation (10m × 3 files) so disk usage stays bounded.
+- **Image cleanup**: every deploy runs `docker image prune -f` after
+  `up -d`, removing dangling/untagged layers so disk usage doesn't grow
+  unbounded on a long-lived server. Only untagged images are removed —
+  rollback tags (`<sha>`) already pulled stay local, and any tag not
+  cached locally re-pulls from GHCR on demand.
 
 ## Tests & checks
 

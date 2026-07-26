@@ -1546,7 +1546,13 @@ Model for M4: sonnet; repetitive handler/keyboard parts → haiku.
   GHCR with the workflow's own `GITHUB_TOKEN` (via `docker/login-action`,
   `packages: write` permission) rather than a PAT — sufficient for pushing
   from Actions; the separate read-only PAT from D42 point 6 is still
-  needed for the server's own `docker login` to pull.
+  needed for the server's own `docker login` to pull. Pre-merge addition
+  (PR review): the SSH deploy script gained `docker image prune -f` after
+  `up -d` — a long-lived server otherwise accumulates dangling/untagged
+  layers on every deploy with no cleanup story. `-f` alone (not `-a`)
+  only removes untagged images, so cached rollback tags (`<sha>`) are
+  untouched; any tag not cached locally still re-pulls from GHCR on
+  demand.
 - Done: U6.1 (`docker-compose.prod.yml`: all three services' `image:`
   changed to `${CASHFLOW_IMAGE:-cashflow:prod}` [keeping `build: .`] plus a
   shared `x-logging` json-file rotation block; `.github/workflows/deploy.yml`
