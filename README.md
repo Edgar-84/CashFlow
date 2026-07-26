@@ -56,9 +56,9 @@ How the three ways to run map onto this:
    `DATABASE_URL` in your laptop `.env` must be the session-pooler URL.
    With the dev bot token in your `.env`, this can safely run while the
    real server is live.
-3. **Production (EC2)** — deployed by CD from `master` (see plan M6);
-   the server's `.env` is created once by hand and edited in place when
-   values change, followed by `docker compose up -d --force-recreate`.
+3. **Production (EC2)** — deployed by CD from `master` (see "Deployment"
+   below); the server's `.env` is created once by hand and edited in place
+   when values change, followed by `docker compose up -d --force-recreate`.
 
 ## Run
 
@@ -90,6 +90,62 @@ uv run alembic upgrade head                # apply migrations
 uv run uvicorn main:app --reload           # backend on :8000
 uv run python -m bot.bot                   # bot (separate terminal)
 ```
+
+## Deployment
+
+Merges to `master` auto-deploy via `.github/workflows/deploy.yml`: build
+and push `ghcr.io/edgar-84/cashflow` tagged `latest` + `<commit sha>`, copy
+`docker-compose.prod.yml` to the server (so server-side config can never
+drift from what's in the repo), then SSH in to
+`docker compose -f docker-compose.prod.yml pull && ... up -d`. The CI
+`verify`/`integration` jobs gate every PR into master first, so CD only
+ever deploys a smoke-tested build. `.env` is the one piece that stays
+manual — it holds secrets and is never checked into the repo, so CD never
+touches it.
+
+### One-time server bootstrap
+
+1. Launch an EC2 instance, install Docker + the Compose plugin.
+2. `mkdir -p /opt/bot` — CD copies `docker-compose.prod.yml` into this
+   directory itself on every deploy; nothing to copy by hand.
+3. Hand-write `/opt/bot/.env` (see "Environments & `.env`" above — prod
+   `BOT_TOKEN`, Supabase session-pooler `DATABASE_URL`, a strong
+   `INTERNAL_TOKEN`, all family `ALLOWED_TG_IDS`), then
+   `chmod 600 /opt/bot/.env`.
+4. Add `CASHFLOW_IMAGE=ghcr.io/edgar-84/cashflow:latest` to that `.env` —
+   without it, compose falls back to `cashflow:prod` (a local build) and
+   CD's `pull` has nothing to update.
+5. Create a GHCR read-only PAT (`read:packages` scope) and
+   `docker login ghcr.io -u <github-user> --password-stdin` once on the
+   server so `docker compose pull` can fetch a private image.
+6. In the GitHub repo, add secrets `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`
+   (a key authorized on the server for that user) — both the compose-file
+   copy step and the `deploy` job in `.github/workflows/deploy.yml` use
+   them.
+7. First run: once 1–6 are done, the next push to `master` (e.g. this PR's
+   merge) performs the very first deploy automatically — copies the
+   compose file, pulls the image, applies migrations via the one-shot
+   `migrate` service, starts api+bot. No manual command needed.
+
+### Day-2 ops
+
+- **Rollback**: pin a known-good tag in `/opt/bot/.env`
+  (`CASHFLOW_IMAGE=ghcr.io/edgar-84/cashflow:<sha>`) and
+  `docker compose -f docker-compose.prod.yml up -d --force-recreate`, or
+  `git revert` the bad commit on `master` and let CD redeploy `latest`.
+- **Config change**: edit `/opt/bot/.env`, then
+  `docker compose -f docker-compose.prod.yml up -d --force-recreate`.
+- **Migrations**: every deploy re-runs the one-shot `migrate` service;
+  `alembic upgrade head` is idempotent, so schema changes merged to
+  master apply automatically — no separate migration step.
+- **Logs**: `docker compose -f docker-compose.prod.yml logs -f [api|bot|migrate]`.
+  Each service logs
+  to json-file with rotation (10m × 3 files) so disk usage stays bounded.
+- **Image cleanup**: every deploy runs `docker image prune -f` after
+  `up -d`, removing dangling/untagged layers so disk usage doesn't grow
+  unbounded on a long-lived server. Only untagged images are removed —
+  rollback tags (`<sha>`) already pulled stay local, and any tag not
+  cached locally re-pulls from GHCR on demand.
 
 ## Tests & checks
 

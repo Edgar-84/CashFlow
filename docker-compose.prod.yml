@@ -7,19 +7,30 @@
 # and is the only client of the api, reached over the internal compose
 # network as http://api:8000. X-Internal-Token stays the auth layer.
 #
+# `image` defaults to a local build (laptop prod-config test, D42); the
+# server's .env sets CASHFLOW_IMAGE=ghcr.io/edgar-84/cashflow:latest so CD
+# can `docker compose pull && up -d` without rebuilding.
+#
 # Run: docker compose -f docker-compose.prod.yml up -d --build
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   migrate:
     build: .
-    image: cashflow:prod
+    image: ${CASHFLOW_IMAGE:-cashflow:prod}
     command: alembic upgrade head
     env_file: .env
     restart: "no"
+    logging: *default-logging
 
   api:
     build: .
-    image: cashflow:prod
+    image: ${CASHFLOW_IMAGE:-cashflow:prod}
     command: uvicorn main:app --host 0.0.0.0 --port 8000
     env_file: .env
     restart: unless-stopped
@@ -38,10 +49,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging: *default-logging
 
   bot:
     build: .
-    image: cashflow:prod
+    image: ${CASHFLOW_IMAGE:-cashflow:prod}
     command: python -m bot.bot
     env_file: .env
     environment:
@@ -50,3 +62,4 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    logging: *default-logging
