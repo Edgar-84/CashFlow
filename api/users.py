@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from api.deps import get_user_service, require_admin
+from api.deps import get_current_user, get_user_service, require_admin
 from models.user import UserCreate, UserResponse, UserUpdate
 from services.user_service import UserService
 
@@ -16,6 +16,13 @@ async def list_users(
     service: Annotated[UserService, Depends(get_user_service)],
 ) -> list[UserResponse]:
     return await service.list(admin.account_id)
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_route(
+    user: Annotated[UserResponse, Depends(get_current_user)],
+) -> UserResponse:
+    return user
 
 
 @router.get("/{user_id}", response_model=UserResponse)
