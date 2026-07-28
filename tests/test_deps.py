@@ -4,9 +4,14 @@ Hermetic: repositories are replaced with in-memory fakes via
 ``app.dependency_overrides`` — no DB, no network (tests/CLAUDE.md).
 """
 
+import hashlib
+import hmac
+import json
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated, Any
+from urllib.parse import parse_qsl, urlencode
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,10 +20,12 @@ from httpx import ASGITransport, AsyncClient
 
 from api import deps
 from api.deps import (
+    InitDataError,
     PermissionChecker,
     PermissionDecision,
     enforce_ownership,
     resolve_permission,
+    validate_init_data,
 )
 from config import get_settings
 from models.enums import Action, Resource, Role
@@ -59,6 +66,19 @@ def make_permission_row(
         can_delete=can_delete,
         own_only=own_only,
     )
+
+
+def build_init_data(bot_token: str, user_id: int, *, auth_date: int | None = None) -> str:
+    """A validly signed ``initData`` query string, per Telegram's spec."""
+    fields = {
+        "auth_date": str(auth_date if auth_date is not None else int(time.time())),
+        "query_id": "AAHtest",
+        "user": json.dumps({"id": user_id}),
+    }
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
+    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    fields["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    return urlencode(fields)
 
 
 class FakeUserRepo:
@@ -264,6 +284,54 @@ def test_enforce_ownership_allows_foreign_record_when_not_own_only() -> None:
     enforce_ownership(decision, user, owner_id=uuid4())  # must not raise
 
 
+# --- validate_init_data: HMAC per Telegram's initData spec --------------------
+
+
+def test_validate_init_data_returns_tg_id_for_valid_payload() -> None:
+    init_data = build_init_data("test-bot-token", user_id=555)
+
+    assert validate_init_data(init_data, "test-bot-token", max_age_sec=86400) == 555
+
+
+def test_validate_init_data_rejects_tampered_hash() -> None:
+    init_data = build_init_data("test-bot-token", user_id=555)
+    tampered = dict(parse_qsl(init_data))
+    tampered["user"] = json.dumps({"id": 999})  # change payload, keep the original hash
+
+    with pytest.raises(InitDataError):
+        validate_init_data(urlencode(tampered), "test-bot-token", max_age_sec=86400)
+
+
+def test_validate_init_data_rejects_expired_auth_date() -> None:
+    stale_auth_date = int(time.time()) - 86400 - 60
+    init_data = build_init_data("test-bot-token", user_id=555, auth_date=stale_auth_date)
+
+    with pytest.raises(InitDataError):
+        validate_init_data(init_data, "test-bot-token", max_age_sec=86400)
+
+
+def test_validate_init_data_matches_independently_computed_vector() -> None:
+    # Hardcoded, not built via build_init_data: the hash below was computed
+    # out-of-band with `openssl dgst -sha256 -hmac` (two commands, not this
+    # Python HMAC code path) against auth_date=1700000000, query_id=AAHtest,
+    # user={"id": 42}. Catches a systematic error (e.g. swapped key/msg
+    # order) that a self-consistent test built from the same code could not.
+    bot_token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+    init_data = (
+        "auth_date=1700000000&query_id=AAHtest&user=%7B%22id%22%3A+42%7D"
+        "&hash=6723e02845344c82bab96703f65c66351ad46ef62eb038229909e62603c605b9"
+    )
+
+    assert validate_init_data(init_data, bot_token, max_age_sec=10_000_000_000) == 42
+
+
+def test_validate_init_data_rejects_wrong_bot_token() -> None:
+    init_data = build_init_data("test-bot-token", user_id=555)
+
+    with pytest.raises(InitDataError):
+        validate_init_data(init_data, "some-other-bot-token", max_age_sec=86400)
+
+
 # --- HTTP surface: token + header 401s, checker wiring ------------------------
 
 
@@ -401,6 +469,61 @@ async def test_checker_consults_permission_row(member: UserResponse, viewer: Use
         response = await client.get("/expenses", headers=auth_headers(100))
 
     assert response.status_code == 403
+
+
+def init_data_headers(tg_id: int, **kwargs: Any) -> dict[str, str]:
+    return {"X-Telegram-Init-Data": build_init_data(get_settings().bot_token, tg_id, **kwargs)}
+
+
+async def test_init_data_valid_payload_resolves_user(
+    http_client: AsyncClient, member: UserResponse
+) -> None:
+    # No X-Internal-Token sent at all: the initData path is a full substitute,
+    # not an addition to the bot's header pair.
+    response = await http_client.get("/expenses", headers=init_data_headers(100))
+
+    assert response.status_code == 200
+    assert response.json() == {"user_id": str(member.id)}
+
+
+async def test_init_data_tampered_hash_is_401(http_client: AsyncClient) -> None:
+    tampered = dict(parse_qsl(build_init_data(get_settings().bot_token, 100)))
+    tampered["user"] = json.dumps({"id": 999})
+
+    response = await http_client.get(
+        "/expenses", headers={"X-Telegram-Init-Data": urlencode(tampered)}
+    )
+
+    assert response.status_code == 401
+
+
+async def test_init_data_expired_is_401(http_client: AsyncClient) -> None:
+    stale_auth_date = int(time.time()) - get_settings().initdata_max_age_sec - 60
+
+    response = await http_client.get(
+        "/expenses", headers=init_data_headers(100, auth_date=stale_auth_date)
+    )
+
+    assert response.status_code == 401
+
+
+async def test_init_data_well_formed_but_unknown_tg_id_is_401(http_client: AsyncClient) -> None:
+    response = await http_client.get("/expenses", headers=init_data_headers(999999))
+
+    assert response.status_code == 401
+
+
+async def test_init_data_produces_same_permission_decision_as_header_pair(
+    http_client: AsyncClient,
+) -> None:
+    # Member updating an expense is allowed but own_only per the default matrix
+    # (same case as test_checker_exposes_own_only_decision_on_request_state) —
+    # both credential paths must resolve to the identical PermissionDecision.
+    via_header = await http_client.put("/expenses/some-id", headers=auth_headers(100))
+    via_init_data = await http_client.put("/expenses/some-id", headers=init_data_headers(100))
+
+    assert via_header.status_code == via_init_data.status_code == 200
+    assert via_header.json() == via_init_data.json() == {"own_only": True}
 
 
 def test_permission_checker_accepts_enum_and_string_forms() -> None:

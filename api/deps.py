@@ -14,10 +14,15 @@ resolved decision on ``request.state.permission_decision``.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import secrets
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Annotated
+from urllib.parse import parse_qsl
 from uuid import UUID
 
 import asyncpg
@@ -155,9 +160,7 @@ def _unauthorized(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
 
-async def verify_internal_token(
-    x_internal_token: Annotated[str | None, Header(alias="X-Internal-Token")] = None,
-) -> None:
+def verify_internal_token(x_internal_token: str | None) -> None:
     """Reject any request that does not carry the shared bot→backend secret (D1)."""
     expected = get_settings().internal_token
     if x_internal_token is None or not secrets.compare_digest(
@@ -166,22 +169,78 @@ async def verify_internal_token(
         raise _unauthorized("Invalid or missing X-Internal-Token")
 
 
+class InitDataError(Exception):
+    """Raised by :func:`validate_init_data` on any invalid/tampered/expired payload."""
+
+
+def validate_init_data(init_data: str, bot_token: str, max_age_sec: int) -> int:
+    """Verify a Telegram Mini App ``initData`` payload and return the tg_id.
+
+    Per Telegram's spec, the HMAC key is ``HMAC_SHA256(key=b"WebAppData",
+    msg=bot_token)`` — not the bot token directly — and the data-check string
+    is the sorted ``k=v`` pairs (``hash`` removed) joined by ``\\n``.
+    """
+    try:
+        data = dict(parse_qsl(init_data, strict_parsing=True))
+    except ValueError:
+        raise InitDataError("Malformed init_data") from None
+
+    received_hash = data.pop("hash", None)
+    if not received_hash:
+        raise InitDataError("Missing hash")
+
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
+    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(computed_hash, received_hash):
+        raise InitDataError("Invalid hash")
+
+    try:
+        auth_date = int(data["auth_date"])
+    except (KeyError, ValueError):
+        raise InitDataError("Missing or malformed auth_date") from None
+    if time.time() - auth_date > max_age_sec:
+        raise InitDataError("Expired init_data")
+
+    try:
+        tg_id = json.loads(data["user"])["id"]
+    except (KeyError, ValueError, TypeError):
+        raise InitDataError("Missing or malformed user field") from None
+    return int(tg_id)
+
+
 async def get_current_user(
-    _token: Annotated[None, Depends(verify_internal_token)],
     user_repo: Annotated[UserRepository, Depends(get_user_repo)],
+    x_telegram_init_data: Annotated[str | None, Header(alias="X-Telegram-Init-Data")] = None,
+    x_internal_token: Annotated[str | None, Header(alias="X-Internal-Token")] = None,
     x_telegram_user_id: Annotated[str | None, Header(alias="X-Telegram-User-Id")] = None,
 ) -> UserResponse:
-    """Step 1: resolve the caller from ``X-Telegram-User-Id``, else 401.
+    """Step 1: resolve the caller, else 401.
 
-    The header is declared ``str`` and parsed by hand: letting FastAPI coerce
-    to ``int`` would turn a malformed header into a 422 instead of a 401.
+    Two accepted credentials, resolved in order:
+    1. ``X-Telegram-Init-Data`` (Mini App) — validated via
+       :func:`validate_init_data`, tg_id derived from the signed payload.
+    2. ``X-Internal-Token`` + ``X-Telegram-User-Id`` (bot) — unchanged from
+       before this was added. The header is declared ``str`` and parsed by
+       hand: letting FastAPI coerce to ``int`` would turn a malformed header
+       into a 422 instead of a 401.
     """
-    if x_telegram_user_id is None:
-        raise _unauthorized("Missing X-Telegram-User-Id")
-    try:
-        tg_id = int(x_telegram_user_id)
-    except ValueError:
-        raise _unauthorized("Malformed X-Telegram-User-Id") from None
+    if x_telegram_init_data is not None:
+        settings = get_settings()
+        try:
+            tg_id = validate_init_data(
+                x_telegram_init_data, settings.bot_token, settings.initdata_max_age_sec
+            )
+        except InitDataError:
+            raise _unauthorized("Invalid X-Telegram-Init-Data") from None
+    else:
+        verify_internal_token(x_internal_token)
+        if x_telegram_user_id is None:
+            raise _unauthorized("Missing X-Telegram-User-Id")
+        try:
+            tg_id = int(x_telegram_user_id)
+        except ValueError:
+            raise _unauthorized("Malformed X-Telegram-User-Id") from None
     users = await user_repo.list(tg_id=tg_id)
     if not users:
         raise _unauthorized("Unknown user")
