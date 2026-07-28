@@ -51,7 +51,7 @@ receives notifications.
 ## Contracts (U0)
 
 **Backend — `config.Settings`**
-- `family_currency: str = "EUR"` (env `FAMILY_CURRENCY`)
+- `family_currency: str = "USD"` (env `FAMILY_CURRENCY`)
 - `mini_app_url: str | None = None` (env `MINI_APP_URL`)
 - `initdata_max_age_sec: int = 86400` (env `INITDATA_MAX_AGE_SEC`)
 
@@ -96,7 +96,7 @@ receives notifications.
 
 ### M0 — Backend deltas (Python; same shape as every unit already shipped)
 
-- [ ] **U0.1 `initData` authentication** — `validate_init_data` + the
+- [x] **U0.1 `initData` authentication** — `validate_init_data` + the
       `get_current_user` second credential per Contracts; three new settings.
       AC: valid signed payload → the right user; tampered hash → 401; expired
       `auth_date` beyond `initdata_max_age_sec` → 401; well-formed signature for
@@ -338,13 +338,19 @@ tg_id seeded via `docs/seed.sql`).
   reviewed and checked off).
 
 ## STATE (handoff)
-- Done: nothing yet — this plan has just been written and is awaiting human
-  approval. `docs/design/mini-app-ux.md`, `webapp/CLAUDE.md` and the root
-  `CLAUDE.md` edits (architecture map, commands, auth rule, env vars,
-  out-of-scope, do-not-edit list) are already on disk, uncommitted.
-- Next: **`docs/plans/bot-allowlist-db.md` ships in full first** (D210). Then
-  **CP0** (finish the V1.1 manual test pass + the prod `amount <= 0` check),
-  then `/unit U0.1 docs/plans/mini-app-v2.md`.
+- Done: **U0.1** — `validate_init_data` (`api/deps.py`) verifies the Telegram
+  HMAC (`WebAppData` key, sorted `k=v\n`-joined data-check string, `hash`
+  removed) and returns the tg_id; `get_current_user` now resolves
+  `X-Telegram-Init-Data` first, falling back unchanged to
+  `X-Internal-Token` + `X-Telegram-User-Id`. Three new `Settings` fields
+  (`family_currency`, `mini_app_url`, `initdata_max_age_sec`). Tests added to
+  `tests/test_deps.py` cover valid/tampered/expired/unknown-user payloads and
+  assert the same `PermissionDecision` via either credential, plus one
+  hardcoded vector computed out-of-band via `openssl dgst -hmac` (reviewer
+  flagged that a self-consistent test suite alone can't catch a systematic
+  HMAC error). Full suite green (514 passed) — the bot's header path is
+  unaffected.
+- Next: `/unit U0.3 docs/plans/mini-app-v2.md` (Expense pagination).
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
@@ -355,8 +361,6 @@ tg_id seeded via `docs/seed.sql`).
     edits prod compose + deploy config). `webapp/pnpm-lock.yaml` is on root
     CLAUDE.md's do-not-edit list, so **U1.1** needs sign-off for the lockfile it
     creates.
-  - The bot's auth path is a regression surface in U0.1 — the existing suite
-    passing unchanged *is* an acceptance criterion, not a side effect.
   - `webapp/CLAUDE.md` currently documents the client-side colour rule (D206);
     it must be updated when screen 06 and `categories.color` eventually land.
   - V1.1's unresolved deploy-safety flag blocks the first deploy — see CP0.

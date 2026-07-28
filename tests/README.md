@@ -132,6 +132,16 @@ Hermetic — repositories replaced with in-memory fakes via
 | `test_checker_exposes_own_only_decision_on_request_state` | `PermissionChecker` stores the `PermissionDecision` on `request.state` for step-6 consumers (U2.4) |
 | `test_checker_consults_permission_row` | `PermissionChecker` fetches the (user, resource) row and applies its flags (step 4) |
 | `test_permission_checker_accepts_enum_and_string_forms` | `PermissionChecker("expenses", "create")` (route-pattern contract) equals the enum form |
+| `test_validate_init_data_returns_tg_id_for_valid_payload` | A validly signed `initData` payload returns the tg_id from its `user` field |
+| `test_validate_init_data_rejects_tampered_hash` | Changing a field after signing invalidates the hash → `InitDataError` |
+| `test_validate_init_data_rejects_expired_auth_date` | `auth_date` older than `max_age_sec` → `InitDataError` |
+| `test_validate_init_data_matches_independently_computed_vector` | A hardcoded payload/hash computed out-of-band via `openssl dgst -hmac` (not this code's own HMAC calls) validates — catches a systematic HMAC construction error self-consistent tests can't |
+| `test_validate_init_data_rejects_wrong_bot_token` | A payload signed with a different bot token → `InitDataError` |
+| `test_init_data_valid_payload_resolves_user` | `X-Telegram-Init-Data` alone (no `X-Internal-Token`) resolves the caller through the full dependency chain |
+| `test_init_data_tampered_hash_is_401` | Tampered `initData` payload → 401 |
+| `test_init_data_expired_is_401` | Expired `initData` payload → 401 |
+| `test_init_data_well_formed_but_unknown_tg_id_is_401` | Validly signed `initData` for a tg_id with no `users` row → 401 |
+| `test_init_data_produces_same_permission_decision_as_header_pair` | `initData` and the header pair resolve to the identical `PermissionDecision` for the same user |
 
 ## Service tests (`test_user_service.py`) → [`services/user_service.py`](../services/user_service.py)
 Hermetic — `UserRepositoryProtocol` replaced with an in-memory `FakeUserRepo`. No DB.
