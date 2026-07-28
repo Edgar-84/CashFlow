@@ -51,9 +51,33 @@ receives notifications.
 ## Contracts (U0)
 
 **Backend — `config.Settings`**
-- `family_currency: str = "USD"` (env `FAMILY_CURRENCY`)
 - `mini_app_url: str | None = None` (env `MINI_APP_URL`)
 - `initdata_max_age_sec: int = 86400` (env `INITDATA_MAX_AGE_SEC`)
+- ~~`family_currency`~~ superseded by D211 (U0.5) — currency is per-account,
+  not a deployment-wide env var.
+
+**Backend — currency (U0.5, supersedes D203)**
+- `models/enums.py::Currency` — `StrEnum` of the 15 supported ISO 4217 codes
+  (see U0.5 below for the list).
+- `accounts.currency` — `TEXT NOT NULL DEFAULT 'USD'`, same "TEXT + comment,
+  no DB CHECK" convention as `users.role`; validated at the Pydantic layer.
+- `models/account.py::AccountResponse` — `id, name, currency, owner_id,
+  created_at`. No `Create`/`Update` models yet — no account-creation API
+  exists (self-registration/admin panel are still V2); accounts are created
+  by hand via SQL, per `api/CLAUDE.md`.
+- `repositories/account_repo.py::AccountRepository` — generic
+  `BaseRepository[AccountResponse]` over `accounts`, no custom queries.
+- `models/user.py::UserMeResponse(UserResponse)` — adds `currency: Currency`.
+  Used **only** by `GET /users/me`; the shared `UserResponse` (used by every
+  other `users` route, `PermissionChecker`, etc.) is untouched, so this has
+  zero ripple into existing routes/tests.
+- `api/deps.py::get_account_repo` (factory, same pattern as the other
+  `get_*_repo` functions) and `get_current_user_with_currency` (composes
+  `get_current_user` + `get_account_repo`, mirrors how `PermissionChecker`
+  already composes user + permission repo without a service layer — auth
+  composition lives in `deps.py` by established convention here).
+- `GET /users/me` → `UserMeResponse` instead of `UserResponse` (the only
+  route affected).
 
 **Backend — `api/deps.py`**
 - New pure `validate_init_data(init_data: str, bot_token: str, max_age_sec: int)
@@ -105,6 +129,23 @@ receives notifications.
       `initData` produces the same `PermissionDecision` as with the header pair.
       Files: `config.py`, `api/deps.py`, `tests/test_deps.py`(+).
       RISKY → reviewer subagent. `/effort high`. Model: sonnet.
+- [x] **U0.5 Per-account currency** (supersedes D203; human-requested
+      mid-plan revision, not originally scoped) — `accounts.currency` column
+      + `Currency` enum + `GET /users/me` returns it via `UserMeResponse`.
+      `config.family_currency` removed (superseded, unused by any consumer).
+      AC: migration adds `accounts.currency TEXT NOT NULL DEFAULT 'USD'` and
+      backfills existing rows; `GET /users/me` response includes `currency`
+      matching the caller's account; every other `users` route/response is
+      byte-for-byte unchanged (still `UserResponse`, no `currency` field);
+      an account row with a currency outside the `Currency` enum's 15 codes
+      fails Pydantic validation, not a raw DB error; the whole existing
+      suite green.
+      Files: `models/enums.py`, `models/account.py`(new),
+      `models/user.py`, `repositories/account_repo.py`(new), `api/deps.py`,
+      `api/users.py`, `config.py`, `migrations/versions/`(new),
+      `docs/SCHEMA.sql`, `api/CLAUDE.md`, `CLAUDE.md`, tests ×2+.
+      RISKY (migration + shared-model contract change) → reviewer subagent.
+      Model: sonnet.
 - [ ] **U0.3 Expense pagination** — `limit`/`offset` through route → service →
       repo, defaults 50/0, `limit > 200` → 422.
       AC: page 1 + page 2 have no overlap and cover the seeded set; newest-first
@@ -267,6 +308,16 @@ tg_id seeded via `docs/seed.sql`).
   runtime layer Python-only; check the final image size in U1.5.
 - **Prod deploy-safety flag inherited from V1.1 U1.6** — see CP0. Unresolved at
   the time of writing.
+- **`accounts.currency` has no DB `CHECK` constraint** (U0.5, same "TEXT +
+  comment" convention as `users.role`). A row manually corrupted to a value
+  outside the 15-code `Currency` enum makes `GET /users/me` raise an
+  uncaught `pydantic.ValidationError` — an unhandled 500, not a controlled
+  4xx (`main.py` has no global `ValidationError` handler). Flagged by
+  reviewer on U0.5; accepted as consistent with `role`'s pre-existing,
+  identical gap rather than fixed ad hoc for currency alone — a global
+  `ValidationError` → 500-with-log handler (or per-field DB `CHECK`
+  constraints) would fix both at once and is a candidate for its own unit if
+  it ever bites.
 
 ## Decision log
 - D200 (2026-07-27, HUMAN): the Mini App authenticates with Telegram-signed
@@ -336,6 +387,30 @@ tg_id seeded via `docs/seed.sql`).
   cheaper than stale cross-references. Rejected: keeping a duplicate unit in both
   plans (whichever ran second would be a no-op unit that still had to be read,
   reviewed and checked off).
+- D211 (2026-07-28, HUMAN): **supersedes D203.** Currency moves from a
+  single deployment-wide `FAMILY_CURRENCY` env var to a per-account
+  `accounts.currency` column, chosen from a fixed 15-code `Currency` enum
+  (not a free-form string). Raised mid-plan by the human after U0.1 shipped;
+  not originally scoped as U0.5, added as a new unit rather than folding into
+  U0.1 (different risk profile: schema migration + a contract change, vs.
+  U0.1's pure auth logic). D203's original reasoning ("one family, one
+  currency, a column implies conversion logic nobody asked for") still holds
+  for *conversion* — this does not add multi-currency math, budgets/statistics
+  still assume one currency per account. It only moves *where* that one
+  currency is chosen from an env var (deployment-wide, requires a restart to
+  change) to a DB column (per-account, settable at account-creation time,
+  which matters once self-registration/the admin panel — currently V2 —
+  gives accounts a real creation flow instead of a manual SQL `INSERT`).
+  Exposed via `GET /users/me` (`UserMeResponse`, additive) rather than the
+  shared `UserResponse` or a new `GET /accounts/me` route, to keep the diff
+  contained to one route with zero ripple into the `users` CRUD
+  routes/tests/`PermissionChecker`. Rejected: a new `GET /accounts/me`
+  endpoint (real new surface — model + repo + route — for one field, with no
+  current second consumer to justify a dedicated resource); adding `currency`
+  directly to the shared `UserResponse` (would have required every
+  `UserRepository` read to `JOIN accounts`, rippling into `UserService`,
+  every `users` route, and every existing test constructing a `UserResponse`
+  fixture).
 
 ## STATE (handoff)
 - Done: **U0.1** — `validate_init_data` (`api/deps.py`) verifies the Telegram
@@ -349,7 +424,18 @@ tg_id seeded via `docs/seed.sql`).
   hardcoded vector computed out-of-band via `openssl dgst -hmac` (reviewer
   flagged that a self-consistent test suite alone can't catch a systematic
   HMAC error). Full suite green (514 passed) — the bot's header path is
-  unaffected.
+  unaffected. Shipped as PR #45.
+- Done: **U0.5** (D211, human-requested mid-plan revision) — `accounts.currency`
+  column (migration `0231c6bd4dfa`, `TEXT NOT NULL DEFAULT 'USD'`); new
+  `Currency` enum (15 codes); `models/account.py::AccountResponse`;
+  `repositories/account_repo.py::AccountRepository` (plain
+  `BaseRepository`, no custom queries); `GET /users/me` now returns
+  `UserMeResponse` (`UserResponse` + `currency`) via a new composed
+  dependency `get_current_user_with_currency` in `api/deps.py` — every
+  other `users` route/response is untouched. `config.family_currency`
+  removed (superseded, had zero consumers). Full suite green (518 passed);
+  schema + `AccountRepository` also verified against a real Postgres via
+  `scripts/integration_docker.sh`.
 - Next: `/unit U0.3 docs/plans/mini-app-v2.md` (Expense pagination).
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
@@ -363,4 +449,13 @@ tg_id seeded via `docs/seed.sql`).
     creates.
   - `webapp/CLAUDE.md` currently documents the client-side colour rule (D206);
     it must be updated when screen 06 and `categories.color` eventually land.
+  - `Currency`/account currency (D211, U0.5): future units reading the
+    family's currency for display (`lib/money.ts::formatAmount`, U1.2/U1.4)
+    must read it from `GET /users/me`'s `currency` field, not
+    `config.family_currency` — that setting no longer exists.
+  - `migrations/versions/0231c6bd4dfa_add_accounts_currency.py` was validated
+    against a real Postgres via `scripts/integration_docker.sh` (D18: local
+    `alembic upgrade head` still doesn't work on this machine — missing
+    `greenlet`), not `alembic upgrade head` directly. Same gap as every prior
+    migration; not new to U0.5.
   - V1.1's unresolved deploy-safety flag blocks the first deploy — see CP0.

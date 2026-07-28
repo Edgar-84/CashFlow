@@ -7,11 +7,11 @@ Only Pydantic v2 schemas live here. No SQLAlchemy models, no DB session code,
 no business logic. These schemas are the contract at API boundaries and
 between layers (repository ↔ service ↔ route).
 
-- Account: DEFERRED — no Pydantic model in V1. Account rows are seeded
-  manually via docs/seed.sql and never cross the API boundary (only
-  account_id: UUID appears in other schemas). Add AccountResponse when
-  a service needs a typed account row; add AccountCreate in V2
-  (self-registration / admin panel). Do NOT create models/account.py now.
+- Account: `models/account.py::AccountResponse` only (`id, name, currency,
+  owner_id, created_at`), added in U0.5 (D211) once `GET /users/me` needed a
+  typed `accounts.currency` read. Still no `AccountCreate`/`AccountUpdate` —
+  no account-creation API exists; accounts are still created by hand via SQL
+  (`api/CLAUDE.md`). Add those in V2 (self-registration / admin panel).
 
 ## Four-schema pattern (every entity)
 For an entity `Expense`, define:

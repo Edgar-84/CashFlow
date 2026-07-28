@@ -10,6 +10,7 @@ CREATE TABLE accounts (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name       TEXT NOT NULL,
   owner_id   UUID,              -- set after first user is created
+  currency   TEXT NOT NULL DEFAULT 'USD',  -- ISO 4217; see models.enums.Currency for the supported list
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

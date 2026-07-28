@@ -4,13 +4,22 @@ from uuid import UUID
 import asyncpg
 
 from models.budget_plan import BudgetPlanResponse
-from models.enums import Role
+from models.enums import Currency, Role
 from models.expense import ExpenseResponse
 from models.user import UserResponse
 
 
-async def make_account(conn: asyncpg.Connection, *, name: str = "Test Account") -> UUID:
-    row = await conn.fetchrow("INSERT INTO accounts (name) VALUES ($1) RETURNING id", name)
+async def make_account(
+    conn: asyncpg.Connection, *, name: str = "Test Account", currency: Currency | None = None
+) -> UUID:
+    if currency is None:
+        row = await conn.fetchrow("INSERT INTO accounts (name) VALUES ($1) RETURNING id", name)
+    else:
+        row = await conn.fetchrow(
+            "INSERT INTO accounts (name, currency) VALUES ($1, $2) RETURNING id",
+            name,
+            currency.value,
+        )
     assert row is not None
     return row["id"]
 
