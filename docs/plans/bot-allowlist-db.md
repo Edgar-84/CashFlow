@@ -72,7 +72,7 @@ talk to the bot, which is exactly what the backend already enforces.
       `GET /users/me` is **not** captured by `/{user_id}` (i.e. no 422).
       Files: `api/users.py`, `tests/test_users_api.py`. Model: haiku-friendly.
       **Also satisfies mini-app-v2 U0.2 (D301).**
-- [ ] **U2 Middleware probes the backend** — `AllowlistMiddleware` replaces its
+- [x] **U2 Middleware probes the backend** — `AllowlistMiddleware` replaces its
       in-memory set with a `get_me()` probe behind a TTL cache; `create_dispatcher`
       stops taking `allowed_tg_ids`.
       AC: a tg_id with a `users` row reaches the handler with `client` injected;
@@ -162,16 +162,22 @@ talk to the bot, which is exactly what the backend already enforces.
   message).
 
 ## STATE (handoff)
-- Done: U1 (`GET /users/me`, `api/users.py` + `tests/test_users_api.py`).
-- Next: `/unit U2 docs/plans/bot-allowlist-db.md` (RISKY, reviewer subagent).
+- Done: U1 (`GET /users/me`, `api/users.py` + `tests/test_users_api.py`). U2
+  (`AllowlistMiddleware` probes `GET /users/me` behind a per-tg_id TTL cache;
+  `bot/middlewares.py`, `bot/client.py` (`get_me()`), `bot/bot.py`
+  (`create_dispatcher` drops `allowed_tg_ids`), `tests/test_bot_middlewares.py`,
+  `tests/test_bot_bot.py`, `tests/README.md`). Reviewer subagent: APPROVE, no
+  blockers.
+- Next: `/unit U3 docs/plans/bot-allowlist-db.md` (config/docs-only, retires
+  `ALLOWED_TG_IDS`).
 - Gotchas:
   - Decision ids start at D300 (MVP D1–D45, V1.1 D100–D124, Mini App D200–D209).
   - U1 also closes mini-app-v2 U0.2 — check that box there when U1 lands (D301).
-  - U2 is the bot's auth gate. RISKY → reviewer subagent, and the existing
-    middleware/dispatcher tests must stay green in spirit after the signature
-    change.
   - U3 touches `.env.example` but **not** `.env` (do-not-edit list). The human
     removes `ALLOWED_TG_IDS` from their own `.env` files, dev and prod, and from
     the deploy environment.
+  - `config.py`'s `allowed_tg_ids`/`allowed_tg_ids_list` and `bot/CLAUDE.md`'s
+    stale "tg_id allowlist (from ALLOWED_TG_IDS)" line are U3's job, not U2's —
+    left untouched on purpose.
   - This plan must be fully done and committed before
     `/unit U0.1 docs/plans/mini-app-v2.md`.

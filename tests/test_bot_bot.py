@@ -1,8 +1,12 @@
 """Unit tests for bot/bot.py — create_dispatcher, hermetic (no real
-Telegram/network), U4.2 AC: dispatcher builds."""
+Telegram/network), U4.2 AC: dispatcher builds. U2 AC (bot-allowlist-db plan):
+create_dispatcher no longer takes allowed_tg_ids; the allowlist is a
+GET /users/me probe made by AllowlistMiddleware."""
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from aiogram import Bot, Dispatcher, Router
@@ -14,16 +18,38 @@ from bot.client import BackendClient
 from bot.middlewares import AllowlistMiddleware
 
 
-def make_dispatcher(allowed_tg_ids: list[int] | None = None) -> Dispatcher:
-    def reject_any_request(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("no API call expected in these tests")
+def _user_json(tg_id: int) -> dict[str, Any]:
+    return {
+        "id": str(uuid4()),
+        "tg_id": tg_id,
+        "name": "Test User",
+        "role": "member",
+        "account_id": str(uuid4()),
+        "created_at": "2026-01-01T00:00:00Z",
+    }
 
+
+def reject_any_request(request: httpx.Request) -> httpx.Response:
+    raise AssertionError("no API call expected in these tests")
+
+
+def make_probe_responder(allowed_tg_ids: set[int]) -> Callable[[httpx.Request], httpx.Response]:
+    def responder(request: httpx.Request) -> httpx.Response:
+        tg_id = int(request.headers["X-Telegram-User-Id"])
+        if tg_id in allowed_tg_ids:
+            return httpx.Response(200, json=_user_json(tg_id))
+        return httpx.Response(401)
+
+    return responder
+
+
+def make_dispatcher(
+    responder: Callable[[httpx.Request], httpx.Response] = reject_any_request,
+) -> Dispatcher:
     http_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(reject_any_request), base_url="http://test"
+        transport=httpx.MockTransport(responder), base_url="http://test"
     )
-    return create_dispatcher(
-        http_client, allowed_tg_ids or [555], internal_token="test-internal-token"
-    )
+    return create_dispatcher(http_client, internal_token="test-internal-token")
 
 
 def make_update(tg_id: int) -> Update:
@@ -59,7 +85,7 @@ def test_allowlist_registered_as_outer_update_middleware_after_user_context() ->
 
 
 async def test_allowlisted_update_reaches_handler_with_injected_client() -> None:
-    dp = make_dispatcher(allowed_tg_ids=[555])
+    dp = make_dispatcher(make_probe_responder({555}))
     received: dict[str, Any] = {}
     router = Router()
 
@@ -76,7 +102,7 @@ async def test_allowlisted_update_reaches_handler_with_injected_client() -> None
 
 
 async def test_non_allowlisted_update_never_reaches_handler() -> None:
-    dp = make_dispatcher(allowed_tg_ids=[555])
+    dp = make_dispatcher(make_probe_responder({555}))
     router = Router()
 
     @router.message()
