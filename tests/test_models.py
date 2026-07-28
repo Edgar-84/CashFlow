@@ -1,11 +1,14 @@
 from datetime import UTC, datetime
+from typing import cast
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
+from models.account import AccountResponse
 from models.budget_plan import BudgetPlanCreate, BudgetPlanResponse, BudgetPlanUpdate
 from models.category import CategoryCreate, CategoryResponse, CategoryUpdate
-from models.enums import Action, Resource, Role
+from models.enums import Action, Currency, Resource, Role
 from models.errors import (
     DomainError,
     LimitExceededWarning,
@@ -15,7 +18,7 @@ from models.errors import (
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.permission import PermissionCreate, PermissionResponse, PermissionUpdate
 from models.tag import TagCreate, TagResponse, TagUpdate
-from models.user import UserCreate, UserResponse, UserUpdate
+from models.user import UserCreate, UserMeResponse, UserResponse, UserUpdate
 
 
 def test_user_models() -> None:
@@ -35,6 +38,42 @@ def test_user_models() -> None:
         created_at=datetime.now(UTC),
     )
     assert response.account_id == account_id
+
+
+def test_account_response_and_user_me_response() -> None:
+    account_id = uuid4()
+    account = AccountResponse(
+        id=account_id,
+        name="Smith Family",
+        currency=Currency.PLN,
+        owner_id=None,
+        created_at=datetime.now(UTC),
+    )
+    assert account.currency == Currency.PLN
+
+    me = UserMeResponse(
+        id=uuid4(),
+        tg_id=123456789,
+        name="Wife",
+        role=Role.MEMBER,
+        account_id=account_id,
+        created_at=datetime.now(UTC),
+        currency=account.currency,
+    )
+    assert me.currency == Currency.PLN
+
+
+def test_account_response_rejects_unsupported_currency() -> None:
+    # A currency outside the fixed 15-code enum fails Pydantic validation
+    # rather than reaching the DB as an uncontrolled free-form string (D211).
+    with pytest.raises(ValidationError):
+        AccountResponse(
+            id=uuid4(),
+            name="Smith Family",
+            currency=cast(Currency, "XYZ"),
+            owner_id=None,
+            created_at=datetime.now(UTC),
+        )
 
 
 def test_category_models() -> None:
@@ -194,6 +233,7 @@ def test_enums_have_expected_members() -> None:
         Resource.BUDGET_PLANS,
     }
     assert set(Action) == {Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}
+    assert len(set(Currency)) == 15
 
 
 def test_domain_errors_are_typed_and_distinct() -> None:

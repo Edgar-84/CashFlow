@@ -61,10 +61,12 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 
 ## Environment (.env)
 `DATABASE_URL`, `BOT_TOKEN`, `BACKEND_BASE_URL`, `INTERNAL_TOKEN`, `FAMILY_TZ`.
-Mini App adds: `FAMILY_CURRENCY`, `MINI_APP_URL` (the bot's link to it),
-`INITDATA_MAX_AGE_SEC`. Backend-only — none of them are secrets, and none are
-injected into the browser bundle. No CORS variable: the Mini App is served from
-the same origin as the API (D201).
+Mini App adds: `MINI_APP_URL` (the bot's link to it), `INITDATA_MAX_AGE_SEC`.
+Backend-only — none of them are secrets, and none are injected into the
+browser bundle. No CORS variable: the Mini App is served from the same
+origin as the API (D201). Currency is **not** an env var — it's a per-account
+`accounts.currency` column (`models.enums.Currency`, D211), set at account
+creation (see api/CLAUDE.md's "Adding users manually").
 One `.env` per machine, never committed; no `.env.dev`/`.env.prod` variants —
 dev vs prod values (incl. the separate dev bot token) are documented in
 README "Environments & .env".
@@ -76,7 +78,9 @@ README "Environments & .env".
 - Admin panel for account/user management. Its prerequisite — migrating the
   bot allowlist from an `.env` var to a DB lookup — is DONE
   (`docs/plans/bot-allowlist-db.md`): adding a family member is now one
-  `INSERT` into `users`, no `.env` edit, no bot restart.
+  `INSERT` into `users`, no `.env` edit, no bot restart. When this panel
+  lands, account creation should let the user pick `accounts.currency`
+  (D211) instead of the manual SQL `INSERT` being the only way to set it.
 
 ## Do not edit without asking
 `migrations/versions/`, `.env*`, `uv.lock`, `webapp/pnpm-lock.yaml`.

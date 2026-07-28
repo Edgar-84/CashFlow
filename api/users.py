@@ -3,8 +3,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from api.deps import get_current_user, get_user_service, require_admin
-from models.user import UserCreate, UserResponse, UserUpdate
+from api.deps import get_current_user_with_currency, get_user_service, require_admin
+from models.user import UserCreate, UserMeResponse, UserResponse, UserUpdate
 from services.user_service import UserService
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -18,10 +18,10 @@ async def list_users(
     return await service.list(admin.account_id)
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=UserMeResponse)
 async def get_current_user_route(
-    user: Annotated[UserResponse, Depends(get_current_user)],
-) -> UserResponse:
+    user: Annotated[UserMeResponse, Depends(get_current_user_with_currency)],
+) -> UserMeResponse:
     return user
 
 

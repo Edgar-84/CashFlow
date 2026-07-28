@@ -13,11 +13,15 @@ model. Business logic and DB access are forbidden here.
   `budgets.py`, `statistics.py`, `users.py`.
 
 ## Auth (bot → backend contract)
-- Bot sends `X-Telegram-User-Id: <tg_id>` on every request.
-- `get_current_user` reads that header, resolves it via `user_repo` to a `User`
-  (with `account_id`), and injects it into the route.
-- **The bot never sends `account_id` or user UUIDs.** Backend derives everything
-  from `tg_id`. Trusting client-supplied identifiers is a bug.
+- Bot sends `X-Telegram-User-Id: <tg_id>` + `X-Internal-Token` on every request.
+- `get_current_user` accepts a second credential, `X-Telegram-Init-Data` (the
+  Mini App, U0.1) — validated via `validate_init_data`, tg_id derived from the
+  signed payload. If present, it takes priority; otherwise the header pair
+  above resolves the caller, unchanged.
+- Either path resolves via `user_repo` to a `User` (with `account_id`) and
+  injects it into the route.
+- **Neither client ever sends `account_id` or user UUIDs.** Backend derives
+  everything from `tg_id`. Trusting client-supplied identifiers is a bug.
 
 ## Route pattern
 ```python
@@ -45,7 +49,8 @@ Three tiers, pick the narrowest that fits the route:
 | `Depends(require_admin)` | `role == admin` only, 403 otherwise | `users`, `permissions` — no override-row/own_only concept, not in the `Resource` enum, so `PermissionChecker` doesn't apply to them |
 
 "Authenticated" always means: valid `X-Internal-Token` **and** an `X-Telegram-User-Id`
-that resolves to a row in `users` — there is no public/unauthenticated route.
+that resolves to a row in `users`, **or** a validly signed `X-Telegram-Init-Data`
+that resolves the same way — there is no public/unauthenticated route.
 
 ## Permissions — two-level model
 Level 1 (**role**): coarse-grained system access.
@@ -81,6 +86,11 @@ Level 2 (**permission row**): per-resource CRUD flags that override role default
 
 ## Adding users manually (no self-registration yet)
 ```sql
+-- Create an account (once per family), choosing its currency (D211) from
+-- models.enums.Currency: USD | EUR | GBP | PLN | UAH | CZK | CHF | SEK |
+-- NOK | DKK | JPY | CNY | CAD | AUD | TRY. Omit the column to get 'USD'.
+INSERT INTO accounts (name, currency) VALUES ('Smith Family', 'PLN') RETURNING id;
+
 INSERT INTO users (tg_id, name, role, account_id)
 VALUES (123456789, 'Wife', 'member', '<account-uuid>');
 

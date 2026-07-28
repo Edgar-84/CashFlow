@@ -16,7 +16,8 @@ from test_user_service import FakeUserRepo
 
 from api import deps
 from config import get_settings
-from models.enums import Role
+from models.account import AccountResponse
+from models.enums import Currency, Role
 from models.user import UserResponse
 
 
@@ -61,6 +62,25 @@ def viewer(account_id: UUID) -> UserResponse:
     )
 
 
+@pytest.fixture
+def account(account_id: UUID) -> AccountResponse:
+    return AccountResponse(
+        id=account_id,
+        name="Test Account",
+        currency=Currency.PLN,
+        owner_id=None,
+        created_at=datetime.now(UTC),
+    )
+
+
+class FakeAccountRepo:
+    def __init__(self, accounts: dict[UUID, AccountResponse]) -> None:
+        self._accounts = accounts
+
+    async def get(self, id: UUID) -> AccountResponse | None:
+        return self._accounts.get(id)
+
+
 class TgLookupFakeUserRepo(FakeUserRepo):
     """FakeUserRepo extended with the tg_id lookup get_current_user needs."""
 
@@ -82,11 +102,18 @@ OverrideRepo = Callable[[], TgLookupFakeUserRepo]
 
 @pytest.fixture
 def override_repo(
-    app: FastAPI, admin: UserResponse, member: UserResponse, viewer: UserResponse
+    app: FastAPI,
+    admin: UserResponse,
+    member: UserResponse,
+    viewer: UserResponse,
+    account: AccountResponse,
 ) -> OverrideRepo:
     def _apply() -> TgLookupFakeUserRepo:
         repo = TgLookupFakeUserRepo([admin, member, viewer])
         app.dependency_overrides[deps.get_user_repo] = lambda: repo
+        app.dependency_overrides[deps.get_account_repo] = lambda: FakeAccountRepo(
+            {account.id: account}
+        )
         return repo
 
     return _apply
@@ -133,6 +160,30 @@ async def test_get_me_as_member_returns_own_row(
 
     assert response.status_code == 200
     assert response.json()["id"] == str(member.id)
+
+
+async def test_get_me_includes_account_currency(
+    client: AsyncClient, override_repo: OverrideRepo, member: UserResponse, account: AccountResponse
+) -> None:
+    override_repo()
+
+    response = await client.get("/users/me", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert response.json()["currency"] == account.currency.value
+
+
+async def test_list_users_response_has_no_currency_field(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse
+) -> None:
+    # UserResponse (every route but /me) stays untouched by D211 — no currency
+    # leaks in, and no accounts JOIN is needed for these routes.
+    override_repo()
+
+    response = await client.get("/users", headers=auth_headers(admin.tg_id))
+
+    assert response.status_code == 200
+    assert all("currency" not in u for u in response.json())
 
 
 async def test_get_me_as_viewer_returns_own_row(
