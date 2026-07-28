@@ -16,7 +16,9 @@ check defaults/validation. No DB, no network.
 | `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags`; `user_name` defaults `None` and round-trips when supplied; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6) | [`models/expense.py`](../models/expense.py) |
 | `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=80`); `notify_threshold` rejects >100; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6 added `Update`); `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
 | `test_permission_models` | `PermissionCreate.own_only` defaults `True`; `PermissionUpdate` fields optional | [`models/permission.py`](../models/permission.py) |
-| `test_enums_have_expected_members` | `Role`/`Resource`/`Action` enum membership matches spec | [`models/enums.py`](../models/enums.py) |
+| `test_account_response_and_user_me_response` | `AccountResponse` carries `currency`; `UserMeResponse` (D211) extends `UserResponse` with it | [`models/account.py`](../models/account.py), [`models/user.py`](../models/user.py) |
+| `test_account_response_rejects_unsupported_currency` | A currency outside the 15-code `Currency` enum fails Pydantic validation, not a raw DB error | [`models/account.py`](../models/account.py) |
+| `test_enums_have_expected_members` | `Role`/`Resource`/`Action` enum membership matches spec; `Currency` has exactly 15 codes (D211) | [`models/enums.py`](../models/enums.py) |
 | `test_domain_errors_are_typed_and_distinct` | `NotFoundError`/`PermissionDeniedError`/`LimitExceededWarning` are distinct `DomainError` subclasses | [`models/errors.py`](../models/errors.py) |
 
 ## App / health tests (`test_health.py`)
@@ -30,6 +32,13 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 ## Repository tests
 `@pytest.mark.integration` — real Postgres via the `db_conn` fixture
 (per-test transaction, rolled back after).
+
+### `test_account_repo.py` → [`repositories/account_repo.py`](../repositories/account_repo.py)
+| Test | Checks |
+|---|---|
+| `test_get_returns_account_with_default_currency` | An account created without an explicit currency gets the schema default (`USD`) |
+| `test_get_returns_account_with_explicit_currency` | `currency` set at creation round-trips through `get()` |
+| `test_get_missing_returns_none` | `get()` on a missing id returns `None` |
 
 ### `test_user_repo.py` → [`repositories/user_repo.py`](../repositories/user_repo.py)
 | Test | Checks |
@@ -393,8 +402,9 @@ Hermetic — the real app with `BudgetPlanRepository`/`ExpenseRepository`/`UserR
 | `test_create_budget_plan_with_foreign_category_is_404` | U1.1 end-to-end: `POST /budgets` with a `category_id` the fake `category_repo` doesn't have → 404 |
 
 ## API/route tests (`test_users_api.py`) → [`api/users.py`](../api/users.py)
-Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replaced by
-`TgLookupFakeUserRepo` via `app.dependency_overrides`. No DB.
+Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` and
+`AccountRepository` replaced by `TgLookupFakeUserRepo`/`FakeAccountRepo` via
+`app.dependency_overrides`. No DB.
 
 | Test | Checks |
 |---|---|
@@ -402,6 +412,8 @@ Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replac
 | `test_list_users_as_member_is_403` | Member `GET /users` → 403 (`require_admin` gate, D27) |
 | `test_list_users_as_viewer_is_403` | Viewer `GET /users` → 403 |
 | `test_get_me_as_member_returns_own_row` | Member `GET /users/me` → 200 with their own row (not 403) |
+| `test_get_me_includes_account_currency` | `GET /users/me` response includes `currency` matching the caller's account (D211) |
+| `test_list_users_response_has_no_currency_field` | `GET /users` (every route but `/me`) has no `currency` field — `UserResponse` is untouched by D211 |
 | `test_get_me_as_viewer_returns_own_row` | Viewer `GET /users/me` → 200 with their own row (not 403) |
 | `test_get_me_is_not_shadowed_by_user_id_route` | `GET /users/me` resolves to the `me` route, not `/{user_id}` (would be a 422 from UUID parsing) |
 | `test_get_me_missing_credentials_is_401` | `GET /users/me` with no headers → 401 |

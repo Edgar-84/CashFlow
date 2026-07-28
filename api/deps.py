@@ -33,7 +33,8 @@ import database
 from config import get_settings
 from models.enums import Action, Resource, Role
 from models.permission import PermissionResponse
-from models.user import UserResponse
+from models.user import UserMeResponse, UserResponse
+from repositories.account_repo import AccountRepository
 from repositories.budget_plan_repo import BudgetPlanRepository
 from repositories.category_repo import CategoryRepository
 from repositories.expense_repo import ExpenseRepository
@@ -54,6 +55,12 @@ def get_user_repo(
     conn: Annotated[asyncpg.Connection, Depends(database.get_connection)],
 ) -> UserRepository:
     return UserRepository(conn)
+
+
+def get_account_repo(
+    conn: Annotated[asyncpg.Connection, Depends(database.get_connection)],
+) -> AccountRepository:
+    return AccountRepository(conn)
 
 
 def get_permission_repo(
@@ -245,6 +252,19 @@ async def get_current_user(
     if not users:
         raise _unauthorized("Unknown user")
     return users[0]
+
+
+async def get_current_user_with_currency(
+    user: Annotated[UserResponse, Depends(get_current_user)],
+    account_repo: Annotated[AccountRepository, Depends(get_account_repo)],
+) -> UserMeResponse:
+    """``GET /users/me`` only — adds the caller's account currency (D211).
+
+    ``account_id`` is FK-enforced NOT NULL, so the account always resolves.
+    """
+    account = await account_repo.get(user.account_id)
+    assert account is not None
+    return UserMeResponse(**user.model_dump(), currency=account.currency)
 
 
 async def require_admin(

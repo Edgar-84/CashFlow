@@ -42,6 +42,12 @@ Record each answer in the plan's Decision log as D200+.
   currency per deployment) or a per-account column. Recommendation: env var —
   the family has one currency, and a column implies conversion logic nobody
   asked for.
+  **Superseded by D211** (`docs/plans/mini-app-v2.md`, U0.5): currency is a
+  per-account `accounts.currency` column (a fixed 15-code enum, not free-form),
+  read via `GET /users/me`, not a `FAMILY_CURRENCY` env var. D211's reasoning
+  still agrees with D203 on the part that matters — one currency per account,
+  no conversion logic — it only moves *where* that one currency is chosen
+  from (deployment-wide env var → per-account DB column).
 - **DECIDE D204 — Scope parity.** Which bot commands the Mini App replaces in
   v1. Recommendation: screens 01–05 in v1 (home, add, expenses, budgets,
   statistics); categories and tags management stay bot-only until M3. The bot is
