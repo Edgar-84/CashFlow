@@ -5,13 +5,42 @@ tag")."""
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
 from models.expense import ExpenseResponse
 from models.statistics import CategoryTotal, PeriodTotal, TagTotal
 from services.period import month_bounds
+
+
+def _month_start_before(edge: datetime, tz: str) -> datetime:
+    """The UTC-aware start of the calendar month strictly before `edge`
+    (itself a UTC-aware month boundary) — asks `month_bounds` for the month
+    containing the instant just before `edge`, reusing its family-tz/DST-aware
+    arithmetic instead of duplicating it."""
+    start, _ = month_bounds(edge - timedelta(microseconds=1), tz)
+    return start
+
+
+def _window_for_months_back(
+    months_back: int | None, now: datetime | None, tz: str
+) -> tuple[datetime, datetime]:
+    """Family-tz-correct bounds for the `months_back` preset (API Contracts,
+    plan Decision log D207): 0/None = current month, 1 = last month only,
+    2 = the three months before the current one. Closes D120 — the bot
+    previously computed "last month"/"last 3 months" bounds in plain UTC
+    because it has no access to family-tz-aware month arithmetic without
+    importing `services/` (forbidden, bot/CLAUDE.md)."""
+    this_start, this_end = month_bounds(now, tz)
+    if not months_back:
+        return this_start, this_end
+    one_back = _month_start_before(this_start, tz)
+    if months_back == 1:
+        return one_back, this_start
+    two_back = _month_start_before(one_back, tz)
+    three_back = _month_start_before(two_back, tz)
+    return three_back, this_start
 
 
 class ExpensePeriodRepositoryProtocol(Protocol):
@@ -51,11 +80,15 @@ class StatisticsService:
         now: datetime | None,
         start: datetime | None = None,
         end: datetime | None = None,
+        months_back: int | None = None,
     ) -> tuple[list[ExpenseResponse], datetime, datetime]:
-        """Caller-supplied `start`/`end` win over the default family-timezone
-        current month; each bound defaults independently, so passing neither
-        reproduces `month_bounds(now, family_tz)` exactly."""
-        default_start, default_end = month_bounds(now, self._family_tz)
+        """Caller-supplied `start`/`end` win over the default window; each
+        bound defaults independently, so passing neither reproduces
+        `_window_for_months_back(months_back, now, family_tz)` exactly, which
+        in turn reproduces `month_bounds(now, family_tz)` when `months_back`
+        is also omitted (route-level 422 keeps `months_back` and `start`/`end`
+        mutually exclusive in practice, per plan Decision log D207)."""
+        default_start, default_end = _window_for_months_back(months_back, now, self._family_tz)
         period_start = start if start is not None else default_start
         period_end = end if end is not None else default_end
         expenses = await self._expense_repo.get_by_period(account_id, period_start, period_end)
@@ -71,11 +104,12 @@ class StatisticsService:
         now: datetime | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
+        months_back: int | None = None,
         category_id: UUID | None = None,
         tag_id: UUID | None = None,
     ) -> PeriodTotal:
         expenses, period_start, period_end = await self._expenses(
-            account_id, user_id=user_id, now=now, start=start, end=end
+            account_id, user_id=user_id, now=now, start=start, end=end, months_back=months_back
         )
         if category_id is not None:
             expenses = [e for e in expenses if e.category_id == category_id]
@@ -93,9 +127,10 @@ class StatisticsService:
         now: datetime | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
+        months_back: int | None = None,
     ) -> list[CategoryTotal]:
         expenses, _, _ = await self._expenses(
-            account_id, user_id=user_id, now=now, start=start, end=end
+            account_id, user_id=user_id, now=now, start=start, end=end, months_back=months_back
         )
         totals: dict[UUID, int] = defaultdict(int)
         for expense in expenses:
@@ -110,9 +145,10 @@ class StatisticsService:
         now: datetime | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
+        months_back: int | None = None,
     ) -> list[TagTotal]:
         expenses, _, _ = await self._expenses(
-            account_id, user_id=user_id, now=now, start=start, end=end
+            account_id, user_id=user_id, now=now, start=start, end=end, months_back=months_back
         )
         totals: dict[UUID, int] = defaultdict(int)
         for expense in expenses:

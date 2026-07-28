@@ -182,6 +182,70 @@ async def test_by_period_default_uses_family_tz_not_utc() -> None:
     assert result.total == 1000
 
 
+async def test_by_period_months_back_0_is_current_month() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    in_month = datetime(2026, 7, 5, tzinfo=UTC)
+    expense = make_expense(account_id=account_id, amount=1000, created_at=in_month)
+    service = StatisticsService(FakeExpensePeriodRepo([expense]))
+
+    result = await service.by_period(account_id, now=now, months_back=0)
+
+    assert result.start == datetime(2026, 7, 1, tzinfo=UTC)
+    assert result.end == datetime(2026, 8, 1, tzinfo=UTC)
+    assert result.total == 1000
+
+
+async def test_by_period_months_back_1_is_last_month_only() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    last_month = datetime(2026, 6, 15, tzinfo=UTC)
+    this_month = datetime(2026, 7, 5, tzinfo=UTC)
+    e1 = make_expense(account_id=account_id, amount=1200, created_at=last_month)
+    e2 = make_expense(account_id=account_id, amount=9999, created_at=this_month)
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    result = await service.by_period(account_id, now=now, months_back=1)
+
+    assert result.start == datetime(2026, 6, 1, tzinfo=UTC)
+    assert result.end == datetime(2026, 7, 1, tzinfo=UTC)
+    assert result.total == 1200
+
+
+async def test_by_period_months_back_2_is_last_three_months() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    in_window = datetime(2026, 4, 15, tzinfo=UTC)  # April, exactly on the window's start
+    outside_window = datetime(2026, 7, 5, tzinfo=UTC)  # current month, excluded
+    e1 = make_expense(account_id=account_id, amount=1500, created_at=in_window)
+    e2 = make_expense(account_id=account_id, amount=9999, created_at=outside_window)
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    result = await service.by_period(account_id, now=now, months_back=2)
+
+    assert result.start == datetime(2026, 4, 1, tzinfo=UTC)
+    assert result.end == datetime(2026, 7, 1, tzinfo=UTC)
+    assert result.total == 1500
+
+
+async def test_by_period_months_back_family_tz_rollover_closes_d120() -> None:
+    """The same Europe/Belgrade rollover instant as
+    test_by_period_default_uses_family_tz_not_utc, but for the `months_back=1`
+    preset — proves D120's UTC-vs-family_tz discrepancy is gone for "last
+    month" too, not just the default "this month" window."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 31, 22, 0, tzinfo=UTC)  # already Aug 1 00:00 in Belgrade
+    late_july_belgrade = datetime(2026, 7, 31, 21, 0, tzinfo=UTC)  # July 31 23:00 Belgrade
+    expense = make_expense(account_id=account_id, amount=1000, created_at=late_july_belgrade)
+    service = StatisticsService(FakeExpensePeriodRepo([expense]), family_tz="Europe/Belgrade")
+
+    result = await service.by_period(account_id, now=now, months_back=1)
+
+    assert result.start == datetime(2026, 6, 30, 22, 0, tzinfo=UTC)  # July 1 00:00 Belgrade
+    assert result.end == datetime(2026, 7, 31, 22, 0, tzinfo=UTC)  # Aug 1 00:00 Belgrade
+    assert result.total == 1000
+
+
 async def test_by_period_category_filter() -> None:
     account_id = uuid4()
     now = datetime(2026, 7, 17, tzinfo=UTC)

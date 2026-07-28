@@ -154,7 +154,7 @@ receives notifications.
       unchanged for existing callers.
       Files: `api/expenses.py`, `services/expense_service.py`,
       `repositories/expense_repo.py`, tests ×2. Model: sonnet.
-- [ ] **U0.4 `months_back` period param** — server-side bounds via
+- [x] **U0.4 `months_back` period param** — server-side bounds via
       `month_bounds(now, family_tz)`; closes D120.
       AC: `months_back=0/1/2` produce the documented windows in a non-UTC
       `family_tz`; `months_back` + `start` together → 422; omitting everything
@@ -449,7 +449,33 @@ tg_id seeded via `docs/seed.sql`).
   boundary) plus `test_list_default_limit_is_50`. Full suite green (523
   passed) and the 21 `test_expense_repo.py` cases green against a real
   Postgres via `scripts/integration_docker.sh`.
-- Next: `/unit U0.4 docs/plans/mini-app-v2.md` (`months_back` period param).
+- Done: **U0.4** — `GET /statistics/by-period|by-category|by-tag` gain
+  `months_back: int | None` (`Query(ge=0, le=2)`; anything else → 422),
+  mutually exclusive with `start`/`end` (both → 422, `api/statistics.py::
+  _validate_period`). `services/statistics_service.py` gets a new
+  `_window_for_months_back(months_back, now, tz)`: 0/`None` = current month
+  (delegates straight to `month_bounds`), 1 = the single prior calendar
+  month, 2 = the three calendar months before the current one — all
+  family-tz-correct. It computes "N months back" by feeding
+  `month_bounds` the instant just before each boundary
+  (`_month_start_before`) rather than duplicating month/DST arithmetic, so
+  `services/period.py` needed no changes (stayed inside the plan's Files
+  list for this unit). This is what actually closes D120: the bot's
+  `preset_bounds()` (`bot/handlers/statistics.py`) still computes "last
+  month"/"last 3 months" in plain UTC for its own presets — unchanged, out
+  of scope — but the Mini App's `months_back` param now gets the
+  family-tz-correct version server-side, which is the discrepancy D120
+  accepted. No new decision: implementation stayed inside D207's contract
+  (`months_back` is a plain int, mutually exclusive with `start`/`end`).
+  Tests: 4 new in `test_statistics_service.py` (0/1/2 presets +
+  a Europe/Belgrade rollover case mirroring the existing family_tz test,
+  proving the D120 discrepancy is gone for `months_back=1`), 4 new in
+  `test_statistics_api.py` (422 on `months_back`+`start`, 422 on
+  `months_back=3`, `by-period` end-to-end with `months_back=1`,
+  `by-category` passthrough). `tests/README.md` updated. Full suite green
+  (531 passed).
+- Next: `/unit U1.1 docs/plans/mini-app-v2.md` (Toolchain + verify.sh lane)
+  — the last U0 unit is done; M1 (frontend foundation) starts here.
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
