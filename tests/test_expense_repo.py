@@ -447,6 +447,52 @@ async def test_get_by_period_orders_newest_first(db_conn: asyncpg.Connection) ->
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
+async def test_list_paginates_without_overlap_newest_first(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    seeded = [
+        await make_expense(
+            db_conn,
+            account_id=account_id,
+            user_id=user.id,
+            category_id=category_id,
+            created_at=datetime(2026, 7, day, tzinfo=UTC),
+        )
+        for day in range(1, 6)
+    ]
+    newest_first_ids = [e.id for e in reversed(seeded)]
+
+    page1 = await repo.list(account_id=account_id, limit=2, offset=0)
+    page2 = await repo.list(account_id=account_id, limit=2, offset=2)
+    page3 = await repo.list(account_id=account_id, limit=2, offset=4)
+
+    assert [e.id for e in page1] == newest_first_ids[0:2]
+    assert [e.id for e in page2] == newest_first_ids[2:4]
+    assert [e.id for e in page3] == newest_first_ids[4:5]
+    all_ids = [e.id for page in (page1, page2, page3) for e in page]
+    assert all_ids == newest_first_ids
+    assert len(set(all_ids)) == len(all_ids)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_default_limit_is_50(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    for _ in range(3):
+        await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=category_id)
+
+    results = await repo.list(account_id=account_id)
+
+    assert len(results) == 3
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
 async def test_list_populates_user_name(db_conn: asyncpg.Connection) -> None:
     account_id = await make_account(db_conn)
     category_id = await make_category(db_conn, account_id=account_id)

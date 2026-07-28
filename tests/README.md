@@ -88,6 +88,8 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 | `test_get_by_period_populates_user_name` | `get_by_period()` populates `user_name` |
 | `test_get_by_category_populates_user_name` | `get_by_category()` populates `user_name` |
 | `test_zero_or_negative_amount_rejected_by_db_check` | DB `CHECK (amount > 0)` on `expenses` rejects a direct zero/negative insert with `asyncpg.CheckViolationError` (U1.6) |
+| `test_list_paginates_without_overlap_newest_first` | `list(limit=, offset=)` pages a 5-row seeded set with no overlap between pages, newest-`created_at`-first order preserved across the page boundary (U0.3 AC) |
+| `test_list_default_limit_is_50` | Omitting `limit`/`offset` still returns every row of a small set — default call unchanged for existing callers (U0.3 AC) |
 
 ### `test_budget_plan_repo.py` → [`repositories/budget_plan_repo.py`](../repositories/budget_plan_repo.py)
 | Test | Checks |
@@ -241,6 +243,8 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | Test | Checks |
 |---|---|
 | `test_list_scopes_by_account` | `list()` excludes another account's expenses |
+| `test_list_defaults_to_limit_50_offset_0` | Omitting `limit`/`offset` still returns every row of a small set (U0.3 AC) |
+| `test_list_passes_limit_and_offset_through_to_repo` | `list(limit=, offset=)` is threaded to the repo call unchanged (U0.3) |
 | `test_get_returns_expense_in_account` | `get()` returns an expense belonging to the given account |
 | `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
 | `test_get_foreign_account_raises_not_found` | `get()` on an expense from another account raises `NotFoundError` |
@@ -327,6 +331,9 @@ first time — plan Decision log handoff note).
 |---|---|
 | `test_list_expenses_as_member_returns_account_expenses` | Member `GET /expenses` returns ALL account expenses, including other users' (default matrix: read is unqualified, not `own_only`) |
 | `test_list_expenses_with_own_only_override_filters_to_own` | An override permission row with `own_only=True` on `read` filters `GET /expenses` down to the caller's own expenses (review fix — the default matrix never sets `own_only` on read, but an override row can) |
+| `test_list_expenses_pages_without_overlap` | `GET /expenses?limit=&offset=` — two consecutive pages of a 5-row set are disjoint and each has the requested size (U0.3 AC) |
+| `test_list_expenses_default_limit_unchanged_for_existing_callers` | Omitting `limit`/`offset` still returns every row of a small set — default call unchanged (U0.3 AC) |
+| `test_list_expenses_limit_over_200_is_422` | `GET /expenses?limit=201` → 422 (U0.3 AC) |
 | `test_get_expense_as_viewer` | Viewer `GET /expenses/{id}` returns the expense |
 | `test_get_missing_expense_is_404` | Unknown id → 404 |
 | `test_create_expense_as_member` | Member `POST /expenses` → 201; response `account_id`/`user_id` are server-derived |

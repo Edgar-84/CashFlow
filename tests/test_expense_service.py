@@ -24,9 +24,12 @@ class FakeExpenseRepo:
     def __init__(self, expenses: list[ExpenseResponse] | None = None) -> None:
         self._expenses: dict[UUID, ExpenseResponse] = {e.id: e for e in (expenses or [])}
 
-    async def list(self, **filters: Any) -> list[ExpenseResponse]:
+    async def list(
+        self, *, limit: int = 50, offset: int = 0, **filters: Any
+    ) -> list[ExpenseResponse]:
         account_id = filters.get("account_id")
-        return [e for e in self._expenses.values() if e.account_id == account_id]
+        matches = [e for e in self._expenses.values() if e.account_id == account_id]
+        return matches[offset : offset + limit]
 
     async def get(self, id: UUID) -> ExpenseResponse | None:
         return self._expenses.get(id)
@@ -241,6 +244,28 @@ async def test_list_scopes_by_account() -> None:
     result = await service.list(account_id)
 
     assert result == [mine]
+
+
+async def test_list_defaults_to_limit_50_offset_0() -> None:
+    account_id = uuid4()
+    expenses = [make_expense(account_id=account_id) for _ in range(3)]
+    repo = FakeExpenseRepo(expenses)
+    service = make_service(repo)
+
+    result = await service.list(account_id)
+
+    assert {e.id for e in result} == {e.id for e in expenses}
+
+
+async def test_list_passes_limit_and_offset_through_to_repo() -> None:
+    account_id = uuid4()
+    expenses = [make_expense(account_id=account_id) for _ in range(5)]
+    repo = FakeExpenseRepo(expenses)
+    service = make_service(repo)
+
+    page = await service.list(account_id, limit=2, offset=2)
+
+    assert len(page) == 2
 
 
 async def test_get_returns_expense_in_account() -> None:

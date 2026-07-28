@@ -174,6 +174,61 @@ async def test_list_expenses_with_own_only_override_filters_to_own(
     assert [e["id"] for e in response.json()] == [str(mine.id)]
 
 
+async def test_list_expenses_pages_without_overlap(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    expenses = [make_expense(account_id=account_id, user_id=member.id) for _ in range(5)]
+    override_repos(expenses)
+
+    page1 = await client.get(
+        "/expenses", headers=auth_headers(member.tg_id), params={"limit": 2, "offset": 0}
+    )
+    page2 = await client.get(
+        "/expenses", headers=auth_headers(member.tg_id), params={"limit": 2, "offset": 2}
+    )
+
+    assert page1.status_code == 200
+    assert page2.status_code == 200
+    ids1 = [e["id"] for e in page1.json()]
+    ids2 = [e["id"] for e in page2.json()]
+    assert len(ids1) == 2
+    assert len(ids2) == 2
+    assert set(ids1).isdisjoint(ids2)
+    assert set(ids1) | set(ids2) <= {str(e.id) for e in expenses}
+
+
+async def test_list_expenses_default_limit_unchanged_for_existing_callers(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    expenses = [make_expense(account_id=account_id, user_id=member.id) for _ in range(3)]
+    override_repos(expenses)
+
+    response = await client.get("/expenses", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert {e["id"] for e in response.json()} == {str(e.id) for e in expenses}
+
+
+async def test_list_expenses_limit_over_200_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/expenses", headers=auth_headers(member.tg_id), params={"limit": 201}
+    )
+
+    assert response.status_code == 422
+
+
 async def test_get_expense_as_viewer(
     client: AsyncClient, override_repos: OverrideRepos, viewer: UserResponse, account_id: UUID
 ) -> None:
