@@ -60,7 +60,7 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 - Notifications are best-effort: send failures are logged and must never fail the expense operation that triggered them.
 
 ## Environment (.env)
-`DATABASE_URL`, `BOT_TOKEN`, `BACKEND_BASE_URL`, `INTERNAL_TOKEN`, `ALLOWED_TG_IDS` (comma-separated tg_ids), `FAMILY_TZ`.
+`DATABASE_URL`, `BOT_TOKEN`, `BACKEND_BASE_URL`, `INTERNAL_TOKEN`, `FAMILY_TZ`.
 Mini App adds: `FAMILY_CURRENCY`, `MINI_APP_URL` (the bot's link to it),
 `INITDATA_MAX_AGE_SEC`. Backend-only — none of them are secrets, and none are
 injected into the browser bundle. No CORS variable: the Mini App is served from
@@ -73,10 +73,10 @@ README "Environments & .env".
 - Voice input · Bot self-registration · OAuth/JWT (tg_id + internal token is enough for now) · Scheduled digests/APScheduler (V1 notifies on expense creation only).
 - The Mini App frontend is no longer out of scope — it is being planned in
   `docs/design/mini-app-ux.md`. Its §0 decisions (D200–D205) gate implementation.
-- Admin panel for account/user management. PREREQUISITE: migrate the bot
-  allowlist from ALLOWED_TG_IDS in .env to a DB lookup against the users
-  table (one change in bot/middlewares.py). Until then, adding a user
-  requires editing .env + bot restart.
+- Admin panel for account/user management. Its prerequisite — migrating the
+  bot allowlist from an `.env` var to a DB lookup — is DONE
+  (`docs/plans/bot-allowlist-db.md`): adding a family member is now one
+  `INSERT` into `users`, no `.env` edit, no bot restart.
 
 ## Do not edit without asking
 `migrations/versions/`, `.env*`, `uv.lock`, `webapp/pnpm-lock.yaml`.

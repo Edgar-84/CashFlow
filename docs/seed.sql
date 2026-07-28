@@ -12,8 +12,8 @@
 -- HOW TO GET tg_id: each family member messages @userinfobot
 -- in Telegram and receives their numeric ID.
 --
--- IMPORTANT: after seeding, add every tg_id to ALLOWED_TG_IDS
--- in .env and restart the bot (bot middleware allowlist).
+-- IMPORTANT: the bot allowlist IS the users table — no .env edit, no
+-- restart. A tg_id can message the bot as soon as its row exists here.
 -- ============================================================
 
 
@@ -100,7 +100,5 @@ ORDER BY u.role, u.name;
 -- ============================================================
 -- CHECKLIST after running this file:
 -- [ ] owner_id set on the account (owner_set = true above)
--- [ ] every tg_id added to ALLOWED_TG_IDS in .env
--- [ ] bot restarted
 -- [ ] each member sent /start to the bot and got the main menu
 -- ============================================================

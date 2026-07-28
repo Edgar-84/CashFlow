@@ -528,7 +528,7 @@ Hermetic — no FSM state, no backend calls, so no fakes needed (U2.5 AC:
 Hermetic — no real Telegram/network; updates fed through the full dispatcher
 stack via `dp.feed_update` with a `MockTransport`-backed http client standing
 in for the backend's `GET /users/me` probe (U4.2 AC: dispatcher builds;
-bot-allowlist-db plan U2 AC: `create_dispatcher` takes no `allowed_tg_ids`).
+bot-allowlist-db plan U2 AC: `create_dispatcher` takes no allowlist parameter).
 
 | Test | Checks |
 |---|---|

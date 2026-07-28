@@ -20,7 +20,6 @@ _ENV_DEFAULTS = {
     "BOT_TOKEN": "test-bot-token",
     "BACKEND_BASE_URL": "http://localhost:8000",
     "INTERNAL_TOKEN": "test-internal-token",
-    "ALLOWED_TG_IDS": "123456789",
 }
 
 # Matches the postgres service in the CI "integration" job — lets

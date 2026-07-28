@@ -47,12 +47,12 @@ Record each answer in the plan's Decision log as D200+.
   statistics); categories and tags management stay bot-only until M3. The bot is
   never retired — it stays the fastest path for a one-line expense and the only
   surface for notifications.
-- **DECIDE D205 — Bot allowlist.** `ALLOWED_TG_IDS` gates the bot in
-  `bot/middlewares.py`. The Mini App does not go through that middleware, so its
-  gate is the `users` table lookup that `get_current_user` already does. This is
-  either fine (the user row is the real allowlist) or it is the moment to do the
-  allowlist→DB migration that root CLAUDE.md names as the V2 admin-panel
-  prerequisite. Decide which.
+- **DECIDE D205 — Bot allowlist.** The bot's `AllowlistMiddleware` in
+  `bot/middlewares.py` gates on a `users`-table lookup. The Mini App does not
+  go through that middleware, so its gate is the same `users` table lookup
+  that `get_current_user` already does. This is either fine (the user row is
+  the real allowlist) or it is the moment to do the allowlist→DB migration
+  that root CLAUDE.md names as the V2 admin-panel prerequisite. Decide which.
 
 ---
 

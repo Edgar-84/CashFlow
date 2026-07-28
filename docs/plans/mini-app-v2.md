@@ -28,8 +28,8 @@ receives notifications.
   `categories.color` migration in v1 (D206).
 - Offline write queueing (read-only offline only), voice input, self-
   registration, admin surfaces (users/permissions) — still V2 admin panel. Its
-  `ALLOWED_TG_IDS` → DB allowlist prerequisite is no longer this plan's problem:
-  `docs/plans/bot-allowlist-db.md` does it, and ships before U0.1.
+  DB allowlist prerequisite is done (`docs/plans/bot-allowlist-db.md`,
+  shipped before U0.1).
 - Any change to notification behaviour. Fan-out (D104) is untouched.
 - CORS anything — the app is same-origin (D201).
 
@@ -225,7 +225,7 @@ receives notifications.
 
 ## Live-test checkpoints
 Each ends with something to try in the dev bot's Mini App (dev `BOT_TOKEN`, own
-tg_id in `ALLOWED_TG_IDS`, `docs/seed.sql` applied).
+tg_id seeded via `docs/seed.sql`).
 
 - **CP0 — before U0.1**: finish the V1.1 CP0–CP8 manual pass, and run the
   outstanding prod check `SELECT count(*) FROM expenses WHERE amount <= 0`
@@ -297,10 +297,10 @@ tg_id in `ALLOWED_TG_IDS`, `docs/seed.sql` applied).
   units to reach the same payoff); walking skeleton only (Home + Add alone
   leaves the month view without the drill-down that makes it useful).
 - D205 (2026-07-27): the Mini App's gate is the `users`-table lookup
-  `get_current_user` already performs; `ALLOWED_TG_IDS` stays bot-only and is
-  **not** migrated to the DB by this plan. A tg_id with no user row gets 401,
-  which is the same practical outcome. The allowlist→DB migration remains the
-  documented prerequisite for the V2 admin panel.
+  `get_current_user` already performs; the bot's allowlist is **not** migrated
+  to the DB by this plan. A tg_id with no user row gets 401, which is the same
+  practical outcome. The allowlist→DB migration remains the documented
+  prerequisite for the V2 admin panel.
   **Amended 2026-07-27 (see D210):** still accurate as scoped — this plan does
   not perform the migration — but the migration is no longer pending. It has
   its own plan, `docs/plans/bot-allowlist-db.md`, sequenced before U0.1.

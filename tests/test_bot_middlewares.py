@@ -29,12 +29,12 @@ def _user_json(tg_id: int) -> dict[str, Any]:
 
 
 def make_probe_responder(
-    *, allowed_tg_ids: set[int], captured: list[httpx.Request]
+    *, known_tg_ids: set[int], captured: list[httpx.Request]
 ) -> Callable[[httpx.Request], httpx.Response]:
     def responder(request: httpx.Request) -> httpx.Response:
         captured.append(request)
         tg_id = int(request.headers["X-Telegram-User-Id"])
-        if tg_id in allowed_tg_ids:
+        if tg_id in known_tg_ids:
             return httpx.Response(200, json=_user_json(tg_id))
         return httpx.Response(401)
 
@@ -68,7 +68,7 @@ async def _run(middleware: AllowlistMiddleware, tg_id: int | None) -> tuple[Any,
 async def test_allowlisted_tg_id_calls_handler_with_injected_client() -> None:
     captured: list[httpx.Request] = []
     middleware = make_middleware(
-        responder=make_probe_responder(allowed_tg_ids={ALLOWED_TG_ID}, captured=captured)
+        responder=make_probe_responder(known_tg_ids={ALLOWED_TG_ID}, captured=captured)
     )
     received_client: BackendClient | None = None
 
@@ -86,7 +86,7 @@ async def test_allowlisted_tg_id_calls_handler_with_injected_client() -> None:
 async def test_non_allowlisted_tg_id_is_dropped_before_handler() -> None:
     captured: list[httpx.Request] = []
     middleware = make_middleware(
-        responder=make_probe_responder(allowed_tg_ids={ALLOWED_TG_ID}, captured=captured)
+        responder=make_probe_responder(known_tg_ids={ALLOWED_TG_ID}, captured=captured)
     )
 
     result, handler_called = await _run(middleware, DENIED_TG_ID)
@@ -98,7 +98,7 @@ async def test_non_allowlisted_tg_id_is_dropped_before_handler() -> None:
 async def test_missing_event_from_user_is_dropped() -> None:
     captured: list[httpx.Request] = []
     middleware = make_middleware(
-        responder=make_probe_responder(allowed_tg_ids={ALLOWED_TG_ID}, captured=captured)
+        responder=make_probe_responder(known_tg_ids={ALLOWED_TG_ID}, captured=captured)
     )
 
     result, handler_called = await _run(middleware, None)
@@ -111,7 +111,7 @@ async def test_missing_event_from_user_is_dropped() -> None:
 async def test_second_update_within_ttl_issues_no_second_probe() -> None:
     captured: list[httpx.Request] = []
     middleware = make_middleware(
-        responder=make_probe_responder(allowed_tg_ids={ALLOWED_TG_ID}, captured=captured)
+        responder=make_probe_responder(known_tg_ids={ALLOWED_TG_ID}, captured=captured)
     )
 
     await _run(middleware, ALLOWED_TG_ID)
@@ -125,7 +125,7 @@ async def test_second_update_within_ttl_issues_no_second_probe() -> None:
 async def test_expired_entry_re_probes() -> None:
     captured: list[httpx.Request] = []
     middleware = make_middleware(
-        responder=make_probe_responder(allowed_tg_ids={ALLOWED_TG_ID}, captured=captured),
+        responder=make_probe_responder(known_tg_ids={ALLOWED_TG_ID}, captured=captured),
         ttl_ok=-1,
     )
 
@@ -168,7 +168,7 @@ async def test_probe_5xx_drops_update_and_logs_error(caplog: pytest.LogCaptureFi
 async def test_cache_never_exceeds_max_entries() -> None:
     captured: list[httpx.Request] = []
     middleware = make_middleware(
-        responder=make_probe_responder(allowed_tg_ids=set(), captured=captured),
+        responder=make_probe_responder(known_tg_ids=set(), captured=captured),
         max_entries=2,
     )
 
@@ -209,7 +209,7 @@ async def test_injected_client_carries_headers_for_the_calling_tg_id() -> None:
 async def test_dropped_update_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     captured: list[httpx.Request] = []
     middleware = make_middleware(
-        responder=make_probe_responder(allowed_tg_ids={ALLOWED_TG_ID}, captured=captured)
+        responder=make_probe_responder(known_tg_ids={ALLOWED_TG_ID}, captured=captured)
     )
 
     with caplog.at_level("WARNING", logger="bot.middlewares"):

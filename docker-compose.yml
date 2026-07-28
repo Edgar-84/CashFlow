@@ -1,7 +1,7 @@
 # Local full stack for laptop testing: db → migrate (one-shot) → api → bot.
 # DATABASE_URL/BACKEND_BASE_URL are overridden here to point at compose
-# service hostnames; everything else (BOT_TOKEN, INTERNAL_TOKEN,
-# ALLOWED_TG_IDS) comes from `.env` at runtime — see .dockerignore.
+# service hostnames; everything else (BOT_TOKEN, INTERNAL_TOKEN) comes from
+# `.env` at runtime — see .dockerignore.
 # Prod (AWS → Supabase) uses docker-compose.prod.yml instead.
 
 services:

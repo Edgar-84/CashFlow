@@ -1,6 +1,6 @@
 """Unit tests for bot/bot.py — create_dispatcher, hermetic (no real
 Telegram/network), U4.2 AC: dispatcher builds. U2 AC (bot-allowlist-db plan):
-create_dispatcher no longer takes allowed_tg_ids; the allowlist is a
+create_dispatcher no longer takes an allowlist parameter; the allowlist is a
 GET /users/me probe made by AllowlistMiddleware."""
 
 from collections.abc import Callable
@@ -33,10 +33,10 @@ def reject_any_request(request: httpx.Request) -> httpx.Response:
     raise AssertionError("no API call expected in these tests")
 
 
-def make_probe_responder(allowed_tg_ids: set[int]) -> Callable[[httpx.Request], httpx.Response]:
+def make_probe_responder(known_tg_ids: set[int]) -> Callable[[httpx.Request], httpx.Response]:
     def responder(request: httpx.Request) -> httpx.Response:
         tg_id = int(request.headers["X-Telegram-User-Id"])
-        if tg_id in allowed_tg_ids:
+        if tg_id in known_tg_ids:
             return httpx.Response(200, json=_user_json(tg_id))
         return httpx.Response(401)
 

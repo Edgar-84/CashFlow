@@ -43,14 +43,13 @@ should exist only in the server's `.env`.
 | `DATABASE_URL` | ignored by the local stack (pinned to the `db` container); set it to the Supabase **session** pooler URL only for a prod-config test from the laptop | Supabase **session** pooler URL (port 5432, not the transaction pooler) |
 | `BACKEND_BASE_URL` | ignored in docker (pinned to `http://api:8000`); `http://localhost:8000` for bare-host runs | ignored (pinned in compose) |
 | `INTERNAL_TOKEN` | any random dev value | strong secret — `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `ALLOWED_TG_IDS` | your Telegram id | all family members' ids |
 | `FAMILY_TZ` | optional, defaults to `UTC` — IANA name, e.g. `Europe/Belgrade` | same |
 
 How the three ways to run map onto this:
 
 1. **Local stack** — `docker compose up --build`. Uses a throwaway
-   Postgres container; only `BOT_TOKEN`, `INTERNAL_TOKEN` and
-   `ALLOWED_TG_IDS` are actually read from your `.env`.
+   Postgres container; only `BOT_TOKEN` and `INTERNAL_TOKEN` are actually
+   read from your `.env`.
 2. **Prod config from the laptop** — `docker compose -f
    docker-compose.prod.yml up --build`. Talks to the real Supabase, so
    `DATABASE_URL` in your laptop `.env` must be the session-pooler URL.
@@ -110,8 +109,7 @@ touches it.
    directory itself on every deploy; nothing to copy by hand.
 3. Hand-write `/opt/bot/.env` (see "Environments & `.env`" above — prod
    `BOT_TOKEN`, Supabase session-pooler `DATABASE_URL`, a strong
-   `INTERNAL_TOKEN`, all family `ALLOWED_TG_IDS`), then
-   `chmod 600 /opt/bot/.env`.
+   `INTERNAL_TOKEN`), then `chmod 600 /opt/bot/.env`.
 4. Add `CASHFLOW_IMAGE=ghcr.io/edgar-84/cashflow:latest` to that `.env` —
    without it, compose falls back to `cashflow:prod` (a local build) and
    CD's `pull` has nothing to update.
