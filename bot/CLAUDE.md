@@ -11,8 +11,9 @@ what will let the future Telegram Mini App (V2) reuse the same backend.
 - `bot.py` — `Dispatcher` + router registration; entrypoint (`__main__`).
 - `client.py` — `BackendClient`: httpx `AsyncClient` wrapper, one method per
   endpoint. All API calls go through this class.
-- `middlewares.py` — tg_id allowlist (from `ALLOWED_TG_IDS`); injects
-  `X-Telegram-User-Id` header into every outgoing API call.
+- `middlewares.py` — tg_id allowlist (a `GET /users/me` probe against the
+  backend, TTL-cached per tg_id); injects `X-Telegram-User-Id` header into
+  every outgoing API call.
 - `keyboards.py` — `InlineKeyboardMarkup` builders (pure functions).
 - `states.py` — FSM `StatesGroup`s.
 - `handlers/` — one module per feature area: `expenses.py`, `categories.py`,

@@ -85,7 +85,7 @@ talk to the bot, which is exactly what the backend already enforces.
       Files: `bot/middlewares.py`, `bot/bot.py`, `bot/client.py`,
       `tests/test_bot_middlewares.py`, `tests/test_bot_bot.py`.
       RISKY (it is the bot's authentication gate) → reviewer subagent. Model: sonnet.
-- [ ] **U3 Retire `ALLOWED_TG_IDS`** — delete the setting and every reference.
+- [x] **U3 Retire `ALLOWED_TG_IDS`** — delete the setting and every reference.
       AC: `grep -ri allowed_tg_ids` over the repo returns nothing outside this
       plan file and the historical plan files; `bash scripts/verify.sh` green;
       the app and the bot both start with the var absent from `.env`; README's
@@ -93,6 +93,11 @@ talk to the bot, which is exactly what the backend already enforces.
       path with no restart; root `CLAUDE.md`'s "one change in
       `bot/middlewares.py`" claim is corrected and the admin-panel PREREQUISITE
       note is marked done.
+      **Caveat: `.env.example` is excluded from the grep AC** — it matches
+      this repo's `Read(./.env.*)` deny rule, so Claude cannot read or edit
+      it; the human removes its `ALLOWED_TG_IDS` line (and the var from their
+      own `.env` files, dev/prod, and the deploy environment) by hand before
+      this plan is truly closed. See STATE below.
       Files: `config.py`, `.env.example`, `tests/conftest.py`,
       `.github/workflows/ci.yml`, `docker-compose.yml`, `README.md`,
       `CLAUDE.md`, `bot/CLAUDE.md`, `webapp/CLAUDE.md`, `docs/seed.sql`,
@@ -167,17 +172,22 @@ talk to the bot, which is exactly what the backend already enforces.
   `bot/middlewares.py`, `bot/client.py` (`get_me()`), `bot/bot.py`
   (`create_dispatcher` drops `allowed_tg_ids`), `tests/test_bot_middlewares.py`,
   `tests/test_bot_bot.py`, `tests/README.md`). Reviewer subagent: APPROVE, no
-  blockers.
-- Next: `/unit U3 docs/plans/bot-allowlist-db.md` (config/docs-only, retires
-  `ALLOWED_TG_IDS`).
+  blockers. U3 (removed the setting from `config.py`, `.github/workflows/ci.yml`,
+  `docker-compose.yml`, `tests/conftest.py`; reworded every doc reference in
+  `README.md`, `CLAUDE.md`, `bot/CLAUDE.md`, `webapp/CLAUDE.md`, `docs/seed.sql`,
+  `tests/README.md`, `docs/plans/mini-app-v2.md`, `docs/design/mini-app-ux.md`;
+  renamed an incidentally-named `allowed_tg_ids` test-helper parameter in
+  `tests/test_bot_bot.py`/`tests/test_bot_middlewares.py` to `known_tg_ids` so
+  the AC's repo-wide grep is clean; `verify.sh` green).
+- Next: this plan is fully done. Live-test checkpoint CP (see above) is
+  outstanding — run it before `/unit U0.1 docs/plans/mini-app-v2.md`.
 - Gotchas:
   - Decision ids start at D300 (MVP D1–D45, V1.1 D100–D124, Mini App D200–D209).
   - U1 also closes mini-app-v2 U0.2 — check that box there when U1 lands (D301).
-  - U3 touches `.env.example` but **not** `.env` (do-not-edit list). The human
-    removes `ALLOWED_TG_IDS` from their own `.env` files, dev and prod, and from
-    the deploy environment.
-  - `config.py`'s `allowed_tg_ids`/`allowed_tg_ids_list` and `bot/CLAUDE.md`'s
-    stale "tg_id allowlist (from ALLOWED_TG_IDS)" line are U3's job, not U2's —
-    left untouched on purpose.
+  - `.env.example` was **not** touched by U3 — it matches the repo's
+    `Read(./.env.*)` deny rule, so Claude cannot read or edit it. The human
+    removes the `ALLOWED_TG_IDS` line from `.env.example` and from their own
+    `.env` files (dev and prod) and the deploy environment, by hand.
   - This plan must be fully done and committed before
-    `/unit U0.1 docs/plans/mini-app-v2.md`.
+    `/unit U0.1 docs/plans/mini-app-v2.md` — it now is, once `.env.example`
+    is cleaned up by hand and the live-test CP passes.

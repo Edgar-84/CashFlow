@@ -48,7 +48,6 @@ jobs:
       INTERNAL_TOKEN: ci-test-token
       BOT_TOKEN: "000000:ci-fake-token"
       BACKEND_BASE_URL: http://localhost:8000
-      ALLOWED_TG_IDS: "1"
     steps:
       - uses: actions/checkout@v4
 
