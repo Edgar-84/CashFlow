@@ -471,6 +471,10 @@ Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeE
 | `test_by_period_custom_window_overrides_current_month` | Explicit `start`/`end` replace the default current-month window |
 | `test_by_period_last_month_window` | Explicit `start`/`end` covering the prior month works the same as any custom window |
 | `test_by_period_default_uses_family_tz_not_utc` | No `start`/`end` → default bounds computed from the constructor's `family_tz`, not hardcoded UTC (U1.2 wiring) |
+| `test_by_period_months_back_0_is_current_month` | `months_back=0` produces the same bounds as the default current month (U0.4 AC) |
+| `test_by_period_months_back_1_is_last_month_only` | `months_back=1` → the single prior calendar month, excludes the current month (U0.4 AC) |
+| `test_by_period_months_back_2_is_last_three_months` | `months_back=2` → the three calendar months before the current one (U0.4 AC) |
+| `test_by_period_months_back_family_tz_rollover_closes_d120` | `months_back=1` bounds are computed from `family_tz`, not UTC, at a Europe/Belgrade month-rollover instant — the discrepancy D120 accepted is gone (U0.4 AC) |
 | `test_by_period_category_filter` | `category_id` restricts the sum to that category, applied before aggregation |
 | `test_by_period_tag_filter` | `tag_id` restricts the sum to expenses carrying that tag, applied before aggregation |
 | `test_by_category_groups_totals_by_category` | `by_category()` groups totals per `category_id`; each `total` is `int` |
@@ -496,6 +500,10 @@ Action.READ)`-gated — statistics has no `Resource` enum entry of its own (plan
 | `test_by_period_custom_window` | `start`/`end` query params (ISO-8601) restrict the aggregate to that window |
 | `test_by_period_category_and_tag_filter` | `category_id`/`tag_id` query params on `by-period` restrict the aggregate |
 | `test_by_period_start_after_end_is_422` | `start >= end` → 422 |
+| `test_by_period_months_back_and_start_is_422` | `months_back` combined with `start` → 422 (D207: mutually exclusive) |
+| `test_by_period_months_back_out_of_range_is_422` | `months_back=3` (outside the documented 0–2 presets) → 422 |
+| `test_by_period_months_back_1_is_last_month` | `months_back=1` query param restricts `by-period` to the prior calendar month, end to end (U0.4 AC) |
+| `test_by_category_months_back_passthrough` | `months_back` is threaded through to `by-category` the same way as `by-period` |
 
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)
 | Test | Checks | Target |
