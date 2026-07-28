@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from api.deps import PermissionChecker, PermissionDecision, enforce_ownership, get_expense_service
 from models.enums import Action, Resource
@@ -17,12 +17,17 @@ async def list_expenses(
     request: Request,
     user: Annotated[UserResponse, Depends(PermissionChecker(Resource.EXPENSES, Action.READ))],
     service: Annotated[ExpenseService, Depends(get_expense_service)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ExpenseResponse]:
-    expenses = await service.list(user.account_id)
+    expenses = await service.list(user.account_id, limit=limit, offset=offset)
     # Default matrix leaves expense read unqualified (D26), but an override
     # permission row can still set own_only=True for read — step 6 has no
     # single "target record" for a list, so it's applied here as a filter
-    # rather than via enforce_ownership (which 403s on one owner_id).
+    # rather than via enforce_ownership (which 403s on one owner_id). This
+    # means own_only can return a short page — filtered client-side, after
+    # the DB already applied limit/offset (plan Risks: "Pagination vs
+    # own_only").
     decision: PermissionDecision = request.state.permission_decision
     if decision.own_only:
         expenses = [e for e in expenses if e.user_id == user.id]

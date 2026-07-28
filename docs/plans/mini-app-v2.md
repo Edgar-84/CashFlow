@@ -146,7 +146,7 @@ receives notifications.
       `docs/SCHEMA.sql`, `api/CLAUDE.md`, `CLAUDE.md`, tests ×2+.
       RISKY (migration + shared-model contract change) → reviewer subagent.
       Model: sonnet.
-- [ ] **U0.3 Expense pagination** — `limit`/`offset` through route → service →
+- [x] **U0.3 Expense pagination** — `limit`/`offset` through route → service →
       repo, defaults 50/0, `limit > 200` → 422.
       AC: page 1 + page 2 have no overlap and cover the seeded set; newest-first
       order preserved across pages (@integration); `own_only` filtering still
@@ -436,7 +436,20 @@ tg_id seeded via `docs/seed.sql`).
   removed (superseded, had zero consumers). Full suite green (518 passed);
   schema + `AccountRepository` also verified against a real Postgres via
   `scripts/integration_docker.sh`.
-- Next: `/unit U0.3 docs/plans/mini-app-v2.md` (Expense pagination).
+- Done: **U0.3** — `GET /expenses` gains `limit` (default 50, `Query(ge=1, le=200)`
+  → 422 over 200) and `offset` (default 0, `Query(ge=0)`), threaded through
+  `ExpenseService.list` to `ExpenseRepository.list`, which now takes explicit
+  `limit`/`offset` keyword args (separate from the equality `**filters`) and
+  adds `LIMIT`/`OFFSET` to the SQL, still `ORDER BY created_at DESC`. Default
+  call (`list(account_id=...)` with no limit/offset) is unchanged for every
+  existing caller. `own_only` filtering in the route is untouched — it still
+  runs after the DB page, per the plan's documented Risk. Tests added at all
+  three layers (service pass-through, API 422 + no-overlap pagination,
+  integration repo test proving newest-first order holds across a page
+  boundary) plus `test_list_default_limit_is_50`. Full suite green (523
+  passed) and the 21 `test_expense_repo.py` cases green against a real
+  Postgres via `scripts/integration_docker.sh`.
+- Next: `/unit U0.4 docs/plans/mini-app-v2.md` (`months_back` period param).
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).

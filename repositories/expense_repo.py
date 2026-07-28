@@ -132,17 +132,23 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         )
         return {row["category_id"]: row["total"] for row in rows}
 
-    async def list(self, **filters: Any) -> list[ExpenseResponse]:
+    async def list(
+        self, *, limit: int = 50, offset: int = 0, **filters: Any
+    ) -> list[ExpenseResponse]:
+        params = list(filters.values())
         if filters:
             columns = list(filters.keys())
             where = " AND ".join(f"expenses.{col} = ${i}" for i, col in enumerate(columns, start=1))
-            rows = await self._conn.fetch(
-                f"{self._SELECT_WITH_AUTHOR} WHERE {where} ORDER BY expenses.created_at DESC",
-                *filters.values(),
-            )
+            where_clause = f"WHERE {where} "
         else:
-            rows = await self._conn.fetch(
-                f"{self._SELECT_WITH_AUTHOR} ORDER BY expenses.created_at DESC"
-            )
+            where_clause = ""
+        limit_idx, offset_idx = len(params) + 1, len(params) + 2
+        rows = await self._conn.fetch(
+            f"{self._SELECT_WITH_AUTHOR} {where_clause}"
+            f"ORDER BY expenses.created_at DESC LIMIT ${limit_idx} OFFSET ${offset_idx}",
+            *params,
+            limit,
+            offset,
+        )
         expenses = [self._model.model_validate(dict(row)) for row in rows]
         return await self._attach_tags(expenses)

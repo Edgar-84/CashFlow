@@ -19,7 +19,9 @@ class ExpenseRepositoryProtocol(Protocol):
     """Duck-typed repository interface (tests/CLAUDE.md) — lets unit tests
     pass an in-memory fake instead of the real ExpenseRepository."""
 
-    async def list(self, **filters: Any) -> list[ExpenseResponse]: ...
+    async def list(
+        self, *, limit: int = 50, offset: int = 0, **filters: Any
+    ) -> list[ExpenseResponse]: ...
     async def get(self, id: UUID) -> ExpenseResponse | None: ...
     async def create(self, data: dict[str, Any]) -> ExpenseResponse: ...
     async def update(self, id: UUID, data: dict[str, Any]) -> ExpenseResponse | None: ...
@@ -234,5 +236,7 @@ class ExpenseService:
     # D22 (MVP plan): a method literally named `list` breaks every other
     # method's bare `list[...]` annotation earlier in this class body — must
     # stay the last definition here.
-    async def list(self, account_id: UUID) -> list[ExpenseResponse]:
-        return await self._expense_repo.list(account_id=account_id)
+    async def list(
+        self, account_id: UUID, *, limit: int = 50, offset: int = 0
+    ) -> list[ExpenseResponse]:
+        return await self._expense_repo.list(account_id=account_id, limit=limit, offset=offset)
