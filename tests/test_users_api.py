@@ -124,6 +124,63 @@ async def test_list_users_as_viewer_is_403(
     assert response.status_code == 403
 
 
+async def test_get_me_as_member_returns_own_row(
+    client: AsyncClient, override_repo: OverrideRepo, member: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.get("/users/me", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert response.json()["id"] == str(member.id)
+
+
+async def test_get_me_as_viewer_returns_own_row(
+    client: AsyncClient, override_repo: OverrideRepo, viewer: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.get("/users/me", headers=auth_headers(viewer.tg_id))
+
+    assert response.status_code == 200
+    assert response.json()["id"] == str(viewer.id)
+
+
+async def test_get_me_is_not_shadowed_by_user_id_route(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse
+) -> None:
+    # /users/me must resolve to the "me" route, not fall into /{user_id} and
+    # fail UUID parsing with a 422.
+    override_repo()
+
+    response = await client.get("/users/me", headers=auth_headers(admin.tg_id))
+
+    assert response.status_code == 200
+
+
+async def test_get_me_missing_credentials_is_401(
+    client: AsyncClient, override_repo: OverrideRepo
+) -> None:
+    override_repo()
+
+    response = await client.get("/users/me")
+
+    assert response.status_code == 401
+
+
+async def test_get_me_invalid_internal_token_is_401(
+    client: AsyncClient, override_repo: OverrideRepo, member: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.get(
+        "/users/me",
+        headers={"X-Internal-Token": "wrong", "X-Telegram-User-Id": str(member.tg_id)},
+    )
+
+    assert response.status_code == 401
+
+
 async def test_get_user_as_admin(
     client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse, member: UserResponse
 ) -> None:

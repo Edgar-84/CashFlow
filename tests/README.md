@@ -391,6 +391,11 @@ Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` replac
 | `test_list_users_as_admin_returns_account_users` | Admin `GET /users` returns the account's users |
 | `test_list_users_as_member_is_403` | Member `GET /users` → 403 (`require_admin` gate, D27) |
 | `test_list_users_as_viewer_is_403` | Viewer `GET /users` → 403 |
+| `test_get_me_as_member_returns_own_row` | Member `GET /users/me` → 200 with their own row (not 403) |
+| `test_get_me_as_viewer_returns_own_row` | Viewer `GET /users/me` → 200 with their own row (not 403) |
+| `test_get_me_is_not_shadowed_by_user_id_route` | `GET /users/me` resolves to the `me` route, not `/{user_id}` (would be a 422 from UUID parsing) |
+| `test_get_me_missing_credentials_is_401` | `GET /users/me` with no headers → 401 |
+| `test_get_me_invalid_internal_token_is_401` | `GET /users/me` with a wrong `X-Internal-Token` → 401 |
 | `test_get_user_as_admin` | Admin `GET /users/{id}` returns the user |
 | `test_get_missing_user_as_admin_is_404` | Unknown id → 404 (`NotFoundError` mapped by `main.py`'s handler) |
 | `test_get_user_as_member_is_403` | Member `GET /users/{id}` → 403 |

@@ -24,6 +24,9 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
   rest read from `.env`)
 - Docker, production (AWS, from master): `docker compose -f docker-compose.prod.yml up -d --build`
   (no db container — DATABASE_URL must point at Supabase's session pooler; no published ports)
+- Mini App (dev): `cd webapp && pnpm dev` · build: `pnpm build` · its own
+  checks: `pnpm typecheck && pnpm lint && pnpm test` (all three also run from
+  `scripts/verify.sh`)
 
 ## Architecture map (flat layout, no `src/` wrapper)
 - `models/` — Pydantic v2 schemas (Base/Create/Update/Response) — see its CLAUDE.md
@@ -31,6 +34,8 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 - `services/` — business logic; DI'd repositories; triggers notifications — see its CLAUDE.md
 - `api/` — FastAPI routes + PermissionChecker + auth deps — see its CLAUDE.md
 - `bot/` — aiogram; pure HTTP client to the backend, zero DB imports — see its CLAUDE.md
+- `webapp/` — Telegram Mini App (TS + Vite); second HTTP-only client, zero
+  secrets, zero business logic — see its CLAUDE.md and `docs/design/mini-app-ux.md`
 - `migrations/` — Alembic (asyncpg env) — see its CLAUDE.md
 - `tests/` — pytest; unit tests never touch network or real DB — see its CLAUDE.md
 - `docs/SCHEMA.sql` — canonical DB schema (source of truth for first migration)
@@ -48,20 +53,30 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 - No `print()` — use stdlib `logging`.
 - Type hints on every function signature.
 - Auth: bot sends `X-Telegram-User-Id: <tg_id>` AND `X-Internal-Token: <shared secret>` on every request. Backend rejects requests without a valid token (401) and derives user/account from tg_id. Never trust client-supplied UUIDs.
+- The Mini App authenticates with Telegram-signed `initData` instead — a second,
+  additive auth path; the bot's header pair is never changed or replaced.
+  `INTERNAL_TOKEN` (and every other secret) must NEVER reach browser-shipped
+  code; `scripts/verify.sh` greps the webapp build output and fails on a hit.
 - Notifications are best-effort: send failures are logged and must never fail the expense operation that triggered them.
 
 ## Environment (.env)
-`DATABASE_URL`, `BOT_TOKEN`, `BACKEND_BASE_URL`, `INTERNAL_TOKEN`, `ALLOWED_TG_IDS` (comma-separated tg_ids).
+`DATABASE_URL`, `BOT_TOKEN`, `BACKEND_BASE_URL`, `INTERNAL_TOKEN`, `ALLOWED_TG_IDS` (comma-separated tg_ids), `FAMILY_TZ`.
+Mini App adds: `FAMILY_CURRENCY`, `MINI_APP_URL` (the bot's link to it),
+`INITDATA_MAX_AGE_SEC`. Backend-only — none of them are secrets, and none are
+injected into the browser bundle. No CORS variable: the Mini App is served from
+the same origin as the API (D201).
 One `.env` per machine, never committed; no `.env.dev`/`.env.prod` variants —
 dev vs prod values (incl. the separate dev bot token) are documented in
 README "Environments & .env".
 
 ## Out of scope (V2)
-- Voice input · Mini App frontend · Bot self-registration · OAuth/JWT (tg_id + internal token is enough for now) · Scheduled digests/APScheduler (V1 notifies on expense creation only).
+- Voice input · Bot self-registration · OAuth/JWT (tg_id + internal token is enough for now) · Scheduled digests/APScheduler (V1 notifies on expense creation only).
+- The Mini App frontend is no longer out of scope — it is being planned in
+  `docs/design/mini-app-ux.md`. Its §0 decisions (D200–D205) gate implementation.
 - Admin panel for account/user management. PREREQUISITE: migrate the bot
   allowlist from ALLOWED_TG_IDS in .env to a DB lookup against the users
   table (one change in bot/middlewares.py). Until then, adding a user
   requires editing .env + bot restart.
 
 ## Do not edit without asking
-`migrations/versions/`, `.env*`, `uv.lock`.
+`migrations/versions/`, `.env*`, `uv.lock`, `webapp/pnpm-lock.yaml`.
