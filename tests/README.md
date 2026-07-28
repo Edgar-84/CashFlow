@@ -498,13 +498,20 @@ Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`, no real net
 
 ## Bot tests (`test_bot_middlewares.py`) → [`bot/middlewares.py`](../bot/middlewares.py)
 Hermetic — no real Telegram/network; middleware called directly with a fake
-`handler`/`data` dict (U4.1 AC).
+`handler`/`data` dict and a `MockTransport`-backed http client standing in
+for the backend (bot-allowlist-db plan U2 AC: the allowlist is a
+`GET /users/me` probe behind a per-tg_id TTL cache).
 
 | Test | Checks |
 |---|---|
-| `test_non_allowlisted_tg_id_is_dropped_before_any_api_call` | A tg_id outside the allowlist never reaches the handler (AC) |
-| `test_missing_event_from_user_is_dropped` | No `event_from_user` in middleware data → dropped, not a crash |
-| `test_allowlisted_tg_id_calls_handler_with_injected_client` | An allowlisted tg_id's handler runs and receives a `BackendClient` via `data["client"]` |
+| `test_allowlisted_tg_id_calls_handler_with_injected_client` | A tg_id the probe returns 200 for reaches the handler with a `BackendClient` injected via `data["client"]` (AC) |
+| `test_non_allowlisted_tg_id_is_dropped_before_handler` | A tg_id the probe returns 401 for never reaches the handler (AC) |
+| `test_missing_event_from_user_is_dropped` | No `event_from_user` in middleware data → dropped, not a crash, and no probe is made |
+| `test_second_update_within_ttl_issues_no_second_probe` | A second update from the same tg_id inside `ttl_ok` reaches the handler without a second `GET /users/me` call (AC, asserts probe call count) |
+| `test_expired_entry_re_probes` | Once the cached verdict's TTL has elapsed, the next update probes again (AC) |
+| `test_probe_that_raises_drops_update_and_logs_error` | A transport error from the probe drops the update and logs an `ERROR` (AC, D302 fail-closed) |
+| `test_probe_5xx_drops_update_and_logs_error` | A 5xx from the probe drops the update and logs an `ERROR` (AC, D302 fail-closed) |
+| `test_cache_never_exceeds_max_entries` | The verdict cache never grows past `max_entries` (AC) |
 | `test_injected_client_carries_headers_for_the_calling_tg_id` | The injected `BackendClient`'s requests carry that tg_id's `X-Telegram-User-Id` and the configured `X-Internal-Token` |
 | `test_dropped_update_is_logged` | Dropping a non-allowlisted update logs a `WARNING` record naming the tg_id |
 
@@ -519,8 +526,9 @@ Hermetic — no FSM state, no backend calls, so no fakes needed (U2.5 AC:
 
 ## Bot tests (`test_bot_bot.py`) → [`bot/bot.py`](../bot/bot.py)
 Hermetic — no real Telegram/network; updates fed through the full dispatcher
-stack via `dp.feed_update` with a `MockTransport`-backed http client (U4.2 AC:
-dispatcher builds).
+stack via `dp.feed_update` with a `MockTransport`-backed http client standing
+in for the backend's `GET /users/me` probe (U4.2 AC: dispatcher builds;
+bot-allowlist-db plan U2 AC: `create_dispatcher` takes no `allowed_tg_ids`).
 
 | Test | Checks |
 |---|---|

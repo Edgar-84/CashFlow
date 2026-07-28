@@ -20,14 +20,13 @@ logger = logging.getLogger(__name__)
 
 def create_dispatcher(
     http_client: httpx.AsyncClient,
-    allowed_tg_ids: list[int],
     internal_token: str,
 ) -> Dispatcher:
     dp = Dispatcher()
     # Outer middleware on `update`, added after Dispatcher() construction so
     # aiogram's built-in UserContextMiddleware runs first and populates
     # event_from_user (see bot/middlewares.py docstring).
-    dp.update.outer_middleware(AllowlistMiddleware(http_client, allowed_tg_ids, internal_token))
+    dp.update.outer_middleware(AllowlistMiddleware(http_client, internal_token))
     # Feature routers (bot/handlers/) are registered here as M4 units land (U4.3+).
     dp.include_router(create_common_router())
     dp.include_router(create_expenses_router())
@@ -42,7 +41,7 @@ async def main() -> None:
     settings = get_settings()
     bot = Bot(token=settings.bot_token)
     http_client = httpx.AsyncClient(base_url=settings.backend_base_url)
-    dp = create_dispatcher(http_client, settings.allowed_tg_ids_list, settings.internal_token)
+    dp = create_dispatcher(http_client, settings.internal_token)
     logger.info("Starting bot polling")
     try:
         # start_polling closes the bot session itself (close_bot_session=True).
