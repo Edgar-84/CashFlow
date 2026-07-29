@@ -1,0 +1,151 @@
+/** Hand-written TypeScript mirrors of the backend's Pydantic `*Response`
+ * models that this app actually consumes in v1 (screens 01–05, D204).
+ *
+ * When a Pydantic model changes, this file changes in the same unit — that is
+ * the whole point of hand-writing over code generation (webapp/CLAUDE.md).
+ *
+ * IDs are `string` (UUIDs), timestamps are `string` (ISO 8601 as emitted by
+ * FastAPI's default JSON encoder). Money is `number` and always minor units
+ * (kopecks/cents) — root CLAUDE.md's ironclad rule.
+ */
+
+export type Uuid = string;
+export type IsoTimestamp = string;
+
+export type Role = "admin" | "member" | "viewer";
+
+/** `models.enums.Currency` (D211) — 15 ISO 4217 codes offered at account
+ * creation. Kept in lockstep with `models/enums.py::Currency`. */
+export type Currency =
+  | "USD"
+  | "EUR"
+  | "GBP"
+  | "PLN"
+  | "UAH"
+  | "CZK"
+  | "CHF"
+  | "SEK"
+  | "NOK"
+  | "DKK"
+  | "JPY"
+  | "CNY"
+  | "CAD"
+  | "AUD"
+  | "TRY";
+
+export interface UserResponse {
+  id: Uuid;
+  tg_id: number;
+  name: string;
+  role: Role;
+  account_id: Uuid;
+  created_at: IsoTimestamp;
+}
+
+/** `models.user.UserMeResponse` — `GET /users/me` only, adds the caller's
+ * account currency (D211). Every other `users` route returns `UserResponse`. */
+export interface UserMeResponse extends UserResponse {
+  currency: Currency;
+}
+
+export interface CategoryResponse {
+  id: Uuid;
+  name: string;
+  account_id: Uuid;
+  created_at: IsoTimestamp;
+}
+
+export interface TagResponse {
+  id: Uuid;
+  name: string;
+  account_id: Uuid;
+  created_at: IsoTimestamp;
+}
+
+export interface ExpenseResponse {
+  id: Uuid;
+  amount: number;
+  comment: string | null;
+  category_id: Uuid;
+  user_id: Uuid;
+  account_id: Uuid;
+  created_at: IsoTimestamp;
+  updated_at: IsoTimestamp;
+  tags: TagResponse[];
+  user_name: string | null;
+}
+
+/** POST /expenses payload. No `account_id` — backend derives it from the
+ * caller (webapp/CLAUDE.md's zero-DB-concepts rule; api/CLAUDE.md's
+ * "neither client ever sends account_id or user UUIDs"). */
+export interface ExpenseCreate {
+  amount: number;
+  comment?: string | null;
+  category_id: Uuid;
+  tag_ids?: Uuid[];
+}
+
+/** PATCH /expenses/{id} payload — every field optional (partial update,
+ * four-schema pattern). */
+export interface ExpenseUpdate {
+  amount?: number;
+  comment?: string | null;
+  category_id?: Uuid;
+  tag_ids?: Uuid[];
+}
+
+export type BudgetPeriod = "monthly";
+
+export interface BudgetPlanResponse {
+  id: Uuid;
+  category_id: Uuid;
+  amount: number;
+  period: BudgetPeriod;
+  notify_threshold: number;
+  account_id: Uuid;
+  created_at: IsoTimestamp;
+  updated_at: IsoTimestamp;
+}
+
+export interface BudgetPlanCreate {
+  category_id: Uuid;
+  amount: number;
+  period?: BudgetPeriod;
+  notify_threshold?: number;
+}
+
+export interface BudgetPlanUpdate {
+  amount?: number;
+  period?: BudgetPeriod;
+  notify_threshold?: number;
+}
+
+/** `models.budget_plan.BudgetProgress` — computed by budget_service, never a
+ * DB row. `fill_pct` is `null` when the plan's `amount <= 0`. */
+export interface BudgetProgress {
+  budget_plan_id: Uuid;
+  category_id: Uuid;
+  amount: number;
+  spent: number;
+  remaining: number;
+  fill_pct: number | null;
+  notify_threshold: number;
+  is_over_threshold: boolean;
+  is_exceeded: boolean;
+}
+
+export interface PeriodTotal {
+  start: IsoTimestamp;
+  end: IsoTimestamp;
+  total: number;
+}
+
+export interface CategoryTotal {
+  category_id: Uuid;
+  total: number;
+}
+
+export interface TagTotal {
+  tag_id: Uuid;
+  total: number;
+}

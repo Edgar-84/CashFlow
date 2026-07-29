@@ -190,7 +190,7 @@ receives notifications.
       change, both light and dark param sets produce the documented token
       values, absent Telegram object degrades to a readable "open me from
       Telegram" state rather than throwing. Model: sonnet.
-- [ ] **U1.4 ApiClient + types** — one method per v1 endpoint, `initData`
+- [x] **U1.4 ApiClient + types** — one method per v1 endpoint, `initData`
       header on every request, typed error mapping.
       AC: tests against a fake fetch — the header is present on every call;
       401 → "reopen from Telegram", 403 → permission message, 404 → not-found
@@ -602,9 +602,48 @@ tg_id seeded via `docs/seed.sql`).
   locked decision. Full suite still 531 passed (Python untouched); webapp
   vitest now 34 tests across 5 files; `bash scripts/verify.sh` green end to
   end.
-- Next: `/unit U1.4 docs/plans/mini-app-v2.md` (ApiClient + types) —
-  `api/client.ts`/`api/types.ts` per Contracts; `GET /users/me` already exists
-  (bot-allowlist-db U1, D210).
+- Done: **U1.4** — `webapp/src/api/types.ts` (hand-written mirrors of the
+  Pydantic `*Response` models used by v1: `UserMeResponse`, `Currency`,
+  `ExpenseResponse`/`Create`/`Update`, `CategoryResponse`, `TagResponse`,
+  `BudgetPlanResponse`/`Create`/`Update`, `BudgetProgress`, `PeriodTotal`,
+  `CategoryTotal`, `TagTotal`) and `webapp/src/api/client.ts` (`ApiClient`
+  class, 16 methods — one per v1 endpoint across users/expenses/categories/
+  tags/budgets/statistics). Every request funnels through one private
+  `request()` that (a) attaches `X-Telegram-Init-Data` on every call — value
+  is `getInitData() ?? ""` so a missing initData produces a clean backend
+  401 instead of a header-shape 400, (b) sets `Content-Type: application/json`
+  only when a body is present, (c) skips undefined query params entirely
+  but sends `months_back=0` (the U0.4 "current month" value would be
+  silently dropped by a truthy check — bug guarded by a dedicated test).
+  Typed errors thrown by `request()`: `AuthError`(401), `ForbiddenError`(403),
+  `NotFoundError`(404), `RetryableError`(5xx or fetch-rejection); any other
+  non-2xx is a plain `ApiError` with the status — screens (M2) translate
+  these into human strings, never a raw status. `fetch` rejects only on
+  network-layer failure (DNS/TCP/CORS…), not on HTTP status, so a bare
+  `catch` on the fetch call is the correct place to map to `RetryableError`.
+  DI-friendly constructor (`{baseUrl?, fetch?, getInitData?}`) — same shape
+  as `lib/telegram.ts`'s testable exports; real boot wires
+  `getInitData: getInitData` from `lib/telegram` in a later screen unit.
+  Tests: `webapp/tests/client.test.ts` (20 cases) — header present on all 16
+  endpoints (whole-surface sweep, not just `request()` proxy), header sent
+  as `""` when initData is null (proves clean-401 path), 401/403/404/500/503
+  → their respective typed errors with the right `status` and message,
+  network reject → `RetryableError` with `undefined` status, unmapped 409 →
+  plain `ApiError` (not retryable — a duplicate-plan 409 is not a
+  retry-and-hope situation), `limit`/`offset` serialized, `months_back=0`
+  survives the falsy trap, `createExpense`/`createBudgetPlan` bodies
+  contain no `account_id`/`user_id` (the webapp/CLAUDE.md ironclad rule),
+  Content-Type set on POST/PATCH and absent on GET/DELETE, 204 resolves to
+  `undefined` without JSON parsing, typed response shapes round-trip.
+  No new decision — every choice fills in a Contracts detail (throwing
+  typed errors vs Result union; DI constructor shape; header on missing
+  initData) rather than contradicting a locked decision. `bash
+  scripts/verify.sh` green end to end (webapp vitest now 54 tests across 6
+  files; Python still 531 passed; secret-grep clean).
+- Next: `/unit U1.5 docs/plans/mini-app-v2.md` (Serving, reverse proxy,
+  TLS) — **STOP-AND-ASK GATE**, first public exposure of the API. Edits
+  `docker-compose.prod.yml`/Dockerfile/deploy config; do not start without
+  human sign-off.
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
