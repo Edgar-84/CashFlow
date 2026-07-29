@@ -16,3 +16,8 @@ tests/
 docs/plans/
 scripts/
 .pre-commit-config.yaml
+
+# Node (webapp/) — the node build stage runs its own `pnpm install`;
+# local artifacts must never ride along in the build context.
+webapp/node_modules
+webapp/dist

@@ -165,7 +165,7 @@ receives notifications.
 
 ### M1 — Frontend foundation
 
-- [ ] **U1.1 Toolchain + verify.sh lane** — `webapp/` scaffold: `package.json`,
+- [x] **U1.1 Toolchain + verify.sh lane** — `webapp/` scaffold: `package.json`,
       `vite.config.ts`, `tsconfig.json`, `index.html`, `src/main.ts` rendering a
       placeholder, vitest config, `.dockerignore`/`.gitignore` entries;
       `scripts/verify.sh` gains typecheck + lint + vitest + the secret-grep on
@@ -411,6 +411,19 @@ tg_id seeded via `docs/seed.sql`).
   `UserRepository` read to `JOIN accounts`, rippling into `UserService`,
   every `users` route, and every existing test constructing a `UserResponse`
   fixture).
+- D212 (2026-07-29, U1.1): pnpm **11.x** (installed via Homebrew alongside
+  Node 22.13+ — pnpm 11 hard-requires it, CI first shipped with Node 20 and
+  crashed with `ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`, fixed same-day)
+  introduces a build-script approval gate — native `postinstall`
+  scripts (e.g. `esbuild`'s) are skipped by default and recorded in
+  `webapp/pnpm-workspace.yaml`'s `allowBuilds` map, which is what actually
+  creates that file (not hand-written). `esbuild: true` is committed there
+  so `pnpm install --frozen-lockfile` in `verify.sh`/CI builds esbuild's
+  binary non-interactively; `pnpm approve-builds --all` is the non-interactive
+  way to regenerate it if a future dependency adds another native postinstall
+  step. Lockfile format is `lockfileVersion: '9.0'`. No contract change —
+  purely a toolchain-behavior note for whoever next runs `pnpm install` here
+  cold.
 
 ## STATE (handoff)
 - Done: **U0.1** — `validate_init_data` (`api/deps.py`) verifies the Telegram
@@ -474,18 +487,52 @@ tg_id seeded via `docs/seed.sql`).
   `months_back=3`, `by-period` end-to-end with `months_back=1`,
   `by-category` passthrough). `tests/README.md` updated. Full suite green
   (531 passed).
-- Next: `/unit U1.1 docs/plans/mini-app-v2.md` (Toolchain + verify.sh lane)
-  — the last U0 unit is done; M1 (frontend foundation) starts here.
+- Done: **U1.1** — `webapp/` scaffold (TypeScript + Vite, no framework, D202):
+  `package.json` (scripts `dev`/`build`/`typecheck`/`lint`/`test`),
+  `tsconfig.json` (strict), `vite.config.ts` (via `vitest/config`, `test.
+  environment: "node"`), `eslint.config.js` (flat config, `typescript-eslint`
+  recommended, non-type-aware), `index.html`, `src/main.ts` (placeholder —
+  `placeholderText()` extracted as a pure function so it's testable without a
+  DOM; the `document` write is guarded with a `typeof document !== "undefined"`
+  check since the vitest suite imports the module directly under Node),
+  `tests/main.test.ts`. `.gitignore`/`.dockerignore` gained
+  `webapp/node_modules`/`webapp/dist` entries (`webapp/pnpm-lock.yaml` stays
+  tracked, same convention as `uv.lock`). `scripts/verify.sh` gained a webapp
+  lane: toolchain check (fails loudly, not silently, per D208) →
+  `pnpm install --frozen-lockfile` → typecheck → lint → vitest → build →
+  secret-grep (`INTERNAL_TOKEN|BOT_TOKEN|DATABASE_URL`) over `webapp/dist`.
+  `.github/workflows/ci.yml`'s `verify` job gained `pnpm/action-setup`
+  (pointed at `webapp/package.json` — the `packageManager` field isn't at
+  repo root) + `actions/setup-node` (Node 22, pnpm-store cache) ahead of the
+  `bash scripts/verify.sh` step. D212: pnpm 11's build-script approval gate
+  (`webapp/pnpm-workspace.yaml`'s `allowBuilds`) needed `esbuild: true`
+  committed for `--frozen-lockfile` installs to build esbuild's binary
+  non-interactively. Verified by hand: `verify.sh` green with the toolchain
+  present; re-run with `pnpm` removed from `PATH` (`uv` still present) fails
+  loudly with a clear error and non-zero exit, doesn't silently skip; a
+  secret string referenced from `main.ts`'s entry graph and rebuilt into
+  `dist` was caught by the grep, then removed and reconfirmed clean. Full
+  Python suite unaffected (531 passed). No tests deleted or modified outside
+  `webapp/`.
+- Next: `/unit U1.2 docs/plans/mini-app-v2.md` (Pure lib: money, dates, donut
+  geometry) — the toolchain lane is in place; M1 continues with the
+  DOM-free/IO-free libs.
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
   - **There is no U0.2** — it moved to bot-allowlist-db U1 (D210). U0.3/U0.4
     were deliberately not renumbered. `GET /users/me` must already exist before
     U1.4 (ApiClient) and CP1.
-  - Two gates: **U1.5** is a STOP-AND-ASK (first public exposure of the API,
-    edits prod compose + deploy config). `webapp/pnpm-lock.yaml` is on root
-    CLAUDE.md's do-not-edit list, so **U1.1** needs sign-off for the lockfile it
-    creates.
+  - One gate remains: **U1.5** is a STOP-AND-ASK (first public exposure of the
+    API, edits prod compose + deploy config). U1.1's lockfile sign-off
+    (`webapp/pnpm-lock.yaml` was on root CLAUDE.md's do-not-edit list) was
+    asked for and granted during U1.1 itself — resolved, not a future gate.
+  - Any machine running `scripts/verify.sh`/`webapp/` cold needs Node 22.13+
+    (pnpm 11 hard-requires it) and pnpm on `PATH` (this session installed both
+    via `brew install node pnpm`).
+    A future clean-checkout session hitting "pnpm not found" should do the
+    same rather than treating it as a bug — that failure mode is D208,
+    deliberate.
   - `webapp/CLAUDE.md` currently documents the client-side colour rule (D206);
     it must be updated when screen 06 and `categories.color` eventually land.
   - `Currency`/account currency (D211, U0.5): future units reading the

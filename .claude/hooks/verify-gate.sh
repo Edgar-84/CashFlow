@@ -17,9 +17,9 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   fi
 fi
 
-[ -f scripts/verify_old.sh ] || exit 0
+[ -f scripts/verify.sh ] || exit 0
 
-OUT=$(bash scripts/verify_old.sh 2>&1)
+OUT=$(bash scripts/verify.sh 2>&1)
 if [ $? -ne 0 ]; then
   echo "verify.sh FAILED. Fix these before finishing:" 1>&2
   echo "$OUT" | tail -n 40 1>&2

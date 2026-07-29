@@ -15,6 +15,11 @@ __pycache__/
 # uv (uv.lock IS tracked — reproducible installs)
 # nothing to ignore here beyond the venv above
 
+# Node (webapp/ — pnpm-lock.yaml IS tracked, same reproducible-install
+# convention as uv.lock)
+webapp/node_modules/
+webapp/dist/
+
 # IDE
 .idea/
 .vscode/
