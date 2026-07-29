@@ -1,0 +1,39 @@
+/* The token table from docs/design/mini-app-ux.md §6 — nothing else.
+   Light values are the defaults here; src/lib/telegram.ts::applyTheme()
+   overwrites these custom properties at runtime from Telegram's colorScheme
+   (and sets data-theme, used below as a build-time-free fallback for the
+   category palette, which does not change with dark mode). */
+
+:root {
+  --app-background: #EDF0EF;
+  --card: #FFFFFF;
+  --ink: #0E1416;
+  --ink-secondary: #6C7679;
+  --separator: #E4E8E7;
+
+  --category-slot-1: #2a78d6;
+  --category-slot-2: #eb6834;
+  --category-slot-3: #1baf7a;
+  --category-slot-4: #eda100;
+  --category-slot-5: #e87ba4;
+  --category-slot-6: #008300;
+
+  --status-red: #e34948;
+}
+
+:root[data-theme="dark"] {
+  --app-background: #101415;
+  --card: #1C2123;
+  --ink: #F1F5F4;
+  --ink-secondary: #97A1A3;
+  --separator: #272D2F;
+
+  --category-slot-1: #3987e5;
+  --category-slot-2: #d95926;
+  --category-slot-3: #199e70;
+  --category-slot-4: #c98500;
+  --category-slot-5: #d55181;
+  --category-slot-6: #008300;
+
+  --status-red: #e66767;
+}
