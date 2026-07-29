@@ -22,7 +22,17 @@ jobs:
           uv python install 3.13
           uv sync --frozen
 
-      - name: Run verify gate (ruff + mypy + pytest unit)
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: webapp/pnpm-lock.yaml
+
+      - name: Run verify gate (ruff + mypy + pytest unit + webapp typecheck/lint/vitest/build)
         run: bash scripts/verify.sh
 
   # Integration tests against a real Postgres (migrations + @integration)
