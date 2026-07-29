@@ -412,7 +412,9 @@ tg_id seeded via `docs/seed.sql`).
   every `users` route, and every existing test constructing a `UserResponse`
   fixture).
 - D212 (2026-07-29, U1.1): pnpm **11.x** (installed via Homebrew alongside
-  Node 20+) introduces a build-script approval gate — native `postinstall`
+  Node 22.13+ — pnpm 11 hard-requires it, CI first shipped with Node 20 and
+  crashed with `ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`, fixed same-day)
+  introduces a build-script approval gate — native `postinstall`
   scripts (e.g. `esbuild`'s) are skipped by default and recorded in
   `webapp/pnpm-workspace.yaml`'s `allowBuilds` map, which is what actually
   creates that file (not hand-written). `esbuild: true` is committed there
@@ -499,8 +501,9 @@ tg_id seeded via `docs/seed.sql`).
   lane: toolchain check (fails loudly, not silently, per D208) →
   `pnpm install --frozen-lockfile` → typecheck → lint → vitest → build →
   secret-grep (`INTERNAL_TOKEN|BOT_TOKEN|DATABASE_URL`) over `webapp/dist`.
-  `.github/workflows/ci.yml`'s `verify` job gained `pnpm/action-setup` +
-  `actions/setup-node` (Node 20, pnpm-store cache) ahead of the
+  `.github/workflows/ci.yml`'s `verify` job gained `pnpm/action-setup`
+  (pointed at `webapp/package.json` — the `packageManager` field isn't at
+  repo root) + `actions/setup-node` (Node 22, pnpm-store cache) ahead of the
   `bash scripts/verify.sh` step. D212: pnpm 11's build-script approval gate
   (`webapp/pnpm-workspace.yaml`'s `allowBuilds`) needed `esbuild: true`
   committed for `--frozen-lockfile` installs to build esbuild's binary
@@ -524,8 +527,9 @@ tg_id seeded via `docs/seed.sql`).
     API, edits prod compose + deploy config). U1.1's lockfile sign-off
     (`webapp/pnpm-lock.yaml` was on root CLAUDE.md's do-not-edit list) was
     asked for and granted during U1.1 itself — resolved, not a future gate.
-  - Any machine running `scripts/verify.sh`/`webapp/` cold needs Node 20+ and
-    pnpm on `PATH` (this session installed both via `brew install node pnpm`).
+  - Any machine running `scripts/verify.sh`/`webapp/` cold needs Node 22.13+
+    (pnpm 11 hard-requires it) and pnpm on `PATH` (this session installed both
+    via `brew install node pnpm`).
     A future clean-checkout session hitting "pnpm not found" should do the
     same rather than treating it as a bug — that failure mode is D208,
     deliberate.
