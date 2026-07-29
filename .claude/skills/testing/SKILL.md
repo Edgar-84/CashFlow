@@ -1,6 +1,6 @@
 ---
 name: testing
-description: How tests are written and run in this project. Use whenever writing, fixing or running tests, adding pytest fixtures, or when verify_old.sh fails on the pytest step.
+description: How tests are written and run in this project. Use whenever writing, fixing or running tests, adding pytest fixtures, or when verify.sh fails on the pytest step.
 ---
 
 # Testing conventions
