@@ -29,6 +29,20 @@ Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'
 |---|---|---|
 | `test_health_returns_ok` | `GET /health` → 200 `{"status": "ok"}` | [`main.py`](../main.py) |
 
+## Mini App static-mount tests (`test_static.py`) → [`main.py`](../main.py)
+Hermetic — a fake `webapp/dist` in `tmp_path` is passed to `create_app(webapp_dist=…)`;
+DB pool mocked and `get_current_user` overridden so the tests can hit auth-gated
+routes without a real DB. Guards the "static mount swallows API routes" failure
+mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
+
+| Test | Checks |
+|---|---|
+| `test_root_serves_mini_app_index` | `GET /` returns the fixture's `index.html` (`Content-Type: text/html`) — the `StaticFiles(html=True)` mount is wired |
+| `test_hashed_asset_is_served_from_mount` | `GET /assets/app-DEADBEEF.js` returns the fixture asset, proving Vite's hashed asset paths work through the mount |
+| `test_health_route_wins_over_static_mount` | `GET /health` returns `{"status": "ok"}` as JSON — the router beats the mount |
+| `test_expenses_route_wins_over_static_mount` | `GET /expenses` reaches FastAPI (401 JSON from the overridden `get_current_user`), not the static index — this is the plan's explicit U1.5 AC |
+| `test_create_app_skips_mount_when_dist_missing` | `create_app(webapp_dist=<nonexistent>)` produces an app with no `webapp`-named mount route — bare-host dev + the pre-U1.5 test suite still work with no build present |
+
 ## Repository tests
 `@pytest.mark.integration` — real Postgres via the `db_conn` fixture
 (per-test transaction, rolled back after).

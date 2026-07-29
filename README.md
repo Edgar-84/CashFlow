@@ -44,6 +44,9 @@ should exist only in the server's `.env`.
 | `BACKEND_BASE_URL` | ignored in docker (pinned to `http://api:8000`); `http://localhost:8000` for bare-host runs | ignored (pinned in compose) |
 | `INTERNAL_TOKEN` | any random dev value | strong secret — `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `FAMILY_TZ` | optional, defaults to `UTC` — IANA name, e.g. `Europe/Belgrade` | same |
+| `MINI_APP_HOST` | ignored (dev has no TLS proxy) | **required** — public hostname the Caddy proxy serves, e.g. `miniapp.example.com`. Must be a DNS A-record you control that points at the server; Caddy uses it as both the vhost and the Let's Encrypt cert subject |
+| `MINI_APP_URL` | optional — set only if you register the Mini App against your dev bot for local testing | `https://<MINI_APP_HOST>` — the URL the bot's `/miniapp` menu button opens |
+| `INITDATA_MAX_AGE_SEC` | optional, defaults to `86400` (24h) | same — max age of a signed `initData` payload; older payloads are rejected as expired |
 
 How the three ways to run map onto this:
 
@@ -144,6 +147,70 @@ touches it.
   unbounded on a long-lived server. Only untagged images are removed —
   rollback tags (`<sha>`) already pulled stay local, and any tag not
   cached locally re-pulls from GHCR on demand.
+
+## Mini App deployment
+
+The Telegram Mini App (`webapp/`) ships in the same image as the API — the
+Dockerfile's `webapp-builder` stage runs `pnpm build` and the runtime image
+copies `webapp/dist` in; FastAPI serves it via `StaticFiles` at `/`, mounted
+**after** every API router so `/expenses`, `/health`, etc. still route to
+FastAPI (D201, U1.5). The **`proxy`** service in `docker-compose.prod.yml`
+runs Caddy in front of the api, terminates TLS with a Let's Encrypt cert, and
+publishes ports 80/443 to the internet (D213).
+
+### One-time bootstrap
+
+1. **DNS**: create an A-record for the hostname you'll use (e.g.
+   `miniapp.example.com`) pointing at the server's public IP. Wait for
+   propagation — Caddy's cert issuance fails until the ACME HTTP-01
+   challenge on port 80 resolves back to this server.
+2. **Firewall**: open TCP **80** and **443** (and UDP 443 for HTTP/3) to
+   the server. Port 80 is required for ACME cert issuance and renewal, not
+   just for plaintext redirects.
+3. **`.env`**: add `MINI_APP_HOST=<the hostname>` to `/opt/bot/.env`. Without
+   it, the compose file falls back to `miniapp.example.invalid`, which will
+   fail ACME loudly — safe but useless.
+4. **First deploy**: push to `master` (or run `docker compose -f
+   docker-compose.prod.yml up -d --force-recreate proxy`). Caddy contacts
+   Let's Encrypt on first request, provisions a cert, and stores it in the
+   `caddy_data` named volume. Watch `docker compose logs proxy` for
+   `certificate obtained successfully` before moving on.
+5. **BotFather — register the Mini App**: talk to
+   [`@BotFather`](https://t.me/BotFather), `/newapp`, pick your bot, provide
+   a title, short description, a 640×360 photo, and set the **URL** to
+   `https://<MINI_APP_HOST>`. Give the app a `short_name` (used for
+   `t.me/<bot>/<short_name>` deep links).
+6. **Menu button**: `/setmenubutton` in BotFather, pick the bot, set the
+   button text (e.g. "Open") and the same `https://<MINI_APP_HOST>` URL.
+   The chat now has a persistent menu-button next to the compose field that
+   opens the Mini App inline.
+
+### Cert renewal
+
+Caddy renews the LE cert automatically ~30 days before expiry; renewal state
+lives in the `caddy_data` volume (mounted at `/data` inside the proxy
+container) and survives `docker compose up -d --force-recreate`. No cron, no
+certbot sidecar. If you ever `docker volume rm cashflow_caddy_data`, the
+next request will re-issue a fresh cert (rate-limited by LE — do not do this
+casually).
+
+### Rollback
+
+The proxy is stateless config — a bad image change is rolled back the same
+way as api/bot: pin `CASHFLOW_IMAGE=ghcr.io/edgar-84/cashflow:<good-sha>`
+in `/opt/bot/.env` and `docker compose -f docker-compose.prod.yml up -d
+--force-recreate`. The `Caddyfile` itself is checked into the repo and copied
+by the same deploy step as the compose file, so reverting a bad Caddyfile is
+a plain `git revert` + CD.
+
+### Cache busting
+
+Vite emits hashed asset filenames by default (`assets/index-<hash>.js`),
+which is what makes Telegram's aggressive webview cache safe: a new build
+changes the asset filenames, `index.html` references the new names, and the
+old ones are simply never requested again. Don't add unhashed files to
+`webapp/dist` — a `logo.png` at the root would be pinned to the first
+version a client saw, forever.
 
 ## Tests & checks
 
