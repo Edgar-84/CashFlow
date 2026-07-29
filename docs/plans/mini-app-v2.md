@@ -175,7 +175,7 @@ receives notifications.
       the secret-grep fails a deliberately planted `INTERNAL_TOKEN` string in a
       source file; `pnpm build` produces `webapp/dist`.
       Yellow-zone file count, all config. Model: haiku-friendly.
-- [ ] **U1.2 Pure lib: money, dates, donut geometry** — no DOM, no I/O.
+- [x] **U1.2 Pure lib: money, dates, donut geometry** — no DOM, no I/O.
       AC: parametrized vitest — `parseAmount` on `12`, `12.5`, `12,50`,
       `1 234,56`, `0`, `-1`, `abc`, `1.234` (three decimals); `formatAmount`
       round-trips; `formatDay` renders in `family_tz` not the device tz;
@@ -514,9 +514,56 @@ tg_id seeded via `docs/seed.sql`).
   `dist` was caught by the grep, then removed and reconfirmed clean. Full
   Python suite unaffected (531 passed). No tests deleted or modified outside
   `webapp/`.
-- Next: `/unit U1.2 docs/plans/mini-app-v2.md` (Pure lib: money, dates, donut
-  geometry) — the toolchain lane is in place; M1 continues with the
-  DOM-free/IO-free libs.
+- Done: **U1.2** — `webapp/src/lib/money.ts` (`parseAmount`/`formatAmount`),
+  `webapp/src/lib/dates.ts` (`formatDay`), `webapp/src/lib/donut.ts`
+  (`segments`), no DOM/I/O in any of them.
+  `parseAmount` mirrors `bot/handlers/expenses.py::parse_amount_to_minor_units`
+  byte-for-byte in accepted/rejected input shape (whitespace incl. nbsp
+  stripped via JS's Unicode-aware `\s`, comma→dot, reject >1 decimal
+  separator, reject non-positive) but returns `number | null` instead of
+  throwing, since this is a UI input helper, not a command parser. Cents are
+  rounded half-up on the decimal **string**, not `Math.round(value * 100)` on
+  the parsed float — review caught that the float form silently disagrees
+  with the bot's `Decimal(ROUND_HALF_UP)` at the half-cent boundary
+  (`1.005 * 100 === 100.49999999999999` in IEEE 754, rounding to 100 instead
+  of 101). Fixed by reading the third fractional digit directly off the
+  string to decide the carry (sufficient for round-half-up to 2 places: a
+  third digit < 5 can never reach 0.5 regardless of trailing digits, and
+  ≥ 5 always rounds up), with `1.005`/`1.995` (carry into the whole part)
+  added to `money.test.ts` as regression cases.
+  `donut.ts::segments()` is a new contract with no prior art (the bot's
+  `charts.py` renders text bars, not SVG geometry): given
+  `{id, label, minor}[]` it returns one `{dash, gap, offset, slot}` per
+  input row in the same order (`slot` = array index, so the fixed
+  slot-order/never-cycled rule from D206/design §6 falls out of "don't
+  reorder the input" rather than needing its own logic here); more than
+  `maxSlots` (default 6) rows fold the tail into a synthetic trailing "Other"
+  row (sum of the remainder) so the returned array is never longer than
+  `maxSlots + 1` — the caller is responsible for labelling that last slot
+  "Other" when `totals.length > maxSlots`, since the return type
+  per Contracts is geometry-only (no id/label). Gap is a fixed 2px per the
+  design doc; dash shares are computed against `circumference - gap * n` so
+  `sum(dash) + n*gap === circumference`. Zero-total input draws `dash: 0` for
+  every row (a plain empty ring, no arcs) rather than a special case object.
+  `dates.ts::formatDay(iso, tz)` uses `Intl.DateTimeFormat` with the `tz`
+  option — the exact display string (`"Wed, Jul 29"`, short weekday + short
+  month + numeric day) isn't specified anywhere in the design doc, so this is
+  a reasonable default, not a locked contract; free to change in a later unit
+  without a Decision-log entry since no consumer exists yet.
+  Tests: `webapp/tests/money.test.ts` (parametrized `parseAmount` table incl.
+  the three-decimal/half-up case and the `1.005`/`1.995` half-cent boundary
+  regressions, round-trip through `formatAmount`),
+  `webapp/tests/dates.test.ts` (same instant renders a different calendar
+  day in `UTC` vs `Europe/Belgrade` and vs `America/New_York`, proving
+  family_tz-not-device-tz), `webapp/tests/donut.test.ts` (share-sum invariant,
+  fixed slot order, single-category, zero-total, >6-categories fold, offset
+  accumulation). No Python files touched; full suite still 531 passed.
+  `bash scripts/verify.sh` green end to end (webapp vitest: 24 tests across 4
+  files). No new decision — every choice here fills in geometry/format detail
+  the Contracts section left unspecified, none of it contradicts a design-doc
+  decision or needs one.
+- Next: `/unit U1.3 docs/plans/mini-app-v2.md` (Telegram adapter + tokens.css)
+  — `lib/telegram.ts` and the theme token table, per Contracts.
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
