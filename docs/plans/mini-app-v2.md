@@ -182,7 +182,7 @@ receives notifications.
       `segments()` — shares sum to the circumference minus gaps, slot order
       fixed, single-category and zero-total cases, more than six categories
       folds the tail to "Other". Model: sonnet.
-- [ ] **U1.3 Telegram adapter + tokens.css** — `lib/telegram.ts` (initData,
+- [x] **U1.3 Telegram adapter + tokens.css** — `lib/telegram.ts` (initData,
       MainButton, BackButton, haptics, theme params, `expand()`), theme params
       mapped onto the token table from the design doc §6.
       AC: unit tests against a fake `window.Telegram.WebApp` — MainButton
@@ -562,8 +562,49 @@ tg_id seeded via `docs/seed.sql`).
   files). No new decision — every choice here fills in geometry/format detail
   the Contracts section left unspecified, none of it contradicts a design-doc
   decision or needs one.
-- Next: `/unit U1.3 docs/plans/mini-app-v2.md` (Telegram adapter + tokens.css)
-  — `lib/telegram.ts` and the theme token table, per Contracts.
+- Done: **U1.3** — `webapp/src/lib/telegram.ts` (the only module touching
+  `window.Telegram.WebApp`) and `webapp/src/styles/tokens.css` (the §6 token
+  table, nothing else). `getWebApp()` guards with `typeof window ===
+  "undefined"` first (mirrors `main.ts`'s `typeof document` guard) so the
+  module never throws when opened outside Telegram, then every export
+  (`mainButton.show/hide/setEnabled`, `setBackButtonHandler`, `haptics.impact/
+  notification/selection`, `expand()`, `getInitData()`) no-ops safely absent a
+  `WebApp`; `isAvailable()` plus the exported `NOT_IN_TELEGRAM_MESSAGE` string
+  is the "readable open-me-from-Telegram state" the AC asks for — no screen
+  wiring yet, that lands with M2. `setBackButtonHandler(handler | null)` keeps
+  one module-level `currentBackHandler` and calls `offClick` on it before
+  wiring the next one (or hiding on `null`) — the wired/unwired-on-screen-
+  change shape the AC specifies. Theme: `resolveThemeTokens(colorScheme)` is a
+  pure function returning the exact light/dark hex values from the design
+  doc's first §6 table (Telegram's `colorScheme` only selects which fixed set
+  applies — its own arbitrary theme colours are never read), so both variants
+  are testable without a DOM; `applyTheme()` reads `webApp.colorScheme`,
+  defaults to `"light"` absent Telegram, and writes the CSS custom properties
+  plus a `data-theme` attribute onto `document.documentElement`, guarded the
+  same way as `main.ts` (untestable under vitest's `node` environment, same
+  gap `main.test.ts` already accepts for its `document` branch). `tokens.css`
+  declares the light values as `:root` defaults (initial paint / no-Telegram
+  fallback) plus a `:root[data-theme="dark"]` override block that
+  `applyTheme()`'s `data-theme` write activates; it also carries the §6
+  category-palette and status-red tables since those are still part of the
+  same design-doc token table and need a home before the donut/statistics
+  screens land. Tests: `webapp/tests/telegram.test.ts` — a hand-built fake
+  `TelegramWebApp` with `vi.fn()` members; MainButton show/hide/enable/disable;
+  BackButton wiring uses `vi.resetModules()` + a dynamic re-import to get an
+  isolated `currentBackHandler` for the sequential wire→rewire→unwire
+  assertions; both theme variants against the documented hex values; an
+  "absent Telegram" block asserting every export is a no-op rather than a
+  throw. No new decision — mapping `colorScheme` onto fixed design-doc hex
+  values (rather than reading Telegram's own arbitrary theme palette) fills in
+  a Contracts detail ("theme params mapped onto the token table") the same way
+  U1.2's `formatDay` string format did, and doesn't contradict D206 (category
+  colour is still assigned client-side, unaffected by this unit) or any other
+  locked decision. Full suite still 531 passed (Python untouched); webapp
+  vitest now 34 tests across 5 files; `bash scripts/verify.sh` green end to
+  end.
+- Next: `/unit U1.4 docs/plans/mini-app-v2.md` (ApiClient + types) —
+  `api/client.ts`/`api/types.ts` per Contracts; `GET /users/me` already exists
+  (bot-allowlist-db U1, D210).
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
