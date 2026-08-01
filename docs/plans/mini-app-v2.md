@@ -197,7 +197,7 @@ receives notifications.
       result, 5xx and network failure → retryable error; query params
       (`limit`/`offset`/`months_back`) serialized as specified; no method sends
       `account_id` or a user UUID. Model: sonnet.
-- [ ] **U1.5 Serving, reverse proxy, TLS** ⚠ **STOP-AND-ASK GATE** — first
+- [x] **U1.5 Serving, reverse proxy, TLS** ⚠ **STOP-AND-ASK GATE** — first
       public exposure of the API. Dockerfile gains a node build stage producing
       `webapp/dist`; `main.py` mounts `StaticFiles(html=True)` at `/` **after**
       every router; prod compose publishes a port behind a TLS reverse proxy;
@@ -424,6 +424,35 @@ tg_id seeded via `docs/seed.sql`).
   step. Lockfile format is `lockfileVersion: '9.0'`. No contract change —
   purely a toolchain-behavior note for whoever next runs `pnpm install` here
   cold.
+- D213 (2026-07-29, U1.5, HUMAN): **Caddy** as the TLS reverse proxy in front
+  of the api, run **as a compose service in `docker-compose.prod.yml`** (not
+  a system-level proxy on the host). `caddy:2-alpine`, one-block Caddyfile
+  driven by `$MINI_APP_HOST`, two named volumes (`caddy_data`,
+  `caddy_config`) persist LE cert material across `up -d --force-recreate`.
+  Rejected: nginx + certbot (two services or a combined image, manual
+  renewal orchestration for zero gain at family scale); Traefik (label-based
+  routing is overkill for one backend service); a system-level Caddy/nginx
+  bound to 443 on the host with compose publishing to `127.0.0.1:8000`
+  (splits the deploy story — the `docker compose up` you already have stops
+  being enough, and adds a second thing to reason about on every server
+  bootstrap). Consequence: only the `proxy` service publishes ports (80/443
+  + UDP 443 for HTTP/3); the `api` service stays unpublished, reached over
+  the internal compose network exactly as before. Cert renewal is fully
+  automatic (Caddy handles ACME + renewal timers itself); the only ongoing
+  ops burden is not deleting the `caddy_data` volume.
+- D214 (2026-07-29, U1.5): the `StaticFiles(html=True)` mount at `/` is
+  **conditional on `webapp/dist` existing** — `create_app(webapp_dist=…)`
+  takes an optional `Path` and only mounts when the directory is present.
+  Rationale: bare-host dev (`uvicorn main:app --reload` with no prior
+  `pnpm build`) and the existing pytest suite must keep working with no
+  build present; the Dockerfile's `webapp-builder` stage always populates
+  `dist` in the image, so prod is unaffected. Also lets `tests/test_static.py`
+  point `create_app` at a `tmp_path` fixture and drive the mount from tests
+  without polluting the real `webapp/dist`. Rejected: unconditional mount
+  (every bare-host dev run and every existing test would have to `pnpm build`
+  first — bad ratio for what's a purely additive feature); env-var flag to
+  enable the mount (two switches for what's one signal — is dist there or
+  not — is worse than one).
 
 ## STATE (handoff)
 - Done: **U0.1** — `validate_init_data` (`api/deps.py`) verifies the Telegram
@@ -640,20 +669,68 @@ tg_id seeded via `docs/seed.sql`).
   initData) rather than contradicting a locked decision. `bash
   scripts/verify.sh` green end to end (webapp vitest now 54 tests across 6
   files; Python still 531 passed; secret-grep clean).
-- Next: `/unit U1.5 docs/plans/mini-app-v2.md` (Serving, reverse proxy,
-  TLS) — **STOP-AND-ASK GATE**, first public exposure of the API. Edits
-  `docker-compose.prod.yml`/Dockerfile/deploy config; do not start without
-  human sign-off.
+- Done: **U1.5** (D213, D214, STOP-AND-ASK gate — human sign-off obtained
+  on both decisions before any deploy-config edit) — the Mini App now
+  ships in the same image as the api and is served over TLS from the
+  same origin. `Dockerfile` gains a `webapp-builder` stage
+  (`node:22-alpine` + corepack-pinned pnpm via `packageManager`) that
+  runs `pnpm install --frozen-lockfile && pnpm run build`; the runtime
+  stage `COPY --from=webapp-builder --chown=app:app /webapp/dist
+  ./webapp/dist` (node never ships to the final image, keeping it
+  Python-only). `main.py`: `create_app(webapp_dist: Path | None = None)`
+  now mounts `StaticFiles(directory=dist, html=True)` at `/` **after
+  every `include_router()` call** (the plan's "static mount can swallow
+  API routes" failure mode), gated on `dist.is_dir()` per D214 so
+  bare-host dev + the existing pytest suite still work with no build
+  present. `docker-compose.prod.yml` gains a **`proxy`** service
+  (`caddy:2-alpine`, D213) publishing 80/443 + UDP 443, mounting a repo-
+  root `Caddyfile` (one block: `{$MINI_APP_HOST} { reverse_proxy
+  api:8000 }`) read-only, with `caddy_data`/`caddy_config` named
+  volumes for LE cert persistence; the api service stays unpublished.
+  Hashed asset filenames come for free from Vite's defaults
+  (`assets/index-<hash>.js`) — confirmed against a real `pnpm build`
+  output; no vite.config change needed. `tests/test_static.py` (new, 5
+  cases) drives `create_app(webapp_dist=tmp_path/"dist")` against a
+  fake dist tree: `GET /` returns the fixture index; `GET
+  /assets/app-DEADBEEF.js` returns the fixture asset; `GET /health`
+  still returns JSON (router wins); `GET /expenses` reaches FastAPI
+  (401 via a `get_current_user` dep override — the point is routing,
+  not permissions) — this is the plan's explicit U1.5 no-swallow AC;
+  and `create_app` skips the mount when the directory is absent.
+  `README.md`: env-var table gains `MINI_APP_HOST`/`MINI_APP_URL`/
+  `INITDATA_MAX_AGE_SEC`; new "Mini App deployment" section covers
+  BotFather `/newapp` + `/setmenubutton`, DNS + firewall (80/443, UDP
+  443 for HTTP/3), Caddy first-deploy cert issuance, rollback (same
+  pathway as api/bot — pin `CASHFLOW_IMAGE`), automatic renewal
+  (Caddy handles ACME itself; the only ops burden is not deleting the
+  `caddy_data` volume), and the hashed-asset cache-bust invariant
+  (don't add unhashed files to `dist`). `tests/README.md` gains the
+  `test_static.py` section. Verification: `bash scripts/verify.sh`
+  green (Python 536 passed, webapp vitest 54 across 6 files, secret-
+  grep clean); `docker compose -f docker-compose.prod.yml config`
+  validates with `CASHFLOW_IMAGE` resolving correctly and the placeholder
+  `MINI_APP_HOST=miniapp.example.invalid` default in the compose file
+  keeping laptop `config` runs green even without `MINI_APP_HOST` set;
+  `docker build --target=webapp-builder` and full `docker build` both
+  succeed and the runtime image has `/app/webapp/dist/index.html` +
+  `assets/` owned by `app:app`. Not run: the actual server-side
+  bootstrap (DNS record, first `up -d`, BotFather registration) — that
+  step is on the human per the plan's AC and the new README section.
+- Next: **CP1 live-test after U1.5** — human opens the Mini App from the
+  bot's menu button; the shell loads over HTTPS, greets by name from
+  `GET /users/me`, and matches the Telegram theme. Then `/unit U2.1
+  docs/plans/mini-app-v2.md` (Screen 01 — Home).
 - Gotchas:
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
   - **There is no U0.2** — it moved to bot-allowlist-db U1 (D210). U0.3/U0.4
     were deliberately not renumbered. `GET /users/me` must already exist before
     U1.4 (ApiClient) and CP1.
-  - One gate remains: **U1.5** is a STOP-AND-ASK (first public exposure of the
-    API, edits prod compose + deploy config). U1.1's lockfile sign-off
-    (`webapp/pnpm-lock.yaml` was on root CLAUDE.md's do-not-edit list) was
-    asked for and granted during U1.1 itself — resolved, not a future gate.
+  - No STOP-AND-ASK gates remain in this plan — U1.5's (first public
+    exposure of the API, deploy-config edits) resolved with human
+    sign-off during U1.5 itself. U1.1's lockfile sign-off
+    (`webapp/pnpm-lock.yaml` was on root CLAUDE.md's do-not-edit list)
+    was similarly asked for and granted during U1.1.
   - Any machine running `scripts/verify.sh`/`webapp/` cold needs Node 22.13+
     (pnpm 11 hard-requires it) and pnpm on `PATH` (this session installed both
     via `brew install node pnpm`).
@@ -672,3 +749,11 @@ tg_id seeded via `docs/seed.sql`).
     `greenlet`), not `alembic upgrade head` directly. Same gap as every prior
     migration; not new to U0.5.
   - V1.1's unresolved deploy-safety flag blocks the first deploy — see CP0.
+  - **U1.5 deploy-time gotchas**: the compose file uses a placeholder
+    `MINI_APP_HOST=miniapp.example.invalid` default so `docker compose
+    config` stays green on laptops; the server's `/opt/bot/.env` MUST
+    set a real hostname before the first deploy or Caddy will fail ACME
+    loudly (safe but useless). Port 80 must be reachable from the
+    internet for ACME HTTP-01 renewal, not just for the plaintext
+    redirect. Never `docker volume rm cashflow_caddy_data` casually —
+    re-issuance is LE-rate-limited.

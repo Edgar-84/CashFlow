@@ -3,9 +3,11 @@
 # the transaction pooler: it breaks asyncpg prepared statements (see plan
 # Risks; if pgbouncer errors appear, set statement_cache_size=0 in the pool).
 #
-# No published ports on purpose (D40): the bot long-polls Telegram outbound
-# and is the only client of the api, reached over the internal compose
-# network as http://api:8000. X-Internal-Token stays the auth layer.
+# Publishing (D40 + U1.5): only the `proxy` service (Caddy) publishes ports
+# (80/443); the api still has no direct port exposure. The bot long-polls
+# Telegram outbound and reaches the api over the internal compose network as
+# http://api:8000. X-Internal-Token stays the bot's auth layer; the Mini App
+# reaches the same api through Caddy over HTTPS (D213).
 #
 # `image` defaults to a local build (laptop prod-config test, D42); the
 # server's .env sets CASHFLOW_IMAGE=ghcr.io/edgar-84/cashflow:latest so CD
@@ -63,3 +65,33 @@ services:
       api:
         condition: service_healthy
     logging: *default-logging
+
+  # TLS reverse proxy in front of the api (U1.5, D213). Caddy issues and
+  # renews a Let's Encrypt cert for $MINI_APP_HOST automatically; renewal
+  # state and cert material persist in the caddy_data volume across
+  # `docker compose up -d --force-recreate`. See README "Mini App deployment".
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Public hostname (e.g. miniapp.example.com); Caddy will fail to issue a
+      # cert if this is not a real, DNS-resolvable host it controls. A
+      # placeholder default keeps `docker compose config` green on laptops
+      # (AC) — do NOT ship a prod deploy without setting this in .env.
+      MINI_APP_HOST: ${MINI_APP_HOST:-miniapp.example.invalid}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *default-logging
+
+volumes:
+  caddy_data:
+  caddy_config:

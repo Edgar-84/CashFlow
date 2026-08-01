@@ -1,0 +1,10 @@
+# Caddy reverse proxy in front of the FastAPI api service (U1.5, D213).
+# Host is read from the compose service's environment ($MINI_APP_HOST in .env,
+# e.g. miniapp.example.com). Caddy issues and renews the Let's Encrypt
+# certificate automatically; renewal state lives in the caddy_data volume
+# declared in docker-compose.prod.yml.
+
+{$MINI_APP_HOST} {
+    encode zstd gzip
+    reverse_proxy api:8000
+}
