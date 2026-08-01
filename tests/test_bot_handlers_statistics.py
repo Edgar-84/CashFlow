@@ -339,10 +339,11 @@ async def test_by_tag_clicked_shows_the_tag_picker() -> None:
 
 async def test_category_drilldown_sends_the_category_filter_and_current_bounds() -> None:
     groceries = make_category("Groceries")
+    expected_bounds = h.preset_bounds(STATISTICS_PERIOD_LAST_MONTH_CALLBACK)
+    assert expected_bounds is not None
+    expected_start, expected_end = expected_bounds
     client = FakeStatisticsBackendClient(
-        period=PeriodTotal(
-            start=datetime(2026, 6, 1, tzinfo=UTC), end=datetime(2026, 7, 1, tzinfo=UTC), total=500
-        ),
+        period=PeriodTotal(start=expected_start, end=expected_end, total=500),
         categories=[groceries],
     )
     message = make_message()
@@ -356,7 +357,8 @@ async def test_category_drilldown_sends_the_category_filter_and_current_bounds()
 
     call = client.by_period_calls[0]
     assert call["category_id"] == groceries.id
-    assert call["start"] == datetime(2026, 6, 1, tzinfo=UTC)
+    assert call["start"] == expected_start
+    assert call["end"] == expected_end
     text = message.edit_text.await_args.args[0]
     assert "Groceries" in text
     assert "Total: 5.00" in text
