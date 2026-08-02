@@ -241,7 +241,7 @@ receives notifications.
       field at a time; delete shows a 5s undo **before** the API call and the
       row returns if it is used; delete failure restores the row; 403/404 →
       human messages.
-- [ ] **U2.4 Screen 04 — Budgets** — bars in the category's own colour with a
+- [x] **U2.4 Screen 04 — Budgets** — bars in the category's own colour with a
       threshold tick, states in words plus an icon.
       AC: threshold tick lands at `notify_threshold`; over-budget renders the
       flag with icon **and** text (not colour alone); no-budgets empty state;
@@ -1118,12 +1118,135 @@ tg_id seeded via `docs/seed.sql`).
   run: a live browser/Telegram smoke test — **CP4 (after U2.3b) is now
   unblocked but still open**, same gap every prior M2 unit's STATE has left
   (CP1-CP3 are also still open, per U2.1/U2.2/U2.3's STATE).
+- Done: **U2.4** — Screen 04 (Budgets): parity with `/budgets` plus the
+  threshold tick. No backend/Contract change — `GET/POST/PATCH/DELETE
+  /budgets` and `GET /budgets/{id}/progress` already existed from earlier
+  units; frontend-only, same as U2.3b.
+  New `screens/budgets.ts`, same three-layer split as every other screen:
+  - **data**: `buildBudgetsData` (pure) splits an account's categories into
+    `budgeted` (one row per plan, joined against its own
+    `GET /budgets/{id}/progress` call — same N-small-calls shape U2.1's
+    Home over-budget strip already established, family-scale N) and
+    `unbudgeted` (an invitation row per category with no plan), both in
+    `created_at ASC` order. `loadBudgets` mirrors every other screen's
+    never-throws/cache-fallback contract (loading/error/forbidden/empty/
+    ready/offline); `empty` is the defensive "no categories at all" case
+    (mirrors `add-expense.ts`), not "no budgets yet" — that's a `ready`
+    sub-case (`budgeted.length === 0`) so the unbudgeted invitations still
+    render alongside the AC's "no-budgets empty state" copy.
+  - **controller**: `createBudgetsController` owns one shared create/edit
+    form (`BudgetEditMode`, keyed by category id for create or plan id for
+    edit) rather than two separate flows. A successful save/delete updates
+    `data` locally from the mutation's own response plus a fresh
+    `getBudgetPlanProgress` call (create/update return a
+    `BudgetPlanResponse`, not progress) — same "update from the response"
+    shape as `expense-detail.ts`'s `applyUpdated` — instead of reloading
+    the whole screen.
+  - **presentation**: `renderBudgets`/`renderBudgetsView` (pure,
+    string-content assertions per state) and `mount` (thin DOM glue, the one
+    part with no meaningful unit test — same accepted gap as every other
+    screen). Bar fill and the threshold tick are both plain CSS
+    percentages positioned from `BudgetProgress.fill_pct`/`notify_threshold`
+    directly — no percentage/aggregation math is recomputed client-side
+    (webapp/CLAUDE.md's ironclad rule, the direct D120 lesson). Status text
+    is three words-plus-icon states (`On track` / `⚠ Approaching limit` /
+    `⚠ Over by {amount} {currency}`), with `--status-red` reserved for
+    `is_exceeded` only, per design doc §6 — a past-threshold-but-not-yet-
+    exceeded bar gets the icon and word but not the red text, so status
+    is never colour-alone either way.
+  MainButton is contextual (design doc §4): `nextUnbudgeted` (first
+  unbudgeted category in creation order) drives its label and tap target,
+  hidden once every category has a plan. Unlike every prior screen's chrome
+  (keyed only to top-level load status), this needs to react to in-screen
+  mutations — creating a plan changes what "next" means — so `mount`
+  re-applies `applyBudgetsChrome` after every create/edit/delete instead of
+  once at load; `applyBudgetsChrome` stays the single reusable export both
+  `main.ts` (initial/loading chrome) and `mount` (post-mutation chrome) call.
+  Delete uses `confirmDiscard` (Telegram's own popup, already
+  screen-agnostic despite its name) rather than expense-detail's 5s-undo —
+  the design doc's Telegram note for this screen names no undo affordance,
+  unlike D216's expense-delete AC. `main.ts` gained `showBudgets()`, wired
+  to Home's previously no-op "Budgets" tile.
+  **Known gap, same accepted shape as expense-detail.ts's stale-category
+  fallback**: design doc §4 lists "category deleted underneath a plan" as a
+  state, but `budget_plans.category_id REFERENCES categories(id) ON DELETE
+  RESTRICT` (docs/SCHEMA.sql) means a category with a live plan can never
+  actually be deleted — `buildBudgetsData` still keeps the defensive
+  "Unknown category"/neutral-colour fallback every other screen has, in
+  case the client's own categories fetch is out of sync with its plans
+  fetch, but the scenario can't be triggered end-to-end to prove it live.
+  **Review fixes, same unit, two passes** (reviewer subagent run
+  proactively both times — this unit touches money/budget math). First
+  pass: (1) `save()`'s local `data` update originally happened only after
+  *both* the create/update call and the follow-up `getBudgetPlanProgress`
+  call succeeded, so a plan that was successfully written server-side but
+  then hit a transient failure on the progress read-back left `data` stale
+  (category still shown "unbudgeted" client-side; a retry would re-`POST`
+  and surface a spurious 409). Fixed with `fetchProgress`: the mutation is
+  always committed to `data` once the create/update call itself succeeds,
+  falling back to a zero-spend/`fill_pct: null` placeholder row if only the
+  progress read fails — self-heals on the next full `loadBudgets` (leaving
+  and returning to the screen). (2) Moving a category between
+  `budgeted`/`unbudgeted` on create/delete was appending to the end of the
+  target array, contradicting `nextUnbudgeted`'s documented "first in
+  creation order" contract after an in-session mutation. Fixed by adding
+  `categoryOrder` (every fetched category id in `created_at ASC` order) to
+  `BudgetsData` and re-sorting through it (`sortByCategoryOrder`) on every
+  create/delete.
+  Second pass, on the first pass's own fix: (3) the exceeded-state "Over
+  by X" text was computed client-side as `spentMinor - amountMinor`
+  instead of using `BudgetProgress.remaining`, which the API already
+  computes for exactly this (`budget_service.calculate_progress`) —
+  violated webapp/CLAUDE.md's "never `Number` arithmetic on a displayed
+  amount" rule and could silently drift from the server's formula. Fixed:
+  `BudgetRow` gained `remainingMinor` (straight from `progress.remaining`),
+  and the display is `formatAmount(-row.remainingMinor)` — a sign flip on
+  the server's own number, not a re-derivation from two separate fields.
+  (4) `fetchProgress`'s failure fallback set `fill_pct: null` to mean
+  "couldn't read progress," but the renderer read `fillPct === null` as
+  the real API's "no limit set" (an `amount <= 0` plan) — so a budget that
+  was just successfully created could show its real amount next to the
+  false label "No limit set" if the follow-up progress read failed. Fixed:
+  `BudgetRow`/`rowFrom` gained `spentKnown` (`false` only for the fallback
+  path), and `renderBudgetRow` checks it before `fillPct === null`,
+  rendering "Spend unknown — reopen to refresh" instead.
+  Tests: `webapp/tests/budgets.test.ts` (48 cases) — `buildBudgetsData`
+  (budgeted/unbudgeted split, stale-category fallback, all-unbudgeted with
+  no plans, a plan with a missing progress fetch skipped rather than
+  crashing), `loadBudgets` (ready/empty/forbidden/error/offline mirroring
+  every other screen's suite shape), `nextUnbudgeted`, `amountFieldError`/
+  `thresholdFieldError`/`budgetFormValid`, `createBudgetsController`
+  (start/cancel create and edit populating the right draft, save on create
+  and on edit incl. creation-order re-insertion, the progress-fallback
+  regression case asserting `spentKnown: false`, a real `amount<=0`
+  "no limit" plan asserting `spentKnown: true` (distinct from the
+  fallback), save blocked with no API call on an invalid draft, 409/403/404
+  error-message mapping, delete moving a row back to unbudgeted incl.
+  creation-order re-insertion, delete closing an open edit form for the
+  deleted plan, delete 403/404 mapping), `renderBudgets`/`renderBudgetsView`
+  (all five load states, the threshold-tick CSS position, the
+  exceeded-vs-approaching status distinction incl. the status-red class
+  only on exceeded, "Spend unknown" rendering distinctly from "No limit
+  set" for a `spentKnown: false` row, the offline banner, the create form's
+  disabled-until-valid Save with no Delete button vs. the edit form's
+  Delete button), `applyBudgetsChrome` (contextual MainButton label/target,
+  hidden once fully budgeted, hidden while loading, BackButton wired —
+  same `fakeWebApp()` pattern every chrome test in this repo uses).
+  Verification: `bash scripts/verify.sh` green end to end (Python 536
+  passed, unaffected; webapp vitest 224 across 12 files, up from 176/11;
+  typecheck/lint/build/secret-grep clean; build 45.05 KB JS + 11.33 KB CSS
+  raw / 12.16 KB + 2.48 KB gzipped, still well under the 150 KB budget). Not
+  run: a live browser/Telegram smoke test — no live-test checkpoint is
+  defined for this screen specifically (the plan's checkpoints stop at
+  CP5/U2.5); CP1-CP4 remain open per every prior M2 unit's STATE.
 - Next: **CP3 — after U2.2**: human records an expense in the app and
   confirms it appears in the bot's `/expenses` — the payoff this whole plan
   is for (still open, per U2.1/U2.2's STATE — the SDK-script fix landed
   after both units shipped), then **CP4 — after U2.3b**: edit and delete from
-  the app, undo a delete (now unblocked). Then `/unit U2.4
-  docs/plans/mini-app-v2.md` (Screen 04 — Budgets).
+  the app, undo a delete (now unblocked). CP1-CP4 are all still open — worth
+  a single combined live pass rather than four separate ones, since each
+  reuses the same running app. Then `/unit U2.5 docs/plans/mini-app-v2.md`
+  (Screen 05 — Statistics).
 - Gotchas:
   - **`webapp/index.html` was missing the Telegram Mini Apps SDK script**
     (`https://telegram.org/js/telegram-web-app.js`) from U1.3 through U2.1 —
