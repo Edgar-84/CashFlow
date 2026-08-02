@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CashFlow</title>
+    <!-- Defines window.Telegram.WebApp — lib/telegram.ts::getInitData() and
+         every other Telegram bridge call is a no-op without this. Must load
+         as a classic (non-module) script so it runs before main.ts's
+         deferred module script. -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="/src/styles/tokens.css" />
   </head>
   <body>
