@@ -7,6 +7,13 @@ import {
   type AddExpenseHandlers,
 } from "./screens/add-expense";
 import {
+  applyBudgetsChrome,
+  createMemoryCache as createBudgetsCache,
+  loadBudgets,
+  mount as mountBudgets,
+  type BudgetsHandlers,
+} from "./screens/budgets";
+import {
   applyDetailChrome,
   loadDetail,
   mount as mountExpenseDetail,
@@ -33,6 +40,7 @@ import type { Uuid } from "./api/types";
 const homeCache = createHomeCache();
 const addExpenseCache = createAddExpenseCache();
 const expensesCache = createExpensesCache();
+const budgetsCache = createBudgetsCache();
 const client = new ApiClient({ getInitData });
 
 function getRoot(): HTMLElement | null {
@@ -61,9 +69,11 @@ async function showHome(): Promise<void> {
         void showAddExpense();
       } else if (tile === "expenses") {
         void showExpenses();
+      } else if (tile === "budgets") {
+        void showBudgets();
       }
-      // Budgets/Statistics/Categories/Tags land in later units (U2.4/U2.5,
-      // M3) — tiles stay reachable but are no-ops until then.
+      // Statistics/Categories/Tags land in later units (U2.5, M3) — tiles
+      // stay reachable but are no-ops until then.
     },
     onSegmentTap: (target) => {
       void showExpenses(target.categoryId ? { categoryId: target.categoryId } : {});
@@ -161,6 +171,30 @@ async function showExpenseDetail(id: Uuid, onBack: () => void): Promise<void> {
   const state = await loadDetail(client, id);
   applyDetailChrome(onBack);
   mountExpenseDetail(root, state, client, handlers);
+}
+
+/** Mounts Budgets (U2.4, screen 04), reached from Home's "Budgets" tile.
+ * BackButton always returns to Home, same shape as Expenses/Detail. */
+async function showBudgets(): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+
+  const handlers: BudgetsHandlers = {
+    onRetry: () => {
+      void showBudgets();
+    },
+    onBack: () => {
+      void showHome();
+    },
+  };
+
+  applyBudgetsChrome({ status: "loading" }, handlers.onBack);
+  mountBudgets(root, { status: "loading" }, client, handlers);
+  const state = await loadBudgets(client, budgetsCache);
+  applyBudgetsChrome(state, handlers.onBack);
+  mountBudgets(root, state, client, handlers);
 }
 
 /** Boots the app onto `#app`. Guarded the same way every DOM-touching export

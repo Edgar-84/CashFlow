@@ -619,6 +619,196 @@ body {
   gap: 12px;
 }
 
+/* -- budgets (U2.4) -------------------------------------------------------- */
+
+.budgets-ready,
+.budgets-skeleton,
+.budgets-error,
+.budgets-empty,
+.budgets-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.budget-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 13px;
+  border-bottom: 1px solid var(--separator);
+  cursor: pointer;
+}
+
+.budget-row:last-child {
+  border-bottom: 0;
+}
+
+.budget-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.budget-cat {
+  font-size: 13.5px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-amt {
+  margin-left: auto;
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-bar-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--separator);
+}
+
+.budget-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.budget-bar-tick {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--ink);
+  transform: translateX(-1px);
+}
+
+.budget-status {
+  font-size: 11.5px;
+  color: var(--ink-secondary);
+}
+
+.budget-status--warn {
+  color: var(--ink);
+}
+
+.budget-status--over {
+  color: var(--status-red);
+  font-weight: 600;
+}
+
+.budgets-empty-note {
+  padding: 2px 4px;
+}
+
+.budgets-empty-note p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+.budget-invites {
+  display: flex;
+  flex-direction: column;
+}
+
+.budget-invite {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--separator);
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.budget-invite:last-child {
+  border-bottom: 0;
+}
+
+.budget-invite-nm {
+  min-width: 0;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-invite-cta {
+  margin-left: auto;
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.budget-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.budget-form-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.detail-edit-actions button[data-action="save-budget"] {
+  background: var(--ink);
+  color: var(--app-background);
+}
+
+.detail-edit-actions button[data-action="save-budget"]:disabled {
+  background: var(--separator);
+  color: var(--ink-secondary);
+  cursor: default;
+}
+
+.detail-edit-actions button[data-action="delete-budget"] {
+  background: var(--card);
+  color: var(--status-red);
+}
+
+.budget-row-skeleton {
+  height: 72px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--separator);
+}
+
+.budgets-empty p,
+.budgets-error p,
+.budgets-readonly p {
+  margin: 4px 4px 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.budgets-error button[data-action="retry"] {
+  align-self: flex-start;
+  font: inherit;
+  font-weight: 600;
+  background: var(--ink);
+  color: var(--app-background);
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin: 0 4px;
+  cursor: pointer;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */
@@ -627,7 +817,8 @@ body {
   .legend-skeleton,
   .field-skeleton,
   .chips-skeleton,
-  .exp-day-skeleton {
+  .exp-day-skeleton,
+  .budget-row-skeleton {
     animation: skeleton-pulse 1.4s ease-in-out infinite;
   }
 }
