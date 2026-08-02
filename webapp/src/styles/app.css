@@ -335,6 +335,143 @@ body {
   box-shadow: inset 0 0 0 1px var(--separator);
 }
 
+/* -- expenses list (U2.3) ------------------------------------------------ */
+
+.expenses-ready,
+.expenses-skeleton,
+.expenses-error,
+.expenses-empty,
+.expenses-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.exp-filter {
+  margin: 0 4px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+.exp-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--separator);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.exp-day-subtotal {
+  font-variant-numeric: tabular-nums;
+}
+
+.exp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--separator);
+  min-height: 42px;
+}
+
+.exp-row:last-child {
+  border-bottom: 0;
+}
+
+.exp-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.exp-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exp-comment,
+.exp-tags {
+  font-size: 11.5px;
+  color: var(--ink-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exp-author {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--separator);
+  color: var(--ink-secondary);
+  font-size: 10.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.exp-amount {
+  flex: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.load-more {
+  align-self: center;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--card);
+  color: var(--ink);
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.end-of-list {
+  margin: 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.expenses-empty p,
+.expenses-error p,
+.expenses-readonly p {
+  margin: 4px 4px 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.expenses-error button[data-action="retry"] {
+  align-self: flex-start;
+  font: inherit;
+  font-weight: 600;
+  background: var(--ink);
+  color: var(--app-background);
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin: 0 4px;
+  cursor: pointer;
+}
+
+.exp-day-skeleton {
+  height: 126px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--separator);
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */
@@ -342,7 +479,8 @@ body {
   .donut-skeleton,
   .legend-skeleton,
   .field-skeleton,
-  .chips-skeleton {
+  .chips-skeleton,
+  .exp-day-skeleton {
     animation: skeleton-pulse 1.4s ease-in-out infinite;
   }
 }
