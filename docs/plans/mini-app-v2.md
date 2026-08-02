@@ -805,10 +805,40 @@ tg_id seeded via `docs/seed.sql`).
   excuses reflow/visual assertions. (2) `renderOverBudgetStrip` only shows
   `overBudget[0]` — a second exceeded category is silently dropped, no
   "+N more" affordance; minor, deferred.
+  **Follow-up, post-merge (human live-tested after the SDK-script fix
+  below and saw unstyled/run-together text)**: added
+  `webapp/src/styles/app.css` — layout/geometry/type for every class
+  `screens/home.ts` renders (`.card`, `.row`/`.dot`/`.nm`/`.val`/`.pct`
+  legend rows, `.tiles`/`.tile`, `.strip`, `.donut-wrap`/`.donut-c`/`.amt`,
+  `.donut-skeleton`/`.legend-skeleton`, `.offline-banner`, the retry
+  button), per §6's geometry (14px card radius, tabular-nums amounts at
+  700 weight/-0.035em tracking). `tokens.css` stays token-only per its own
+  doc comment; this new file is deliberately everything else, and is
+  meant to be extended, not duplicated, once U2.3-U2.5 need the same
+  `.card`/`.row` patterns. Skeleton dimensions (196px donut, 126px = 3×42px
+  legend rows) exactly match the real donut/row sizing so swapping loading
+  → ready never reflows — the AC's explicit requirement. Skeleton pulse
+  animation is gated behind `prefers-reduced-motion: no-preference`.
+  `index.html` links it alongside `tokens.css`. Resolves deferred item (1)
+  above; (2) is still open. Verified: `bash scripts/verify.sh` green
+  (Python 536 passed; webapp vitest 79/8 files; typecheck/lint/secret-grep
+  clean; build now 11.12 KB JS + 1.31 KB CSS gzipped, still well under the
+  150 KB budget).
 - Next: **CP2 — after U2.1**: human confirms the donut shows real family
   spending for this month, then `/unit U2.2 docs/plans/mini-app-v2.md`
   (Screen 02 — Add expense).
 - Gotchas:
+  - **`webapp/index.html` was missing the Telegram Mini Apps SDK script**
+    (`https://telegram.org/js/telegram-web-app.js`) from U1.3 through U2.1 —
+    `window.Telegram.WebApp` never existed, so `getInitData()` always
+    returned `null` and every request went out unauthenticated (401,
+    "Reopen this app from Telegram to continue."), even when opened
+    correctly from the bot's menu button. Fixed post-U2.1, outside the unit
+    workflow (`fix_missing_telegram_webapp_sdk_script`, PR #57) once the
+    human hit it live after deploy. This means **CP1 (after U1.5) was never
+    actually proven live** — the shell may have loaded over HTTPS, but
+    `GET /users/me` would have 401'd the same way. Re-run CP1's check (open
+    from the bot's menu button, confirm the name greeting) alongside CP2.
   - **U2.2 needs to add `onClick`/`offClick` to `lib/telegram.ts`'s
     `mainButton` export** (it only has `show`/`hide`/`setEnabled` — U1.3
     never wired a click handler since no screen needed one yet, and U2.1
