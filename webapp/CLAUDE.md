@@ -35,6 +35,9 @@ add it there first.
 - `src/lib/money.ts` — **the** minor-unit parse/format pair.
 - `src/lib/dates.ts` — rendering in `family_tz`.
 - `src/styles/tokens.css` — the token table from the UX brief, nothing else.
+- `src/styles/app.css` — layout/geometry/type for every screen's markup
+  (cards, rows, tiles, skeletons...). Colour always comes from a
+  `tokens.css` custom property, never a literal here.
 - `tests/` — vitest, colocated with nothing else.
 
 ## Ironclad rules
