@@ -222,7 +222,7 @@ receives notifications.
       broken buttons; offline → last data + synced marker; donut segment tap
       routes to the filtered list; category→colour mapping is stable across two
       renders with a category appended.
-- [ ] **U2.2 Screen 02 — Add expense** — the one-surface composer.
+- [x] **U2.2 Screen 02 — Add expense** — the one-surface composer.
       AC: amount focused on open; MainButton disabled and labelled "Choose a
       category" until one is picked, then restates the action; invalid amount
       inline (never a popup); **double submit issues exactly one `POST`**;
@@ -824,9 +824,102 @@ tg_id seeded via `docs/seed.sql`).
   (Python 536 passed; webapp vitest 79/8 files; typecheck/lint/secret-grep
   clean; build now 11.12 KB JS + 1.31 KB CSS gzipped, still well under the
   150 KB budget).
-- Next: **CP2 — after U2.1**: human confirms the donut shows real family
-  spending for this month, then `/unit U2.2 docs/plans/mini-app-v2.md`
-  (Screen 02 — Add expense).
+- Done: **U2.2** — Screen 02 (Add expense), the one-surface composer.
+  `lib/telegram.ts` gained `mainButton.onClick`/`offClick` (the gotcha
+  flagged after U2.1) mirroring `setBackButtonHandler`'s wire-then-unwire-
+  before-rewire shape via a new module-level `currentMainButtonHandler`, and
+  `confirmDiscard(message)` wrapping Telegram's `showConfirm` (falls back to
+  the browser's native `confirm()` outside Telegram, or `true` with neither
+  available, so the discard flow can never get stuck) — fills the "Telegram's
+  own popup, never a custom modal" Contracts detail, same "no new decision"
+  precedent as U1.2/U1.3/U2.1 gap-fills. `screens/home.ts::applyHomeChrome`
+  gained an optional second `onAddExpense` parameter so Home's own MainButton
+  now also routes to Add-expense (the design doc §5 flow diagram's
+  `H -->|MainButton| A`), backward-compatible with every existing call site
+  and test.
+  New `screens/add-expense.ts`, same three-layer split as `home.ts`:
+  - **data**: `loadAddExpenseData` fetches categories/tags/currency
+    (`GET /users/me`, `/categories`, `/tags`) via `Promise.all`, mirroring
+    `loadHome`'s never-throws/cache-fallback-on-offline contract exactly
+    (loading/error/forbidden/empty/ready/offline). `empty` (no categories at
+    all) is defensive — root CLAUDE.md guarantees a seeded "General"
+    category on every account, so this is expected to be unreachable in
+    practice, but the five-states contract (webapp/CLAUDE.md) isn't optional.
+  - **draft**: `createController` owns the in-progress `Draft` (amount input,
+    category id, tag ids, comment) and the double-submit guard. `submitting`
+    is flipped synchronously before the first `await`, so two `submit()`
+    calls issued back-to-back both run before either resolves and only the
+    first reaches `createExpense` (AC: exactly one POST, same shape as the
+    bot's D118/D123 confirm-step guard) — verified directly with
+    `Promise.all([controller.submit(), controller.submit()])` against a
+    manually-resolved fake, no DOM/timing trick needed. On success the draft
+    resets; a replayed call after that is rejected by `submitButtonState`
+    (no category) as `{status: "blocked"}`, not a second write. Errors
+    (403/404-stale-category/5xx-network) map to human messages via
+    `submitErrorMessage` without touching the draft, so it survives exactly
+    as the AC requires — verified with each typed `ApiClient` error class.
+  - `submitButtonState` fills a gap the AC names only the "no category"
+    case for: once a category is picked but the amount isn't valid yet, the
+    button stays disabled with an "Enter an amount" label rather than
+    promising a submit that would fail — "Add {amount} {currency} to
+    {category}" only ever appears once both are true. A stale/removed
+    category id also keeps it disabled (category lookup misses).
+  - **presentation**: `renderAddExpense`/`renderForm` (pure, string
+    assertions per state, same pattern as `renderHome`) and `mount` (thin DOM
+    glue, the one part with no meaningful unit test — same accepted gap as
+    `home.ts::mount`). `mount` re-renders only the form container
+    (`.outerHTML` swap + re-wire) on category/tag chip taps and submit
+    errors; the amount field's own `input` listener updates only the inline
+    error `<p>` and MainButton chrome directly, never touching the input
+    node itself, so typing never loses focus or cursor position. The amount
+    input carries `autofocus` and `mount` also calls `.focus()` once at the
+    end of the initial mount (AC: focused on open) — not re-called on
+    chip-triggered re-renders, so a chip tap can't steal focus back.
+    `wireBackButton` (exported, directly tested) wires the BackButton once:
+    a clean draft closes immediately, a dirty one awaits `confirmDiscard`
+    first (Telegram's popup, not a custom modal).
+  `main.ts` rewritten from the single `boot()`/Home-only shape into
+  `showHome()`/`showAddExpense()`, both reachable from either screen (Home's
+  "Add expense" tile *and* its MainButton go through `showAddExpense`; the
+  Add-expense screen's `onClose`/`onSuccess` both go through `showHome`,
+  which re-fetches — AC: "Home refetched" on success comes for free from
+  reusing the same `loadHome` call every `showHome()` invocation already
+  made). `boot()` stays the exported entry point `main.test.ts` calls, now a
+  thin `applyTheme()` + `showHome()`.
+  `styles/app.css` gained the form/chip styles (`.field`, `.amount-input`,
+  `.chip`/`.chip.active`, `.comment-input`, `.field-error`/`.submit-error`,
+  loading skeletons) — extended the existing file per its own doc comment
+  rather than a new stylesheet.
+  Tests: `webapp/tests/add-expense.test.ts` (37 cases) — the pure helpers
+  (`amountError`, `isDirty`, `submitButtonState`), `loadAddExpenseData`
+  (ready/empty/forbidden/error/offline, mirroring `home.test.ts`'s
+  `loadHome` suite), `createController.submit` (blocked-when-invalid,
+  success with tag_ids/comment round-tripped and draft reset, tag_ids/
+  comment omitted when unset, the duplicate-rapid-submit race via a
+  manually-resolved promise, 403/404/5xx/unmapped-`ApiError` message
+  mapping with draft preservation asserted after each), `renderAddExpense`/
+  `renderForm` (string-content assertions per state, inline error, active
+  chip, offline banner, no tag-chip row when the account has none),
+  `applyAddExpenseChrome`, `wireBackButton` (clean draft closes with no
+  popup; dirty draft awaits `showConfirm` and only closes on `true`).
+  `webapp/tests/telegram.test.ts` gained `mainButton.onClick`/`offClick`
+  wiring tests (same shape as the existing `setBackButtonHandler` test) and
+  `confirmDiscard` tests (via `showConfirm` and the no-Telegram fallback);
+  `webapp/tests/home.test.ts` gained two `applyHomeChrome` cases for the new
+  optional `onAddExpense` param. Both files' `fakeWebApp()` helpers gained
+  `showConfirm: vi.fn()` (now a required `TelegramWebApp` member).
+  Verification: `bash scripts/verify.sh` green end to end (Python 536
+  passed, unaffected; webapp vitest 121 across 9 files, up from 79/8;
+  typecheck/lint/build/secret-grep clean; bundle 6.29 KB JS + 1.60 KB CSS
+  gzipped, still well under the 150 KB budget). Not run: a live
+  browser/Telegram smoke test (needs a running backend + real/forged
+  `initData`, same gap U2.1 left open) — **CP3 is still open**, and per the
+  still-open U2.1 gotcha below, CP1/CP2 should be re-run alongside it now
+  that the SDK-script fix is in place.
+- Next: **CP3 — after U2.2**: human records an expense in the app and
+  confirms it appears in the bot's `/expenses` — the payoff this whole plan
+  is for. Then `/unit U2.3 docs/plans/mini-app-v2.md` (Screen 03a — Expenses
+  list).
 - Gotchas:
   - **`webapp/index.html` was missing the Telegram Mini Apps SDK script**
     (`https://telegram.org/js/telegram-web-app.js`) from U1.3 through U2.1 —
@@ -835,16 +928,9 @@ tg_id seeded via `docs/seed.sql`).
     "Reopen this app from Telegram to continue."), even when opened
     correctly from the bot's menu button. Fixed post-U2.1, outside the unit
     workflow (`fix_missing_telegram_webapp_sdk_script`, PR #57) once the
-    human hit it live after deploy. This means **CP1 (after U1.5) was never
-    actually proven live** — the shell may have loaded over HTTPS, but
-    `GET /users/me` would have 401'd the same way. Re-run CP1's check (open
-    from the bot's menu button, confirm the name greeting) alongside CP2.
-  - **U2.2 needs to add `onClick`/`offClick` to `lib/telegram.ts`'s
-    `mainButton` export** (it only has `show`/`hide`/`setEnabled` — U1.3
-    never wired a click handler since no screen needed one yet, and U2.1
-    still didn't: Home's MainButton is Add-expense, but that screen doesn't
-    exist until U2.2 builds it). Mirror `setBackButtonHandler`'s
-    wire-then-unwire-before-rewire shape.
+    human hit it live after deploy. This means **CP1 (after U1.5) and CP2
+    (after U2.1) were never actually proven live** — re-run both alongside
+    CP3.
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
   - **There is no U0.2** — it moved to bot-allowlist-db U1 (D210). U0.3/U0.4
