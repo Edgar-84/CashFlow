@@ -214,7 +214,7 @@ receives notifications.
 
 ### M2 — Screens (each = one screen + all five states from design §3)
 
-- [ ] **U2.1 Screen 01 — Home** — donut, top-three legend, over-budget strip,
+- [x] **U2.1 Screen 01 — Home** — donut, top-three legend, over-budget strip,
       six tiles, MainButton.
       AC: renders from a fake `ApiClient`; loading skeleton occupies the final
       layout (no reflow assertion); empty account → "add your first" with tiles
@@ -716,11 +716,105 @@ tg_id seeded via `docs/seed.sql`).
   `assets/` owned by `app:app`. Not run: the actual server-side
   bootstrap (DNS record, first `up -d`, BotFather registration) — that
   step is on the human per the plan's AC and the new README section.
-- Next: **CP1 live-test after U1.5** — human opens the Mini App from the
-  bot's menu button; the shell loads over HTTPS, greets by name from
-  `GET /users/me`, and matches the Telegram theme. Then `/unit U2.1
-  docs/plans/mini-app-v2.md` (Screen 01 — Home).
+- Done: **U2.1** — Screen 01 (Home). Three new modules: `lib/category-colors.ts`
+  (D206's slot assignment as its own pure function — sorts categories by
+  `created_at ASC`, slots 1..6, `null` past the sixth — factored out of
+  `home.ts` since screens 03/05/06 will need the same mapping);
+  `screens/home.ts` (data/interaction/presentation layers, see its own file
+  header); `main.ts` rewritten from the U1.1 placeholder into the real boot
+  (`applyTheme` → `ApiClient` wired to `lib/telegram::getInitData` →
+  `loadHome` → `applyHomeChrome` → `mount`), guarded by the same
+  `typeof document` check every DOM-touching export in this codebase already
+  uses. `index.html` gained a `<link>` to `tokens.css` (U1.3 wrote the file
+  but nothing loaded it yet — this is the first screen that needs it
+  rendered).
+  `HomeState` is a six-way discriminated union (loading/error/forbidden/
+  empty/ready/offline) built by `loadHome()`, which never throws — every
+  `ApiClient` failure resolves to one of the states instead. `renderHome()`
+  is a pure `HomeState -> HTML string` function (testable without a DOM,
+  string-content assertions), and `mount()` is the thin, deliberately
+  untested `innerHTML` + click-delegation glue — same accepted gap as
+  `lib/telegram.ts::applyTheme`'s `document`-guarded branch.
+  Three implementation choices filled gaps the design doc/Contracts left
+  open, none contradicting a locked decision (same "no new decision"
+  precedent as U1.2/U1.3/U0.4):
+  - **The six tiles** are the six non-Home screens in the full 7-screen
+    inventory (§3): Add expense, Expenses, Budgets, Statistics, Categories,
+    Tags. The design doc only says "six tiles are the whole app" without
+    naming them; the exploratory UI-concept artifact shows a 6th "Family"
+    tile that isn't among the plan's 7 screens at all, so it wasn't treated
+    as a contract. Categories/Tags tiles point at screens M3 hasn't built
+    yet (same as Expenses/Budgets/Statistics, not built until U2.2-U2.5) —
+    tiles are tappable and haptic-confirmed ("still reachable" per the AC)
+    but `main.ts`'s `onTileTap`/`onSegmentTap` handlers are no-ops until
+    their target screens exist.
+  - **Home also calls `GET /statistics/by-period` (`months_back: 0`)**,
+    one endpoint beyond the design doc's Data-in list for this screen. The
+    donut hole needs a total, and summing `by-category` totals client-side
+    would be exactly the "no aggregation" webapp/CLAUDE.md's ironclad rule
+    forbids — `by-period` already returns the total pre-computed server-side.
+  - **Over-budget detection calls `GET /budgets/{id}/progress` per plan**
+    (N small calls, family-scale N) rather than comparing `by-category`
+    spend against `budgets[].amount` client-side. `is_exceeded`/`remaining`
+    are `budget_service.calculate_progress`'s job (screen 04's Data-in
+    already names this endpoint); computing the same comparison again in
+    the client would be the budget-percentage logic the ironclad rule
+    explicitly forbids.
+  - **No MainButton `onClick` wiring yet.** `lib/telegram.ts`'s `mainButton`
+    export never gained a click method in U1.3 (BackButton did) since no
+    screen needed it. It still doesn't here: Home's MainButton shows/hides/
+    enables correctly, but wiring "tap → open Add-expense" has nothing to
+    navigate to until U2.2 builds that screen — deferred there rather than
+    added speculatively now.
+  Tests: `webapp/tests/category-colors.test.ts` (slot assignment order,
+  >6-categories → `null`, stability across an appended category),
+  `webapp/tests/home.test.ts` (20 cases) — `buildHomeData` (segment order
+  matches creation order not spend order, legend is top-3 **by spend**,
+  >6-category donut fold, colour-mapping stability across a re-render with
+  an appended category, over-budget strip amount = `spent - amount`),
+  `loadHome` (ready/empty/forbidden/error/offline against a fake `HomeApi`,
+  including the offline fallback reading a previously cached snapshot),
+  `segmentTapTarget`, `applyHomeChrome` (fake `TelegramWebApp`, same pattern
+  `telegram.test.ts` established — MainButton shown for ready, hidden for
+  loading/forbidden, BackButton always hidden), `renderHome` (string-content
+  assertions per state, incl. the single-category "no legend" case and the
+  403 state's Add-expense tile rendering `disabled` with no retry button).
+  `webapp/tests/main.test.ts` rewritten — `placeholderText()` no longer
+  exists (superseded by the real boot); the new test asserts `boot()`
+  resolves without throwing when no DOM is present (vitest's `node`
+  environment), the same guard-clause smoke test the file always had.
+  Verification: `bash scripts/verify.sh` green end to end (Python 536
+  passed, webapp vitest 79 across 8 files, typecheck/lint/build/secret-grep
+  clean, bundle 11.12 KB gzipped — well under the 150 KB budget). Not run:
+  a live browser/Telegram smoke test — that needs a running backend and a
+  real or forged `initData`, which this session didn't have; `pnpm dev`
+  wasn't exercised interactively either. CP2 (below) is still open.
+  **Review fix, same unit**: `main.ts::boot()` originally awaited
+  `loadHome()` before ever calling `mountHome()`, so the tested-and-built
+  `"loading"` `HomeState` (skeleton) never actually reached `#app` on a real
+  boot — `#app` stayed blank until the fetch settled, contradicting the
+  AC's "loading skeleton occupies the final layout." Fixed: `boot()` now
+  mounts `{status:"loading"}` synchronously before the `await`, then
+  re-mounts with the resolved state, reusing one `handlers` object for both
+  calls (`HomeHandlers` exported from `screens/home.ts` for this). Two other
+  review findings deliberately deferred, not fixed in this unit: (1) no
+  component CSS yet for `.tiles`/`.card`/`.strip`/`.home-skeleton` —
+  `tokens.css` only carries colour custom properties, so beyond the donut
+  SVG itself the screen has no real layout; worth doing before a serious
+  CP2 check, tracked as a fast-follow, not blocking since the AC explicitly
+  excuses reflow/visual assertions. (2) `renderOverBudgetStrip` only shows
+  `overBudget[0]` — a second exceeded category is silently dropped, no
+  "+N more" affordance; minor, deferred.
+- Next: **CP2 — after U2.1**: human confirms the donut shows real family
+  spending for this month, then `/unit U2.2 docs/plans/mini-app-v2.md`
+  (Screen 02 — Add expense).
 - Gotchas:
+  - **U2.2 needs to add `onClick`/`offClick` to `lib/telegram.ts`'s
+    `mainButton` export** (it only has `show`/`hide`/`setEnabled` — U1.3
+    never wired a click handler since no screen needed one yet, and U2.1
+    still didn't: Home's MainButton is Add-expense, but that screen doesn't
+    exist until U2.2 builds it). Mirror `setBackButtonHandler`'s
+    wire-then-unwire-before-rewire shape.
   - Decision ids start at D200 (MVP owns D1–D45, V1.1 owns D100–D124;
     bot-allowlist-db owns D300+).
   - **There is no U0.2** — it moved to bot-allowlist-db U1 (D210). U0.3/U0.4
