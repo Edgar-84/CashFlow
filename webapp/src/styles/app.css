@@ -1,0 +1,241 @@
+/* App-shell + component layout (docs/design/mini-app-ux.md §6 Visual
+   system). `tokens.css` owns colour variables only ("the token table...
+   nothing else", webapp/CLAUDE.md); this file is everything else —
+   geometry, spacing, type — shared across screens as they land. Home
+   (U2.1) is the only consumer so far; extend rather than duplicate when
+   U2.3-U2.5 need the same card/row/tile patterns. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--app-background);
+  color: var(--ink);
+  font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 14px 12px 96px;
+}
+
+/* Every top-level state wrapper (home.ts's renderSkeleton/renderReady/...)
+   lays its children out the same way, so switching states never reflows
+   the vertical rhythm — the U2.1 AC's "no reflow" requirement. */
+.home-skeleton,
+.home-ready,
+.home-empty,
+.home-error,
+.home-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+/* -- donut ---------------------------------------------------------------- */
+
+.donut-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 2px;
+}
+
+.donut {
+  display: block;
+  width: 196px;
+  height: 196px;
+}
+
+.donut circle[data-category-id] {
+  cursor: pointer;
+}
+
+.donut-c {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+}
+
+.donut-c .amt {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.donut-skeleton {
+  width: 196px;
+  height: 196px;
+  margin: 4px auto 2px;
+  border-radius: 50%;
+  background: var(--separator);
+}
+
+/* -- legend rows ------------------------------------------------------- */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--separator);
+  min-height: 42px;
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.row .nm {
+  font-size: 13.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .val {
+  margin-left: auto;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.row .pct {
+  font-size: 11px;
+  color: var(--ink-secondary);
+  width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Same 42px row height as .row, times three, so the skeleton doesn't
+   reflow once the real legend (up to three rows) replaces it. */
+.legend-skeleton {
+  height: 126px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--separator);
+}
+
+/* -- over-budget strip ---------------------------------------------------- */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  background: var(--card);
+  border-radius: 12px;
+  font-size: 12.5px;
+  color: var(--status-red);
+}
+
+.strip b {
+  font-weight: 600;
+}
+
+/* -- tiles ---------------------------------------------------------------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tile {
+  background: var(--card);
+  border: 0;
+  border-radius: 13px;
+  padding: 14px 12px;
+  min-height: 56px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tile:disabled {
+  color: var(--ink-secondary);
+  cursor: default;
+}
+
+.tile:focus-visible {
+  outline: 2px solid var(--category-slot-1);
+  outline-offset: 2px;
+}
+
+/* -- state copy + retry --------------------------------------------------- */
+
+.home-empty p,
+.home-error p,
+.home-readonly p {
+  margin: 4px 4px 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.home-error button[data-action="retry"] {
+  align-self: flex-start;
+  font: inherit;
+  font-weight: 600;
+  background: var(--ink);
+  color: var(--app-background);
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin: 0 4px;
+  cursor: pointer;
+}
+
+.offline-banner {
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+/* -- accessibility ---------------------------------------------------------
+   prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
+   only runs when the user hasn't asked to avoid motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .donut-skeleton,
+  .legend-skeleton {
+    animation: skeleton-pulse 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
