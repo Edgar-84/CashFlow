@@ -1,5 +1,7 @@
-"""U5.1 e2e smoke (@integration), extended by U3.1: bot client -> real API ->
-test DB.
+"""MVP U5.1 e2e smoke (@integration), extended by family-features-v1_1 U3.1
+and mini-app-v2 U3.1 (a same-numbered but unrelated unit in a different plan
+file — see each test's docstring for which one it belongs to): bot client /
+initData -> real API -> test DB.
 
 Exercises the actual production path through bot.client.BackendClient (the
 bot's only channel to the backend, bot/CLAUDE.md) against the real FastAPI
@@ -11,18 +13,27 @@ test needs neither a live bot token nor network access, while still
 exercising the real notification-flow invariant (services/CLAUDE.md,
 expense_service._check_budget_and_notify) end to end.
 
-U3.1 adds three ACs on top of U5.1's original scenario (plan D104, D106,
-D105 respectively): fan-out notifies every account member, not just the
-one who added the expense; statistics/by-period with explicit start/end
-actually filters by that window rather than just happening to return the
-one row that exists; a foreign-account category_id on create is a 404, not
-a leak of another account's data.
+family-features-v1_1 U3.1 adds three ACs on top of U5.1's original scenario
+(plan D104, D106, D105 respectively): fan-out notifies every account
+member, not just the one who added the expense; statistics/by-period with
+explicit start/end actually filters by that window rather than just
+happening to return the one row that exists; a foreign-account category_id
+on create is a 404, not a leak of another account's data.
+
+mini-app-v2 U3.1 adds the same scenario driven through the Mini App's auth
+path instead of the bot's: a signed X-Telegram-Init-Data payload ->
+GET /users/me -> POST /expenses -> the expense in a paginated GET /expenses
+-> GET /statistics/by-category?months_back=0 includes it, plus a tampered
+payload -> 401. Proves the two auth paths (api/CLAUDE.md's "Choosing an auth
+dependency") resolve to the same account/user against a real DB, not just at
+the dependency-injection level test_deps.py already covers with fakes.
 """
 
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qsl, urlencode
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -31,6 +42,7 @@ import pytest
 import pytest_asyncio
 from factories import make_account, make_budget_plan, make_category, make_expense, make_user
 from httpx import ASGITransport, AsyncClient
+from test_deps import build_init_data
 
 from api import deps
 from bot.client import BackendClient
@@ -233,3 +245,78 @@ async def test_create_expense_with_foreign_account_category_is_404(
                 )
 
     assert exc_info.value.response.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_init_data_auth_round_trips_through_expenses_and_statistics(
+    smoke_fixtures: dict[str, Any],
+) -> None:
+    """mini-app-v2 U3.1: the Mini App auth path (signed X-Telegram-Init-Data,
+    no X-Internal-Token) through the real app/DB, not BackendClient. The
+    posted amount (150) stays far under the fixture's budget_plan threshold
+    (10_000 @ 80%) so no notification fires and no outbound Telegram call is
+    needed here — that fan-out is already covered above.
+    """
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as http_client:
+            headers = {
+                "X-Telegram-Init-Data": build_init_data(
+                    get_settings().bot_token, smoke_fixtures["user_a"].tg_id
+                )
+            }
+
+            me = await http_client.get("/users/me", headers=headers)
+            assert me.status_code == 200
+            assert me.json()["id"] == str(smoke_fixtures["user_a"].id)
+
+            created = await http_client.post(
+                "/expenses",
+                headers=headers,
+                json={
+                    "amount": 150,
+                    "comment": "initData smoke",
+                    "category_id": str(smoke_fixtures["category_id"]),
+                },
+            )
+            assert created.status_code == 201
+            expense_id = created.json()["id"]
+
+            listed = await http_client.get("/expenses", headers=headers, params={"limit": 50})
+            assert listed.status_code == 200
+            assert any(expense["id"] == expense_id for expense in listed.json())
+
+            by_category = await http_client.get(
+                "/statistics/by-category", headers=headers, params={"months_back": 0}
+            )
+            assert by_category.status_code == 200
+            totals = {row["category_id"]: row["total"] for row in by_category.json()}
+            assert totals.get(str(smoke_fixtures["category_id"]), 0) >= 150
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_init_data_tampered_payload_against_real_app_is_401(
+    smoke_fixtures: dict[str, Any],
+) -> None:
+    """mini-app-v2 U3.1 AC: a tampered payload in the same scenario -> 401.
+    test_deps.py already proves this against a fake dependency chain; this
+    repeats it against the real app/DB to guarantee the wiring in main.py
+    doesn't accept it some other way.
+    """
+    tampered = dict(
+        parse_qsl(build_init_data(get_settings().bot_token, smoke_fixtures["user_a"].tg_id))
+    )
+    tampered["user"] = json.dumps({"id": smoke_fixtures["user_a"].tg_id + 1})
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as http_client:
+            response = await http_client.get(
+                "/users/me", headers={"X-Telegram-Init-Data": urlencode(tampered)}
+            )
+
+    assert response.status_code == 401

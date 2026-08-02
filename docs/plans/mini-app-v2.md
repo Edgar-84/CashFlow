@@ -257,7 +257,7 @@ receives notifications.
 
 ### M3 — Smoke
 
-- [ ] **U3.1 e2e smoke through `initData` (@integration)** — a signed payload
+- [x] **U3.1 e2e smoke through `initData` (@integration)** — a signed payload
       built with the test bot token traverses the real app: authenticate →
       `GET /users/me` → `POST /expenses` → the expense appears in a paginated
       `GET /expenses` → `GET /statistics/by-category?months_back=0` includes it.
@@ -1329,14 +1329,41 @@ tg_id seeded via `docs/seed.sql`).
   run: a live browser/Telegram smoke test — **CP5 (after U2.5) is now
   unblocked but still open**, same gap every M2 unit's STATE has left;
   CP1-CP4 remain open too (per U2.1-U2.4's STATE).
-- Next: a single combined live-test pass covering **CP1-CP5** (open the Mini
-  App from the bot's menu button; donut for the month; record an expense and
-  confirm it appears in the bot's `/expenses`; edit/delete/undo; switch
-  Statistics periods and confirm the month boundary agrees with the bot's
-  "this month") — every M2 screen unit has left this open and each reuses
-  the same running app, so one pass now covers all five. Then
-  `/unit U3.1 docs/plans/mini-app-v2.md` (e2e smoke through `initData`,
-  `@integration`) — the last unit in the plan.
+- Done: **U3.1** — e2e smoke through `initData` (`@integration`), the last
+  unit in the plan. Two tests added to `tests/test_e2e_smoke.py` (which
+  already existed from MVP U5.1 / family-features-v1_1 U3.1 — an unrelated,
+  same-numbered unit in a different plan file; docstrings in the test file
+  disambiguate), reusing its `smoke_fixtures`: a happy path
+  (`test_init_data_auth_round_trips_through_expenses_and_statistics`) —
+  a signed `X-Telegram-Init-Data` header, no `X-Internal-Token` at all, drives
+  the real app/DB through `GET /users/me` → `POST /expenses` → the expense
+  in a paginated `GET /expenses` → `GET /statistics/by-category?months_back=0`
+  includes its total — and a tamper AC
+  (`test_init_data_tampered_payload_against_real_app_is_401`), repeating
+  `test_deps.py`'s fake-dependency-chain tamper test against the real
+  app/DB instead. The posted amount (150) stays far under
+  `smoke_fixtures`' budget threshold (10_000 @ 80%) so no notification
+  fires — deliberate, to keep this unit's scope to auth + the read-your-
+  write path rather than re-covering fan-out (already U3.1-of-the-other-plan's
+  job). No `BackendClient` used here (that's the bot's client, not the Mini
+  App's); raw `httpx.AsyncClient` calls against `ASGITransport(app=app)`
+  instead, same shape `test_deps.py` already uses for the hermetic version
+  of this same check. No new decision — implements the Contracts' `initData`
+  auth path exactly as U0.1 already built it. `tests/README.md` updated in
+  the same commit per `tests/CLAUDE.md`.
+  Verification: `bash scripts/integration_docker.sh -k init_data` green (2
+  passed); full `bash scripts/verify.sh` green (Python 536 passed, unit-only
+  as always — integration stays excluded from the default gate per the AC;
+  webapp unaffected, no webapp files touched this unit).
+- Next: **nothing left in this plan's Units list.** The one open item is the
+  combined live-test pass covering **CP1-CP5** (open the Mini App from the
+  bot's menu button; donut for the month; record an expense and confirm it
+  appears in the bot's `/expenses`; edit/delete/undo; switch Statistics
+  periods and confirm the month boundary agrees with the bot's "this
+  month") — every M2 screen unit left this open and U3.1 doesn't close it
+  (it's an automated DB-level smoke, not a live Telegram session, same gap
+  MVP U5.1/family-features-v1_1 U3.1 left for their own scope). Do that pass,
+  then this plan is done.
 - Gotchas:
   - **`webapp/index.html` was missing the Telegram Mini Apps SDK script**
     (`https://telegram.org/js/telegram-web-app.js`) from U1.3 through U2.1 —

@@ -854,15 +854,20 @@ in this period." without calling the formatter at all.
 
 ---
 
-## E2e smoke (`test_e2e_smoke.py`) — U5.1 + U3.1, `@pytest.mark.integration`, excluded from default `verify.sh`
-Real FastAPI app on a real Postgres pool (`main.lifespan`) driven through
-`bot.client.BackendClient` — no fakes for expenses/budgets/DB. Only the
-outbound Telegram call inside `NotificationService` is swapped for a
-`httpx.MockTransport` (same pattern as `test_notification_service.py`), so
-the test needs neither a live bot token nor network access.
+## E2e smoke (`test_e2e_smoke.py`) — MVP U5.1 + family-features-v1_1 U3.1 + mini-app-v2 U3.1, `@pytest.mark.integration`, excluded from default `verify.sh`
+Real FastAPI app on a real Postgres pool (`main.lifespan`). The first three
+tests drive it through `bot.client.BackendClient` (no fakes for expenses/
+budgets/DB); the outbound Telegram call inside `NotificationService` is
+swapped for a `httpx.MockTransport` (same pattern as
+`test_notification_service.py`), so those tests need neither a live bot
+token nor network access. The last two drive the same real app/DB through a
+signed `X-Telegram-Init-Data` header instead (mini-app-v2's auth path,
+`test_deps.py::build_init_data`), no `BackendClient` involved.
 
 | Test | Checks |
 |---|---|
-| `test_add_expense_appears_in_list_and_fires_budget_notification_for_every_member` | Bot client creates an expense against the real API/DB, the expense appears in `list_expenses`, and crossing the budget's `notify_threshold` fires a Telegram notification to EVERY account member, not just the one who added the expense (U5.1 AC + U3.1 fan-out AC, plan D104) |
-| `test_statistics_by_period_with_explicit_bounds_matches_seeded_sum` | `statistics_by_period(start, end)` with an explicit window actually filters by it — total matches the sum of two backdated expenses seeded inside the window, ignoring any "now" expense outside it (U3.1 AC) |
-| `test_create_expense_with_foreign_account_category_is_404` | Creating an expense with another account's `category_id` raises `httpx.HTTPStatusError` with status 404, never leaking cross-account data (U3.1 AC, plan D105) |
+| `test_add_expense_appears_in_list_and_fires_budget_notification_for_every_member` | Bot client creates an expense against the real API/DB, the expense appears in `list_expenses`, and crossing the budget's `notify_threshold` fires a Telegram notification to EVERY account member, not just the one who added the expense (U5.1 AC + family-features-v1_1 U3.1 fan-out AC, plan D104) |
+| `test_statistics_by_period_with_explicit_bounds_matches_seeded_sum` | `statistics_by_period(start, end)` with an explicit window actually filters by it — total matches the sum of two backdated expenses seeded inside the window, ignoring any "now" expense outside it (family-features-v1_1 U3.1 AC) |
+| `test_create_expense_with_foreign_account_category_is_404` | Creating an expense with another account's `category_id` raises `httpx.HTTPStatusError` with status 404, never leaking cross-account data (family-features-v1_1 U3.1 AC, plan D105) |
+| `test_init_data_auth_round_trips_through_expenses_and_statistics` | A signed `X-Telegram-Init-Data` payload (no `X-Internal-Token`) authenticates `GET /users/me`, `POST /expenses`, the created expense appears in a paginated `GET /expenses`, and `GET /statistics/by-category?months_back=0` includes its total — against the real app/DB (mini-app-v2 U3.1 AC) |
+| `test_init_data_tampered_payload_against_real_app_is_401` | A tampered `X-Telegram-Init-Data` payload (`user` field changed post-signing) → 401 against the real app/DB, not just `test_deps.py`'s fake dependency chain (mini-app-v2 U3.1 AC) |
