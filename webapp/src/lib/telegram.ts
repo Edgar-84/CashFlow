@@ -28,6 +28,7 @@ export interface TelegramWebApp {
     notificationOccurred(type: "error" | "success" | "warning"): void;
     selectionChanged(): void;
   };
+  showConfirm(message: string, callback: (confirmed: boolean) => void): void;
 }
 
 declare global {
@@ -59,6 +60,8 @@ export function expand(): void {
   getWebApp()?.expand();
 }
 
+let currentMainButtonHandler: (() => void) | null = null;
+
 export const mainButton = {
   show(label: string): void {
     const webApp = getWebApp();
@@ -81,6 +84,29 @@ export const mainButton = {
     } else {
       webApp.MainButton.disable();
     }
+  },
+  /** Wires `handler` as MainButton's click handler, unwiring whatever
+   * handler a previous screen left in place first — same
+   * wire-then-unwire-before-rewire shape as `setBackButtonHandler`, so
+   * switching screens never stacks handlers from the screen before. */
+  onClick(handler: () => void): void {
+    const webApp = getWebApp();
+    if (!webApp) {
+      return;
+    }
+    if (currentMainButtonHandler) {
+      webApp.MainButton.offClick(currentMainButtonHandler);
+    }
+    currentMainButtonHandler = handler;
+    webApp.MainButton.onClick(handler);
+  },
+  offClick(): void {
+    const webApp = getWebApp();
+    if (!webApp || !currentMainButtonHandler) {
+      return;
+    }
+    webApp.MainButton.offClick(currentMainButtonHandler);
+    currentMainButtonHandler = null;
   },
 };
 
@@ -105,6 +131,21 @@ export function setBackButtonHandler(handler: (() => void) | null): void {
   } else {
     webApp.BackButton.hide();
   }
+}
+
+/** Wraps Telegram's own confirm popup — never a custom modal, per
+ * webapp/CLAUDE.md. Falls back to the browser's native `confirm()` outside
+ * Telegram (e.g. `pnpm dev` in a plain tab), or resolves `true` when neither
+ * is available, so an add-expense-style discard flow never gets stuck. */
+export function confirmDiscard(message: string): Promise<boolean> {
+  const webApp = getWebApp();
+  if (webApp) {
+    return new Promise((resolve) => webApp.showConfirm(message, resolve));
+  }
+  if (typeof window !== "undefined" && typeof window.confirm === "function") {
+    return Promise.resolve(window.confirm(message));
+  }
+  return Promise.resolve(true);
 }
 
 export const haptics = {

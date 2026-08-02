@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyTheme,
+  confirmDiscard,
   expand,
   getInitData,
   haptics,
@@ -37,6 +38,7 @@ function fakeWebApp(overrides: Partial<TelegramWebApp> = {}): TelegramWebApp {
       notificationOccurred: vi.fn(),
       selectionChanged: vi.fn(),
     },
+    showConfirm: vi.fn(),
     ...overrides,
   };
 }
@@ -111,6 +113,44 @@ describe("mainButton", () => {
     mainButton.setEnabled(false);
     expect(webApp.MainButton.disable).toHaveBeenCalledOnce();
   });
+
+  it("onClick() wires a handler, unwires it before wiring the next screen's, then offClick() unwires", async () => {
+    vi.resetModules();
+    const { mainButton: mb } = await import("../src/lib/telegram");
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+
+    const screenOneHandler = vi.fn();
+    mb.onClick(screenOneHandler);
+    expect(webApp.MainButton.onClick).toHaveBeenCalledWith(screenOneHandler);
+    expect(webApp.MainButton.offClick).not.toHaveBeenCalled();
+
+    const screenTwoHandler = vi.fn();
+    mb.onClick(screenTwoHandler);
+    expect(webApp.MainButton.offClick).toHaveBeenCalledWith(screenOneHandler);
+    expect(webApp.MainButton.onClick).toHaveBeenCalledWith(screenTwoHandler);
+
+    mb.offClick();
+    expect(webApp.MainButton.offClick).toHaveBeenCalledWith(screenTwoHandler);
+  });
+});
+
+describe("confirmDiscard", () => {
+  it("resolves via Telegram's showConfirm when available", async () => {
+    const webApp = fakeWebApp({
+      showConfirm: vi.fn((_message: string, callback: (confirmed: boolean) => void) => {
+        callback(true);
+      }),
+    });
+    installWebApp(webApp);
+
+    await expect(confirmDiscard("Discard this expense?")).resolves.toBe(true);
+    expect(webApp.showConfirm).toHaveBeenCalledWith("Discard this expense?", expect.any(Function));
+  });
+
+  it("resolves true without Telegram or a browser confirm (never gets stuck)", async () => {
+    await expect(confirmDiscard("Discard?")).resolves.toBe(true);
+  });
 });
 
 describe("setBackButtonHandler", () => {
@@ -162,6 +202,8 @@ describe("without a Telegram object", () => {
     expect(() => mainButton.show("Save")).not.toThrow();
     expect(() => mainButton.hide()).not.toThrow();
     expect(() => mainButton.setEnabled(true)).not.toThrow();
+    expect(() => mainButton.onClick(() => {})).not.toThrow();
+    expect(() => mainButton.offClick()).not.toThrow();
     expect(() => setBackButtonHandler(() => {})).not.toThrow();
     expect(() => setBackButtonHandler(null)).not.toThrow();
     expect(() => haptics.impact()).not.toThrow();

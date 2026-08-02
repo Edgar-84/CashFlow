@@ -273,6 +273,7 @@ function fakeWebApp(overrides: Partial<TelegramWebApp> = {}): TelegramWebApp {
       notificationOccurred: vi.fn(),
       selectionChanged: vi.fn(),
     },
+    showConfirm: vi.fn(),
     ...overrides,
   };
 }
@@ -324,6 +325,25 @@ describe("applyHomeChrome", () => {
     applyHomeChrome({ status: "loading" });
 
     expect(webApp.MainButton.hide).toHaveBeenCalledOnce();
+  });
+
+  it("wires the MainButton tap to the provided onAddExpense handler (U2.2)", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const onAddExpense = vi.fn();
+
+    applyHomeChrome({ status: "empty", tiles: HOME_TILES }, onAddExpense);
+
+    expect(webApp.MainButton.onClick).toHaveBeenCalledWith(onAddExpense);
+  });
+
+  it("does not wire an onClick handler when none is provided", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+
+    applyHomeChrome({ status: "empty", tiles: HOME_TILES });
+
+    expect(webApp.MainButton.onClick).not.toHaveBeenCalled();
   });
 });
 

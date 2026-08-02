@@ -250,9 +250,10 @@ export function segmentTapTarget(
 /** Telegram chrome for Home: MainButton = Add expense (hidden while loading
  * or for a read-only/forbidden viewer — root CLAUDE.md's PermissionChecker
  * denies the write, so the button must not promise one); BackButton hidden,
- * this is the root screen. No `onClick` wiring yet — Add-expense doesn't
- * exist until U2.2, so there's nothing to navigate to. */
-export function applyHomeChrome(state: HomeState): void {
+ * this is the root screen. `onAddExpense` wires the MainButton tap to
+ * navigation (U2.2) — optional so callers/tests that don't care about
+ * navigation can omit it without wiring a handler. */
+export function applyHomeChrome(state: HomeState, onAddExpense?: () => void): void {
   setBackButtonHandler(null);
   if (state.status === "loading" || state.status === "forbidden") {
     mainButton.hide();
@@ -260,6 +261,9 @@ export function applyHomeChrome(state: HomeState): void {
   }
   mainButton.show("Add expense");
   mainButton.setEnabled(true);
+  if (onAddExpense) {
+    mainButton.onClick(onAddExpense);
+  }
 }
 
 // -- presentation --------------------------------------------------------
