@@ -235,7 +235,7 @@ receives notifications.
       without duplicating; end-of-list marker; empty-per-filter message names
       the filter; `own_only` response renders without an error state; loading
       skeleton rows.
-- [ ] **U2.3b Screen 03b — Expense detail, edit, delete** (split from U2.3,
+- [x] **U2.3b Screen 03b — Expense detail, edit, delete** (split from U2.3,
       same rationale as MVP D43 / V1.1 U2.1b).
       AC: detail shows category, author, tags, comment; edit round-trips one
       field at a time; delete shows a 5s undo **before** the API call and the
@@ -475,6 +475,27 @@ tg_id seeded via `docs/seed.sql`).
   (would have made a frontend-only unit touch a reviewed backend contract
   again, so soon after D211, for a cosmetic gap with an already-documented,
   reversible workaround).
+
+- D216 (2026-08-02, U2.3b): Both delete's 5s-undo and edit's "one field at a
+  time" are scoped to the **detail screen itself**, not the list row the AC's
+  wording ("the row returns if it is used") most literally describes. Reasons:
+  (1) the plan's own flow diagram (§5) routes `E[Expenses] --> D[Expense
+  detail] --> DL[Delete + undo]`, i.e. delete hangs off detail, not the list;
+  (2) a real swipe-to-delete gesture on the list needs either a new runtime
+  dependency (webapp/CLAUDE.md's do-not-edit-without-asking lockfile gate) or
+  nontrivial custom touch handling neither the AC nor the design doc's states
+  spell out in enough detail to build untested. Implementation: tapping
+  Delete on the detail screen swaps its action buttons for an inline
+  "Expense deleted. Undo" banner; undo cancels with **no API call ever
+  made**; the 5s timeout (DOM/mount glue, `setTimeout`) then fires exactly
+  one `DELETE`; a failed delete flips back to the normal detail view with a
+  human message — "the row returns" in the sense that the expense was never
+  actually removed from the account. Edit similarly mirrors the bot's
+  `/editexpense` field-picker (Amount/Category/Comment/Tags) rather than one
+  combined form — each field commits with its own immediate `PATCH`
+  (category/tag chip taps commit on tap; amount/comment need an explicit
+  Save), satisfying the AC's "round-trips one field at a time" literally: one
+  request per edited field, independent of the others.
 
 ## STATE (handoff)
 - Done: **U0.1** — `validate_init_data` (`api/deps.py`) verifies the Telegram
@@ -1028,11 +1049,81 @@ tg_id seeded via `docs/seed.sql`).
   real/forged `initData`, same gap U2.1/U2.2 left open) — CP3 (after U2.2)
   is still open, and CP4 (after U2.3b) covers this screen's own live check
   once detail/edit/delete land.
+- Done: **U2.3b** (D216) — Screen 03b (Expense detail, edit, delete). No
+  backend/Contract change: `GET/PATCH/DELETE /expenses/{id}` and their
+  `ApiClient` methods (`getExpense`/`updateExpense`/`deleteExpense`) already
+  existed from earlier units — this is a frontend-only unit.
+  New `screens/expense-detail.ts`, same three-layer split as the other
+  screens:
+  - **data**: `buildDetailData` (pure) turns an `ExpenseResponse` +
+    categories/tags into the screen's shape (category label/colour via the
+    same `assignCategoryColors`/`categorySlotCssVar` D206 rule as
+    `expenses.ts`, day label via `lib/dates.ts::formatDay` on the **device**
+    tz — same accepted D215 gap, not a new decision). `loadDetail` fetches
+    `getMe`/`getExpense`/`listCategories`/`listTags` in parallel, never
+    throws (mirrors `loadHome`/`loadAddExpenseData`), with a `not-found`
+    branch a list screen doesn't need (a single record can 404 on its own).
+  - **controller**: `createDetailController` owns a field-picker edit mode
+    (`"closed" | "picker" | "amount" | "comment" | "category" | "tags"`),
+    per-field drafts, and the delete/undo state machine
+    (`requestDelete`/`cancelDelete`/`confirmDelete`, guarded against a
+    double-fire the same shape as `add-expense.ts`'s submit guard).
+  - **presentation**: `renderDetail`/`renderDetailView` (pure, string-content
+    assertions per state) and `mount` (thin DOM glue, the one part with no
+    meaningful unit test — same accepted gap as every other screen).
+  D216 (see Decision log): delete's 5s-undo and edit's one-field-at-a-time
+  round trips are both scoped to the **detail screen**, not a list-row
+  swipe/toast — tapping Delete swaps the action buttons for an inline
+  "Expense deleted. Undo" banner; the 5s wait itself is `setTimeout` in
+  `mount` (untested DOM glue, same category as the timer-free parts of every
+  other screen's mount); undo cancels with zero API calls; a failed delete
+  restores the normal detail view with a human message. Edit mirrors the
+  bot's `/editexpense` field-picker rather than one combined form — category/
+  tag chip taps commit immediately, amount/comment need an explicit Save,
+  each its own `PATCH`. Review fix (pre-commit): `#app` is a single root
+  shared by every screen (`main.ts`), so a delete timer or in-flight save
+  left running past a Back tap could resolve after a *different* screen was
+  already mounted there and stomp on it. `mount` now re-wires BackButton
+  itself for the ready state (clearing `deleteTimer` and flipping a local
+  `active` flag before calling `handlers.onBack`), and every async
+  callback that touches `root` (`rerender`, the delete timer's `.then`)
+  checks `active` first. Not unit-tested — `vitest.config.ts` runs the
+  `node` environment (no DOM), so `mount` stays the one accepted
+  no-meaningful-unit-test layer every screen already has; adding `jsdom`
+  to close that gap would be a config change outside this unit's scope.
+  `main.ts` gained `showExpenseDetail(id, onBack)`, wired to the list's
+  previously no-op `onRowTap`; `onBack` is the calling `showExpenses`'s own
+  closure, so returning from detail preserves whatever category filter was
+  in force. `applyDetailChrome`: no MainButton (same choice as
+  `expenses.ts` — actions are in-content buttons), BackButton -> `onBack`.
+  `styles/app.css` gained the detail-card/actions/field-picker/edit/undo
+  styles (`.detail-*`), extending the existing file per its own doc comment.
+  Tests: `webapp/tests/expense-detail.test.ts` (29 cases) —
+  `buildDetailData` (happy path, stale/deleted category fallback),
+  `loadDetail` (ready/forbidden/not-found/error), `createDetailController`
+  (each field's independent PATCH and drafted-value round trip, invalid
+  amount blocked client-side with no API call, a failed save keeping the
+  edit open with the human message, `cancelEdit` discarding with no API
+  call; delete's full state machine — request/cancel/confirm, blocked
+  without a pending delete, a failed delete clearing `pendingDelete` with the
+  right 403/404/unmapped-`ApiError` message), `renderDetail`/
+  `renderDetailView` (all five load states, field picker, category chips
+  marking the active pick, the undo banner replacing the action buttons),
+  `applyDetailChrome` (MainButton hidden, BackButton wired — same
+  `fakeWebApp()` pattern as every other chrome test).
+  Verification: `bash scripts/verify.sh` green end to end (Python 536
+  passed, unaffected; webapp vitest 176 across 11 files, up from 147/10;
+  typecheck/lint/build/secret-grep clean; build 34.01 KB JS + 8.82 KB CSS
+  raw / 9.71 KB + 2.14 KB gzipped, still well under the 150 KB budget). Not
+  run: a live browser/Telegram smoke test — **CP4 (after U2.3b) is now
+  unblocked but still open**, same gap every prior M2 unit's STATE has left
+  (CP1-CP3 are also still open, per U2.1/U2.2/U2.3's STATE).
 - Next: **CP3 — after U2.2**: human records an expense in the app and
   confirms it appears in the bot's `/expenses` — the payoff this whole plan
   is for (still open, per U2.1/U2.2's STATE — the SDK-script fix landed
-  after both units shipped). Then `/unit U2.3b docs/plans/mini-app-v2.md`
-  (Screen 03b — Expense detail, edit, delete).
+  after both units shipped), then **CP4 — after U2.3b**: edit and delete from
+  the app, undo a delete (now unblocked). Then `/unit U2.4
+  docs/plans/mini-app-v2.md` (Screen 04 — Budgets).
 - Gotchas:
   - **`webapp/index.html` was missing the Telegram Mini Apps SDK script**
     (`https://telegram.org/js/telegram-web-app.js`) from U1.3 through U2.1 —

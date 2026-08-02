@@ -472,6 +472,153 @@ body {
   box-shadow: inset 0 0 0 1px var(--separator);
 }
 
+/* -- expense detail (U2.3b) ---------------------------------------------- */
+
+.detail-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-category {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.detail-amount {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+.detail-comment,
+.detail-tags {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.detail-author {
+  font-weight: 600;
+}
+
+.detail-actions,
+.detail-field-picker,
+.detail-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-actions button,
+.detail-field-picker button,
+.detail-edit-actions button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 0;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.detail-actions button[data-action="delete"],
+.detail-actions button.danger {
+  background: var(--card);
+  color: var(--status-red);
+}
+
+.detail-actions button[data-action="open-picker"],
+.detail-edit-actions button[data-action="save-amount"],
+.detail-edit-actions button[data-action="save-comment"],
+.detail-edit-actions button[data-action="save-tags"] {
+  background: var(--ink);
+  color: var(--app-background);
+}
+
+.detail-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detail-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--card);
+  border-radius: 14px;
+}
+
+.detail-undo p {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.detail-undo button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.detail-not-found p,
+.detail-readonly p,
+.detail-error p {
+  margin: 4px 4px 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.detail-error button[data-action="retry"] {
+  align-self: flex-start;
+  font: inherit;
+  font-weight: 600;
+  background: var(--ink);
+  color: var(--app-background);
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin: 4px 4px 0;
+  cursor: pointer;
+}
+
+.detail-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */
