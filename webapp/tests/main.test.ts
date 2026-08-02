@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { placeholderText } from "../src/main";
+import { boot } from "../src/main";
 
-describe("placeholderText", () => {
-  it("returns the placeholder shell text", () => {
-    expect(placeholderText()).toBe("CashFlow");
+describe("boot", () => {
+  it("resolves without throwing when no DOM is present (vitest's node environment)", async () => {
+    await expect(boot()).resolves.toBeUndefined();
   });
 });
