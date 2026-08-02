@@ -7,6 +7,12 @@ import {
   type AddExpenseHandlers,
 } from "./screens/add-expense";
 import {
+  applyDetailChrome,
+  loadDetail,
+  mount as mountExpenseDetail,
+  type DetailHandlers,
+} from "./screens/expense-detail";
+import {
   applyExpensesChrome,
   createExpensesController,
   createMemoryCache as createExpensesCache,
@@ -22,6 +28,7 @@ import {
   mount as mountHome,
   type HomeHandlers,
 } from "./screens/home";
+import type { Uuid } from "./api/types";
 
 const homeCache = createHomeCache();
 const addExpenseCache = createAddExpenseCache();
@@ -113,8 +120,8 @@ async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
     onLoadMore: () => {
       void controller.loadMore().then(render);
     },
-    onRowTap: () => {
-      // Expense detail/edit/delete lands in U2.3b.
+    onRowTap: (id) => {
+      void showExpenseDetail(id, () => void showExpenses(filter));
     },
   };
 
@@ -129,6 +136,31 @@ async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
   render({ status: "loading" });
   const state = await controller.load();
   render(state);
+}
+
+/** Mounts Expense detail (U2.3b, screen 03b), reached by tapping a row on
+ * Expenses. `onBack` returns to the Expenses list this row was tapped from,
+ * preserving whatever filter was in force — captured by `showExpenses`'s
+ * `onRowTap` closure above, same shape as `showAddExpense`'s `onClose`. */
+async function showExpenseDetail(id: Uuid, onBack: () => void): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+
+  const handlers: DetailHandlers = {
+    onRetry: () => {
+      void showExpenseDetail(id, onBack);
+    },
+    onBack,
+    onDeleted: onBack,
+  };
+
+  applyDetailChrome(onBack);
+  mountExpenseDetail(root, { status: "loading" }, client, handlers);
+  const state = await loadDetail(client, id);
+  applyDetailChrome(onBack);
+  mountExpenseDetail(root, state, client, handlers);
 }
 
 /** Boots the app onto `#app`. Guarded the same way every DOM-touching export
