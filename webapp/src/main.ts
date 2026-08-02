@@ -35,12 +35,21 @@ import {
   mount as mountHome,
   type HomeHandlers,
 } from "./screens/home";
+import {
+  applyStatisticsChrome,
+  createMemoryCache as createStatisticsCache,
+  loadStatistics,
+  mount as mountStatistics,
+  type Grouping,
+  type StatisticsHandlers,
+} from "./screens/statistics";
 import type { Uuid } from "./api/types";
 
 const homeCache = createHomeCache();
 const addExpenseCache = createAddExpenseCache();
 const expensesCache = createExpensesCache();
 const budgetsCache = createBudgetsCache();
+const statisticsCache = createStatisticsCache();
 const client = new ApiClient({ getInitData });
 
 function getRoot(): HTMLElement | null {
@@ -71,9 +80,11 @@ async function showHome(): Promise<void> {
         void showExpenses();
       } else if (tile === "budgets") {
         void showBudgets();
+      } else if (tile === "statistics") {
+        void showStatistics();
       }
-      // Statistics/Categories/Tags land in later units (U2.5, M3) — tiles
-      // stay reachable but are no-ops until then.
+      // Categories/Tags land in a later milestone (M3) — tiles stay
+      // reachable but are no-ops until then.
     },
     onSegmentTap: (target) => {
       void showExpenses(target.categoryId ? { categoryId: target.categoryId } : {});
@@ -195,6 +206,42 @@ async function showBudgets(): Promise<void> {
   const state = await loadBudgets(client, budgetsCache);
   applyBudgetsChrome(state, handlers.onBack);
   mountBudgets(root, state, client, handlers);
+}
+
+/** Mounts Statistics (U2.5, screen 05), reached from Home's "Statistics"
+ * tile. `monthsBack`/`grouping` are carried in the closure across preset
+ * taps and retries, same shape as `showExpenses`'s `filter` closure — a
+ * preset tap re-fetches (`loadStatistics`), a grouping toggle does not (that
+ * re-render happens entirely inside `screens/statistics.ts::mount`). A
+ * category-bar tap drills into Expenses filtered to that category (design
+ * doc §5's `S -->|bar tap| EF`), reusing the same `showExpenses` Home's
+ * donut-segment tap already routes through. */
+async function showStatistics(monthsBack = 0, grouping: Grouping = "category"): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+
+  const handlers: StatisticsHandlers = {
+    onRetry: () => {
+      void showStatistics(monthsBack, grouping);
+    },
+    onBack: () => {
+      void showHome();
+    },
+    onPresetChange: (nextMonthsBack) => {
+      void showStatistics(nextMonthsBack, grouping);
+    },
+    onBarTap: (categoryId) => {
+      void showExpenses({ categoryId });
+    },
+  };
+
+  applyStatisticsChrome(handlers.onBack);
+  mountStatistics(root, { status: "loading", monthsBack, grouping }, handlers);
+  const state = await loadStatistics(client, statisticsCache, monthsBack, grouping);
+  applyStatisticsChrome(handlers.onBack);
+  mountStatistics(root, state, handlers);
 }
 
 /** Boots the app onto `#app`. Guarded the same way every DOM-touching export

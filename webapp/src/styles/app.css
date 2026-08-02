@@ -809,6 +809,102 @@ body {
   cursor: pointer;
 }
 
+/* -- statistics (U2.5) ---------------------------------------------------- */
+
+.statistics-ready,
+.statistics-skeleton,
+.statistics-error,
+.statistics-empty,
+.statistics-readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.stats-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 13px;
+  border-bottom: 1px solid var(--separator);
+  cursor: pointer;
+}
+
+.stats-bar-row:last-child {
+  border-bottom: 0;
+}
+
+.stats-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stats-bar-head .nm {
+  font-size: 13.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-bar-head .val {
+  margin-left: auto;
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--separator);
+}
+
+.stats-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ink-secondary);
+}
+
+.stats-bars-empty {
+  margin: 4px 4px 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+/* ~= one real .stats-bar-row's rendered height (12px padding top/bottom +
+   ~17px head line + 6px gap + 8px track), so the ready state's bar list
+   doesn't reflow once the skeleton rows are replaced. */
+.stats-bar-skeleton {
+  height: 55px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--separator);
+}
+
+.statistics-empty p,
+.statistics-error p,
+.statistics-readonly p {
+  margin: 4px 4px 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.statistics-error button[data-action="retry"] {
+  align-self: flex-start;
+  font: inherit;
+  font-weight: 600;
+  background: var(--ink);
+  color: var(--app-background);
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin: 0 4px;
+  cursor: pointer;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */
@@ -818,7 +914,8 @@ body {
   .field-skeleton,
   .chips-skeleton,
   .exp-day-skeleton,
-  .budget-row-skeleton {
+  .budget-row-skeleton,
+  .stats-bar-skeleton {
     animation: skeleton-pulse 1.4s ease-in-out infinite;
   }
 }
