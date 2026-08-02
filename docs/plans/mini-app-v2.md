@@ -247,7 +247,7 @@ receives notifications.
       flag with icon **and** text (not colour alone); no-budgets empty state;
       unbudgeted categories listed with the contextual MainButton; 409 duplicate
       plan and 403 → human messages.
-- [ ] **U2.5 Screen 05 — Statistics** — period presets via `months_back`
+- [x] **U2.5 Screen 05 — Statistics** — period presets via `months_back`
       (U0.4), donut + ranked bars, category/tag grouping toggle.
       AC: each preset sends the right `months_back` and nothing else; grouping
       toggle re-renders without refetching the period; bars sorted descending
@@ -1239,14 +1239,104 @@ tg_id seeded via `docs/seed.sql`).
   run: a live browser/Telegram smoke test — no live-test checkpoint is
   defined for this screen specifically (the plan's checkpoints stop at
   CP5/U2.5); CP1-CP4 remain open per every prior M2 unit's STATE.
-- Next: **CP3 — after U2.2**: human records an expense in the app and
-  confirms it appears in the bot's `/expenses` — the payoff this whole plan
-  is for (still open, per U2.1/U2.2's STATE — the SDK-script fix landed
-  after both units shipped), then **CP4 — after U2.3b**: edit and delete from
-  the app, undo a delete (now unblocked). CP1-CP4 are all still open — worth
-  a single combined live pass rather than four separate ones, since each
-  reuses the same running app. Then `/unit U2.5 docs/plans/mini-app-v2.md`
-  (Screen 05 — Statistics).
+- Done: **U2.5** — Screen 05 (Statistics): "Home's donut plus ranked bars
+  underneath" (design doc §4), period presets via `months_back` (U0.4),
+  category/tag grouping toggle. No backend/Contract change —
+  `GET /statistics/by-period|by-category|by-tag` (with `months_back`) and
+  their `ApiClient` methods already existed from U0.4/U1.4; frontend-only,
+  same as U2.3b/U2.4.
+  New `screens/statistics.ts`, same three-layer split as every other screen:
+  - **data**: `buildStatisticsData` (pure) builds a category donut exactly
+    like `home.ts::buildHomeData` (same `donutSegments`/
+    `assignCategoryColors`/D206 slot rule, reused directly rather than
+    factored into a shared helper — the ~15 lines of donut-building glue
+    stays screen-local, same as every prior screen that touches the donut)
+    plus two ranked-bar arrays (`categoryBars`/`tagBars`) via a new
+    `rankedBars` helper: positive-total rows only, sorted descending, width
+    **relative to the leader** (`widthPct: 100` for the top row), not to the
+    period total — a ranked-bar chart, not a share-of-total chart like the
+    donut (AC: "leader at full width"). Tag rows get `colorVar: null` — there
+    is no `categories.color`-style slot contract for tags (D206 is
+    category-only), so the donut always reflects the category breakdown
+    regardless of which grouping is active; only the ranked-bar list switches.
+    `loadStatistics` fetches `GET /users/me`, `/categories`, `/tags`, and all
+    three statistics endpoints in one `Promise.all` for a given
+    `months_back` — **both groupings' totals are always fetched together**,
+    so the grouping toggle (AC: "re-renders without refetching the period")
+    never needs a second network call. Never-throws/cache-fallback contract
+    identical to every other screen's loader; `empty` is a top-level status
+    (period total `=== 0`, mirrors `home.ts`), not a `ready` sub-case, since
+    there's nothing to rank.
+  - **presentation**: `renderStatistics`/`renderReady` (pure, string-content
+    assertions per state) and `mount` (thin DOM glue, the one part with no
+    meaningful unit test — same accepted gap as every other screen). The
+    ranked-bar list **is** this screen's legend — a fuller one than Home's
+    top-three — so `renderBars` reuses Home's exact "hidden for <=1 row" rule
+    (AC: "single category renders without a legend") rather than adding a
+    second, separate legend component. A grouping with fetched-but-all-zero
+    totals (e.g. no tagged expenses this period while the category total is
+    non-zero) gets its own "No tagged/categorised expenses" note instead of
+    silently rendering nothing. Loading skeleton uses fixed-height
+    `.stats-bar-skeleton` placeholders (no `.stats-bar-fill`, i.e. genuinely
+    zero-width per the AC) sized to match a real `.stats-bar-row`'s rendered
+    height so the ready state doesn't reflow. `mount`'s grouping-toggle click
+    handler re-renders locally (`render({ ...current, grouping: next })`)
+    with **no handler call and no API call** — the concrete mechanism behind
+    the "no refetch" AC line, verified indirectly by a `loadStatistics` test
+    asserting each statistics-by-grouping method is called exactly once
+    regardless of which grouping was requested.
+  - Category-bar tap drills into Expenses filtered to that category (design
+    doc §5's `S -->|bar tap| EF`), wired in `main.ts::showStatistics` through
+    the same `showExpenses({categoryId})` Home's donut-segment tap already
+    uses. **Tag-bar tap is a no-op** — `GET /expenses` has no tag filter
+    (U2.3's own documented scope, `ExpensesFilter` is category-only) — same
+    "tappable but no target screen/contract yet" precedent U2.1 set for its
+    own tiles; not a new decision.
+  - Preset labels ("This month"/"Last month"/"Last 3 months") mirror
+    `bot/keyboards.py`'s statistics period buttons exactly, same
+    mirror-the-bot's-copy convention as `lib/money.ts`'s parser.
+  `main.ts` gained `showStatistics(monthsBack, grouping)`, wired to Home's
+  previously no-op "Statistics" tile; `monthsBack`/`grouping` are carried in
+  the closure across preset taps and retries, same shape as `showExpenses`'s
+  `filter` closure. `styles/app.css` gained the ranked-bar-row/skeleton/
+  empty-note styles (`.stats-bar-*`, `.statistics-*`); the preset and
+  grouping-toggle chips reuse the existing `.chip`/`.chip-row`/
+  `.chips-skeleton` classes from `add-expense.ts` as-is, no new CSS needed
+  for those.
+  No new decision — every choice here fills a Contracts/design-doc gap (bar
+  width basis, tag colour, skeleton sizing, preset copy) without contradicting
+  a locked decision, same "no new decision" precedent as U1.2/U1.3/U2.1/U2.3b.
+  Tests: `webapp/tests/statistics.test.ts` (25 cases) — `buildStatisticsData`
+  (descending sort + leader-at-100 width for both groupings incl. a
+  floating-point-safe `toBeCloseTo` on the non-leader row, zero-total rows
+  dropped, stale-id fallback for both category and tag, donut built from
+  category totals only and unaffected by `grouping`), `loadStatistics`
+  (ready; the exact `{months_back: X}` param on all three endpoints for
+  every preset in `PERIOD_PRESETS`; both groupings fetched exactly once;
+  empty/forbidden/offline-from-cache/error mirroring every other screen's
+  loader suite shape), `renderStatistics` (loading skeleton has no
+  `.stats-bar-fill`, active preset chip, printed values + leader/non-leader
+  bar widths, tag-grouping content swap, single-category hides the bar list
+  entirely, grouping-specific empty note, empty-period state keeps presets/
+  toggle reachable, retry affordance with no raw status code, offline banner
+  with the sync marker), `applyStatisticsChrome` (BackButton wired,
+  MainButton always hidden — same `fakeWebApp()` pattern every chrome test
+  in this repo uses).
+  Verification: `bash scripts/verify.sh` green end to end (Python 536
+  passed, unaffected; webapp vitest 248 across 13 files, up from 224/12;
+  typecheck/lint/build/secret-grep clean; build 51.57 KB JS + 12.64 KB CSS
+  raw / 13.38 KB + 2.59 KB gzipped, still well under the 150 KB budget). Not
+  run: a live browser/Telegram smoke test — **CP5 (after U2.5) is now
+  unblocked but still open**, same gap every M2 unit's STATE has left;
+  CP1-CP4 remain open too (per U2.1-U2.4's STATE).
+- Next: a single combined live-test pass covering **CP1-CP5** (open the Mini
+  App from the bot's menu button; donut for the month; record an expense and
+  confirm it appears in the bot's `/expenses`; edit/delete/undo; switch
+  Statistics periods and confirm the month boundary agrees with the bot's
+  "this month") — every M2 screen unit has left this open and each reuses
+  the same running app, so one pass now covers all five. Then
+  `/unit U3.1 docs/plans/mini-app-v2.md` (e2e smoke through `initData`,
+  `@integration`) — the last unit in the plan.
 - Gotchas:
   - **`webapp/index.html` was missing the Telegram Mini Apps SDK script**
     (`https://telegram.org/js/telegram-web-app.js`) from U1.3 through U2.1 —
