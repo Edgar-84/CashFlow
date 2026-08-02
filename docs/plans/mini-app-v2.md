@@ -229,7 +229,7 @@ receives notifications.
       403/404-on-stale-category/network-failure each show a human message with
       the draft preserved; BackButton on a dirty draft confirms before
       discarding; success → haptic + close + Home refetched.
-- [ ] **U2.3 Screen 03a — Expenses list** — grouped by day with per-day
+- [x] **U2.3 Screen 03a — Expenses list** — grouped by day with per-day
       subtotals, pagination.
       AC: day grouping and subtotals match seeded data; second page appends
       without duplicating; end-of-list marker; empty-per-filter message names
@@ -453,6 +453,28 @@ tg_id seeded via `docs/seed.sql`).
   first — bad ratio for what's a purely additive feature); env-var flag to
   enable the mount (two switches for what's one signal — is dist there or
   not — is worse than one).
+
+- D215 (2026-08-02, U2.3, HUMAN): Expenses-list day grouping uses the
+  **device** timezone, not `family_tz` — no Contract exposes `family_tz` to
+  the browser (`GET /users/me`'s `UserMeResponse` doesn't carry it, and no
+  other endpoint does either). Asked mid-unit: extend `UserMeResponse` with
+  `family_tz` (a small additive backend change, same shape as D211's
+  `currency` addition) vs. accept the device-tz gap now, documented, same
+  category as U1.2's non-locked `formatDay` string format. Human chose the
+  device-tz gap. Rationale accepted: day-grouping is list *presentation*
+  (which visual bucket a row's date badge falls under), not the
+  month-boundary *financial* math D120/webapp/CLAUDE.md's ironclad rule is
+  about (budgets, statistics, notification thresholds) — a family member in a
+  different tz seeing a near-midnight expense grouped under the "wrong" local
+  day is a much lower-stakes cosmetic mismatch than a miscalculated total.
+  `lib/dates.ts::formatDay` and the new `screens/expenses.ts::groupByDay` both
+  already take an explicit `tz` param for exactly this reason — fixing this
+  later means threading `family_tz` onto `UserMeResponse` and passing it at
+  `main.ts`'s call site, not touching `expenses.ts`'s grouping logic itself.
+  Rejected (for now): adding `family_tz` to `UserMeResponse` in this unit
+  (would have made a frontend-only unit touch a reviewed backend contract
+  again, so soon after D211, for a cosmetic gap with an already-documented,
+  reversible workaround).
 
 ## STATE (handoff)
 - Done: **U0.1** — `validate_init_data` (`api/deps.py`) verifies the Telegram
@@ -916,10 +938,101 @@ tg_id seeded via `docs/seed.sql`).
   `initData`, same gap U2.1 left open) — **CP3 is still open**, and per the
   still-open U2.1 gotcha below, CP1/CP2 should be re-run alongside it now
   that the SDK-script fix is in place.
+- Done: **U2.3** (D215) — Screen 03a (Expenses list): grouped by day with a
+  per-day subtotal, real pagination, optional category filter.
+  New `screens/expenses.ts`, same three-layer split as `home.ts`/
+  `add-expense.ts`:
+  - **data**: `buildExpensesData` (pure) turns an accumulated page of
+    `ExpenseResponse[]` + `CategoryResponse[]` into day groups —
+    `groupByDay(rows, tz)` buckets already-newest-first rows by calendar day
+    (via `Intl.DateTimeFormat("en-CA", {timeZone: tz, ...})` for a stable
+    sortable `dayKey`, `lib/dates.ts::formatDay` for the display label),
+    days come out in first-seen order (no re-sort needed, since the API's
+    `ORDER BY created_at DESC` already orders the input). The optional
+    category filter (`buildExpensesData`'s `categoryId`) is applied
+    client-side over whatever page(s) are already loaded — `GET /expenses`
+    has no `category_id` query param (only `limit`/`offset`, per Contracts),
+    so this is the only option without a backend change. An unknown/deleted
+    `categoryId` falls back to a generic "this category" label rather than
+    throwing.
+  - **controller**: `createExpensesController` owns the accumulated raw
+    pages, current `offset`, and `hasMore`, mirroring `loadHome`/
+    `loadAddExpenseData`'s never-throws/cache-fallback contract exactly
+    (loading/error/forbidden/empty/ready/offline). Critical detail for the
+    plan's documented "Pagination vs own_only" risk: `offset` always advances
+    by the **requested** `limit` (a fixed `PAGE_SIZE = 50`), never by
+    `page.length` — an own_only-shortened page must not desync the next raw
+    DB page's offset. `hasMore` is the standard `page.length === PAGE_SIZE`
+    heuristic, which inherits the same documented risk (a short own_only
+    page can under-report `hasMore`); not solved here, consistent with
+    U0.3's accepted scope. `loadMore()` on a network failure keeps whatever
+    is already rendered (`hasMore` stays `true`) rather than losing state —
+    a retry is just tapping "Load more" again.
+  - **presentation**: `renderExpenses` (pure, string-content assertions per
+    state, same pattern as `renderHome`/`renderAddExpense`) and `mount`
+    (thin DOM glue, the one part with no meaningful unit test — same
+    accepted gap as the other two screens' `mount`). Each row shows the
+    category dot/name (`assignCategoryColors`/`categorySlotCssVar` reused
+    from `lib/category-colors.ts`, same D206 slot rule as Home), the
+    author's initial (from `ExpenseResponse.user_name`, absent for a
+    single-member account), tags (comma-joined, no separate title field
+    exists on `ExpenseResponse` — mirrors the bot's own
+    `_format_expenses_list`, which has no title concept either, confirmed
+    by reading `bot/handlers/expenses.py` before writing this), and the
+    comment if present. Footer is either a "Load more" button (`hasMore`)
+    or an end-of-list marker.
+  `applyExpensesChrome(onBack)`: no MainButton on this screen (the design
+  doc names none, unlike Home/Add-expense) — `mainButton.hide()` always;
+  BackButton always wired to `onBack` (→ Home, per the design's flow
+  diagram).
+  `main.ts` gained `showExpenses(filter?)`: Home's "Expenses" tile routes
+  there unfiltered; the donut segment tap (a no-op since U2.1, per its
+  STATE) now routes there filtered to the tapped category — the folded
+  "Other" slot's `categoryId: null` falls back to the unfiltered list, same
+  as the tile, since there's no single category to filter by. Row taps are
+  wired to a handler that's currently a no-op (`onRowTap`) — expense
+  detail/edit/delete is U2.3b, not built yet, same "tappable but no-op
+  until the target screen exists" pattern U2.1 set for its own tiles.
+  `styles/app.css` gained the day-group/row/load-more/end-of-list styles
+  (`.exp-day-header`, `.exp-row`, `.exp-title`/`.exp-comment`/`.exp-tags`,
+  `.exp-author`, `.exp-amount`, `.load-more`, `.end-of-list`,
+  `.exp-day-skeleton` wired into the existing `prefers-reduced-motion`
+  pulse rule) — extended the existing file per its own doc comment.
+  D215 (asked mid-unit, human-confirmed): day grouping uses the device
+  timezone, not `family_tz` — no Contract exposes it to the browser yet;
+  accepted as a documented, reversible gap (see Decision log) rather than
+  extending `UserMeResponse` again so soon after D211 for what is list
+  presentation, not the month-boundary financial math D120 was about.
+  Tests: `webapp/tests/expenses.test.ts` (26 cases) — `groupByDay`
+  (day-bucket + subtotal correctness, a UTC-vs-Europe/Belgrade late-night
+  timestamp landing on different local days), `buildExpensesData`
+  (unfiltered grouping, category filter + label, unknown-category-id
+  fallback, colour-slot mapping), `createExpensesController` (ready from a
+  fake `ExpensesApi`; second-page-appends-without-duplicating asserting the
+  exact `{limit: 50, offset: 50}` second call and 60 unique ids across both
+  pages; end-of-list via a short first page; empty naming the filter;
+  plain empty with no filter; a short own_only-style page rendering ready
+  with no special-cased error; forbidden/error/offline mirroring
+  `home.test.ts`'s suite shape; `loadMore` network failure preserving the
+  already-rendered page), `renderExpenses` (loading/error/forbidden/empty
+  variants incl. the filter-named empty message, day groups with subtotal/
+  row/tag/comment/author content, load-more vs. end-of-list footer,
+  offline marker, filter banner), `applyExpensesChrome` (MainButton hidden,
+  BackButton wired to `onBack`, fake `TelegramWebApp` — same pattern
+  `telegram.test.ts`/`home.test.ts` established).
+  Verification: `bash scripts/verify.sh` green end to end (Python 536
+  passed, unaffected; webapp vitest 147 across 10 files, up from 121/9;
+  typecheck/lint/build/secret-grep clean; build 23.53 KB JS + 6.80 KB CSS
+  raw / 7.70 KB + 1.86 KB gzipped, still well under the 150 KB budget).
+  Not run: a live browser/Telegram smoke test (needs a running backend +
+  real/forged `initData`, same gap U2.1/U2.2 left open) — CP3 (after U2.2)
+  is still open, and CP4 (after U2.3b) covers this screen's own live check
+  once detail/edit/delete land.
 - Next: **CP3 — after U2.2**: human records an expense in the app and
   confirms it appears in the bot's `/expenses` — the payoff this whole plan
-  is for. Then `/unit U2.3 docs/plans/mini-app-v2.md` (Screen 03a — Expenses
-  list).
+  is for (still open, per U2.1/U2.2's STATE — the SDK-script fix landed
+  after both units shipped). Then `/unit U2.3b docs/plans/mini-app-v2.md`
+  (Screen 03b — Expense detail, edit, delete).
 - Gotchas:
   - **`webapp/index.html` was missing the Telegram Mini Apps SDK script**
     (`https://telegram.org/js/telegram-web-app.js`) from U1.3 through U2.1 —

@@ -7,6 +7,15 @@ import {
   type AddExpenseHandlers,
 } from "./screens/add-expense";
 import {
+  applyExpensesChrome,
+  createExpensesController,
+  createMemoryCache as createExpensesCache,
+  mount as mountExpenses,
+  type ExpensesFilter,
+  type ExpensesHandlers,
+  type ExpensesState,
+} from "./screens/expenses";
+import {
   applyHomeChrome,
   createMemoryCache as createHomeCache,
   loadHome,
@@ -16,6 +25,7 @@ import {
 
 const homeCache = createHomeCache();
 const addExpenseCache = createAddExpenseCache();
+const expensesCache = createExpensesCache();
 const client = new ApiClient({ getInitData });
 
 function getRoot(): HTMLElement | null {
@@ -42,12 +52,14 @@ async function showHome(): Promise<void> {
     onTileTap: (tile) => {
       if (tile === "add-expense") {
         void showAddExpense();
+      } else if (tile === "expenses") {
+        void showExpenses();
       }
-      // Expenses/Budgets/Statistics/Categories/Tags land in later units
-      // (U2.3-U2.5, M3) — tiles stay reachable but are no-ops until then.
+      // Budgets/Statistics/Categories/Tags land in later units (U2.4/U2.5,
+      // M3) — tiles stay reachable but are no-ops until then.
     },
-    onSegmentTap: () => {
-      // Filtered expense list lands with U2.3.
+    onSegmentTap: (target) => {
+      void showExpenses(target.categoryId ? { categoryId: target.categoryId } : {});
     },
   };
 
@@ -80,6 +92,43 @@ async function showAddExpense(): Promise<void> {
   mountAddExpense(root, { status: "loading" }, client, handlers);
   const state = await loadAddExpenseData(client, addExpenseCache);
   mountAddExpense(root, state, client, handlers);
+}
+
+/** Mounts Expenses (U2.3, screen 03a). BackButton always returns to Home;
+ * `filter` (an optional category) comes from Home's "Expenses" tile (none) or
+ * a donut-segment tap (that category) — the folded "Other" slot's `null`
+ * categoryId falls back to the unfiltered list, same as the tile. */
+async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+
+  const controller = createExpensesController(client, expensesCache, filter);
+
+  const handlers: ExpensesHandlers = {
+    onRetry: () => {
+      void controller.load().then(render);
+    },
+    onLoadMore: () => {
+      void controller.loadMore().then(render);
+    },
+    onRowTap: () => {
+      // Expense detail/edit/delete lands in U2.3b.
+    },
+  };
+
+  function render(state: ExpensesState): void {
+    if (!root) {
+      return;
+    }
+    applyExpensesChrome(() => void showHome());
+    mountExpenses(root, state, handlers);
+  }
+
+  render({ status: "loading" });
+  const state = await controller.load();
+  render(state);
 }
 
 /** Boots the app onto `#app`. Guarded the same way every DOM-touching export
