@@ -222,7 +222,7 @@ DELETE /tags/{id}         -> 204   (same rule)
 
 ### M0 — Backend
 
-- [ ] **U0.1 `resolve_period` + `PeriodPreset`** — pure, no route, no service
+- [x] **U0.1 `resolve_period` + `PeriodPreset`** — pure, no route, no service
       wiring. AC: each of the five presets produces the documented window in a
       non-UTC `family_tz` (use Belgrade, as U0.4 did); `today` at 23:30 local
       on the last day of a month is that local day, not the UTC one; a custom
@@ -595,13 +595,18 @@ DELETE /tags/{id}         -> 204   (same rule)
   it is ever asked for.
 
 ## STATE (handoff)
-- Done: nothing yet — the plan file is written and its four blocking decisions
-  (D300–D303) are answered by the human. `docs/design/mini-app-ux.md` updated
-  in the same session (§4 screens 01/05/06/07, §8 backend deltas, §11 open
-  questions resolved).
-- Next: **U0.1** — `PeriodPreset` + `resolve_period` in `services/period.py`,
-  pure, with `tests/test_period.py`. Start with `/clear`, then
-  `/unit U0.1 docs/plans/mini-app-v3.md`.
+- Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
+  added to `services/period.py`, delegating to `month_bounds` for the three
+  month-shaped presets via a `_month_start_before` helper (mirrors the one in
+  `statistics_service.py`, which U0.2 is expected to reconcile), and to a new
+  `_day_bounds`/`_local_midnight` pair for `TODAY`/`YESTERDAY`/`CUSTOM`. 21
+  tests in `tests/test_period.py` (Europe/Belgrade for the general cases,
+  America/New_York for the local-vs-UTC-date edge case, both Belgrade 2026
+  DST transitions for the 23h/25h span check). verify.sh green.
+- Next: **U0.2** — Statistics adopts `period`: routes + service consume
+  `resolve_period`, `months_back` becomes a deprecated alias, mutual
+  exclusivity enforced. Start with `/clear`, then
+  `/unit U0.2 docs/plans/mini-app-v3.md`.
 - Gotchas:
   - **U0.3 stops and asks** before touching `migrations/versions/`. Take the
     CP0 snapshot first.

@@ -242,12 +242,30 @@ Hermetic — `TagRepositoryProtocol` replaced with an in-memory `FakeTagRepo`. N
 ## Service tests (`test_period.py`) → [`services/period.py`](../services/period.py)
 Pure logic, no DB. `month_bounds()` is the single shared helper replacing the
 three previously-duplicated `_current_month_bounds` (plan Decision log D107).
+`resolve_period()` (mini-app-v3 plan, D300/D303) resolves every named period
+— day, month-shaped, and custom range — into the same `[start, end)` shape.
 
 | Test | Checks |
 |---|---|
 | `test_month_bounds_default_utc` | Parametrized: mid-year `now` and a December→January year rollover, default `tz="UTC"` |
 | `test_month_bounds_family_tz_evening_of_31st_rolls_to_next_month` | A UTC instant still on the 31st already reads as the 1st of the next month in `Europe/Moscow` (UTC+3) — the returned bounds follow the family timezone, not raw UTC |
 | `test_month_bounds_naive_now_rejected` | A naive `now` raises `ValueError` instead of silently assuming a timezone |
+| `test_resolve_period_none_matches_month_bounds` | `preset=None` returns exactly `month_bounds(now, tz)` — unchanged default behaviour |
+| `test_resolve_period_this_month` | `THIS_MONTH` matches hand-computed `Europe/Belgrade` bounds |
+| `test_resolve_period_last_month` | `LAST_MONTH` resolves to the calendar month strictly before the current one |
+| `test_resolve_period_last_3_months` | `LAST_3_MONTHS` resolves to the three calendar months strictly before the current one (not including it) |
+| `test_resolve_period_today` | `TODAY` resolves to the local wall-clock day containing `now`, in `Europe/Belgrade` |
+| `test_resolve_period_yesterday` | `YESTERDAY` resolves to the local wall-clock day before `now`'s |
+| `test_resolve_period_today_uses_local_date_not_utc_date` | A UTC instant already on the 1st of the month is still the last day of the previous month at 23:30 in `America/New_York` (UTC-4) — `TODAY` follows the local calendar date, not a naive UTC read |
+| `test_resolve_period_custom_single_day_spans_24h` | A single-day custom range (`start_date == end_date`) spans exactly 24h outside a DST switch |
+| `test_resolve_period_custom_range_inclusive_of_end_date` | A multi-day custom range's `end` is the local midnight *after* `end_date`, since `end_date` is inclusive of its whole local day |
+| `test_resolve_period_custom_single_day_across_dst_switch` | Parametrized: a single-day range spans 23h across `Europe/Belgrade`'s spring-forward and 25h across its fall-back |
+| `test_resolve_period_custom_missing_end_date_raises` | `CUSTOM` with only `start_date` raises `ValueError` |
+| `test_resolve_period_custom_missing_start_date_raises` | `CUSTOM` with only `end_date` raises `ValueError` |
+| `test_resolve_period_custom_reversed_dates_raises` | `CUSTOM` with `start_date > end_date` raises `ValueError` |
+| `test_resolve_period_custom_max_range_days_is_allowed` | A custom range spanning exactly `MAX_RANGE_DAYS` (366) is accepted |
+| `test_resolve_period_custom_over_max_range_days_raises` | A custom range spanning `MAX_RANGE_DAYS + 1` raises `ValueError` |
+| `test_resolve_period_naive_now_rejected` | A naive `now` raises `ValueError`, same as `month_bounds` |
 
 ## Service tests (`test_expense_service.py`) → [`services/expense_service.py`](../services/expense_service.py)
 Hermetic — `ExpenseRepositoryProtocol` replaced with an in-memory `FakeExpenseRepo`. No DB.
