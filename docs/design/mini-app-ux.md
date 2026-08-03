@@ -1,16 +1,23 @@
 # UX brief: CashFlow Telegram Mini App
 
-Design input for a future `docs/plans/mini-app-v2.md`. This file describes
-**what each screen must do and which states it must survive**; the plan file
-derives units and acceptance criteria from it. Written as a contract, not as a
-mood board — every "States" list below is an acceptance criterion.
+Design input for `docs/plans/mini-app-v2.md` (screens 01–05, shipped) and
+`docs/plans/mini-app-v3.md` (period selection + screens 06–07). This file
+describes **what each screen must do and which states it must survive**; the
+plan files derive units and acceptance criteria from it. Written as a contract,
+not as a mood board — every "States" list below is an acceptance criterion.
 
 Visual reference (live, theme-aware mockups of all seven screens):
 https://claude.ai/code/artifact/32fd8317-d2f0-4279-8709-af3b261b79fa
 
 Companion plans: `docs/plans/expense-tracker-mvp.md` (V1 MVP, D1–D45),
-`docs/plans/family-features-v1_1.md` (V1.1, D100–D124). Decision ids in this
-document and its plan start at **D200** to avoid collisions.
+`docs/plans/family-features-v1_1.md` (V1.1, D100–D124),
+`docs/plans/mini-app-v2.md` (D200–D211), `docs/plans/mini-app-v3.md`
+(D300–D312). Decision ids in this document and its plans start at **D200** to
+avoid collisions.
+
+**Amended 2026-08-03** for V3: period selection on screens 01 and 05, and
+screens 06/07 un-deferred (D204 reversed by scope, not by argument — it said
+"not in v1", and this is v3). Amendments are marked inline.
 
 ---
 
@@ -145,6 +152,16 @@ the whole app. MainButton is Add expense.
   selection haptic on tile tap.
 - **Interaction**: tapping a donut segment shows the exact slice and navigates to
   that category's filtered expense list.
+- **Period (V3, D300)**: three chips above the donut — **Today · Yesterday ·
+  This month** — defaulting to This month, so someone who never taps sees
+  exactly today's screen. The chip named in force is also the subject of the
+  empty state ("Nothing yesterday", never a generic "no data"). The active chip
+  is marked by shape *and* text, never by colour alone (§2's first principle:
+  the only saturated colour on screen is a category).
+  Home deliberately stops at three: the deeper menu, and every custom range,
+  lives on screen 05. The over-budget strip is **hidden for the day-scoped
+  periods** — budgets are monthly, and a monthly figure beside one day's
+  spending compares two different things (D310).
 
 ### 02 — Add expense
 
@@ -195,12 +212,38 @@ with an icon. Categories with no budget sit at the bottom as an invitation.
 
 Home's donut plus ranked bars underneath, so switching screens never re-teaches
 the picture. Bars sorted by amount, leader at full width; value always printed,
-never inferred from an axis. Period presets are the same three the bot supports.
-"By tag" is the same view with a different grouping, not a different screen.
+never inferred from an axis. "By tag" is the same view with a different
+grouping, not a different screen.
+
+**Periods (V3, D300/D303)** — this is the screen where every period lives:
+
+| Chip | Sends |
+|------|-------|
+| Today | `period=today` |
+| Yesterday | `period=yesterday` |
+| This month | `period=this_month` |
+| Last month | `period=last_month` |
+| Last 3 months | `period=last_3_months` |
+| Select period… | opens the calendar → `period=custom&start_date&end_date` |
+
+The **calendar** is a hand-rolled month grid (no dependency, no native
+`<input type="date">`): tap the start day, tap the end day, the span between
+them highlights, month arrows navigate without losing the selection, and quick
+chips (Last 7 days · Last 30 days · This week) cover the common cases in one
+tap. Apply is disabled until both ends exist. A reversed second tap re-anchors
+the start rather than producing an invalid range; future days are not
+selectable; ranges longer than a year are refused *with the reason shown*, not
+silently truncated. The applied range is shown in words in the header
+("9 – 17 Jul"), never as a pair of ISO strings.
+
+The client picks **dates**; the API converts them to `family_tz` day bounds
+(`end_date` inclusive of that whole day). No client ever computes an instant —
+that is D120's bug and §2's zero-business-logic rule.
 
 - **States**: loading (bars at zero width, no reflow) · empty period · single
-  category · error retry.
-- **Telegram**: selection haptic on preset change; BackButton → Home.
+  category · error retry · calendar open with an incomplete selection.
+- **Telegram**: selection haptic on preset change; BackButton → Home, except
+  while the calendar is open, where it closes the calendar.
 - **Note**: this is where MVP D121's deferred "real chart" lands, and where
   D120's UTC-vs-`family_tz` boundary discrepancy should be fixed in the API
   rather than re-implemented in a second client.
@@ -209,29 +252,54 @@ never inferred from an axis. Period presets are the same three the bot supports.
 
 The one screen with a job the bot never had: it is where a category's colour is
 chosen and stored, which is what makes every donut, dot and bar elsewhere
-consistent. Each row doubles as a mini-report (count + month total). The
-`ON DELETE RESTRICT` rule (MVP D5) is explained *before* the tap, not as a 409
-afterwards.
+consistent. Each row doubles as a mini-report (count + month total).
 
-- **States**: delete blocked by RESTRICT (pre-empted inline, 409 still handled)
-  · 403 · duplicate name (note: names are **not** unique at the DB level, MVP
-  D19 — decide whether the UI warns or the schema gains a constraint) · last
-  remaining category.
-- **Telegram**: MainButton = Save, enabled only when the form is dirty.
-- **Depends on**: a `categories.color` column (see §8).
+**Colour (V3, D301/D308)** — the picker is the **six palette swatches from §6**
+and nothing else: no hex field, no wheel, no seventh hue. Each swatch carries
+its name and the chosen one is marked with a check, so the choice survives
+greyscale. Two categories may share a slot (six colours, unbounded categories);
+the picker shows which are already taken but does not forbid them. The value is
+stored as the **slot index**, not a hex — each slot has a light and a dark
+variant, so a stored hex would be right in exactly one theme.
+
+**Delete (V3, D302)** — the `ON DELETE RESTRICT` dead end (MVP D5) is replaced,
+not merely explained. Deleting a category that **has expenses hides it**: gone
+from every picker, still named, coloured and counted in analytics for the
+periods it was used in. Deleting one with no expenses really deletes it. The
+row's own count tells the UI which will happen, so the confirmation says which —
+"Hide Groceries? 42 expenses keep it for reports" vs "Delete Groceries?" —
+*before* the tap, never as a 409 afterwards.
+
+- **States**: hide-vs-delete named correctly in the confirmation · archived
+  section (collapsed, with a plain-words explanation, absent when empty) · 403
+  · duplicate name (warned, never blocked — names stay non-unique at the DB
+  level, MVP D19/D311) · last remaining active category (deletable, with a
+  warning that new expenses will have nowhere to go).
+- **Telegram**: MainButton = Save, enabled only when the form is dirty;
+  confirmation is Telegram's own popup, never a custom modal.
+- **Depends on**: `categories.color_slot` and `categories.is_active` (see §8).
 
 ### 07 — Tags
 
 Tags are the cross-cutting axis: `#vacation` spans groceries, transport and
-cafés, which no category view can show. So tapping a tag breaks it down by
-category. Renaming and deleting are the secondary action at the bottom, because
-that is how often they happen.
+cafés, which no category view can show. Renaming and deleting are the secondary
+action at the bottom, because that is how often they happen.
+
+**Delete (V3, D302)** — identical rule to screen 06: a tag on at least one
+expense is **hidden**, one on none is deleted. This matters more here than for
+categories, because `expense_tags` is `ON DELETE CASCADE`: without the rule, one
+mis-tap silently strips a tag from every past expense and there is nothing to
+recover.
 
 - **States**: no tags yet (explain what a tag is for, then offer three starters)
-  · unused tag (count 0) · 403 · delete confirms in a Telegram popup, not a
-  custom modal.
-- **Open**: per-tag counts need either a count field on `GET /tags` or a
-  client-side roll-up of the expense list. Decide before the unit is written.
+  · unused tag (count 0, rendered as a fact, not as an error) · archived
+  section · 403 · delete confirms in a Telegram popup, not a custom modal.
+- **Resolved (D305)**: per-tag counts come from the API —
+  `GET /tags?include_usage=true` — not a client-side roll-up of the expense
+  list, which pagination would silently truncate.
+- **Deferred (D309)**: tapping a tag to break it down *by category* needs a
+  `tag_id` filter on `/statistics/by-category` that does not exist yet. The
+  spec stands; it is not built in V3.
 
 ---
 
@@ -332,6 +400,18 @@ in the family plan.
 | Period bounds computed server-side | D120's UTC-vs-`family_tz` discrepancy would be duplicated in a second client. Give the API a months-back parameter and let `services/period.py::month_bounds` do it | 05 |
 | Per-tag expense counts | Either a count on `GET /tags` or a client roll-up — decide | 07 |
 
+**V3 deltas** (`docs/plans/mini-app-v3.md`, M0 — all land before any V3 screen
+unit, same rule as M0 in V2):
+
+| Delta | Why | Blocking |
+|-------|-----|----------|
+| `period` enum + `start_date`/`end_date`, resolved in `family_tz` (D300) | `months_back` cannot express a day or an arbitrary range; the client must never compute bounds | 01, 05 |
+| `categories.color_slot` (1–6, nullable) (D301/D308) | Settles the `categories.color` row above: a **slot index**, not a hex, backfilled from today's position rule so no colour moves. **Migration gate** | 06, every donut |
+| `categories.is_active`, `tags.is_active` (D302/D304) | Delete must stop destroying analytics history; archived rows leave the pickers and stay in the reports | 06, 07 |
+| `include_usage=true` on `GET /categories`\|`/tags` (D305) | The mini-report count, and the pre-tap knowledge of hide-vs-delete | 06, 07 |
+| `include_archived` (default **false**, D306) | Default-false is what lets the bot inherit archiving with zero bot changes; analytics callers opt in to name an old category | 06, 07, 05 |
+| 409 on writing into an archived category | Archiving closes new spending without freezing the history already in it | 02, 04 |
+
 Two of these touch reviewed contracts: `categories.color` needs a migration
 (explicit human approval, per root CLAUDE.md's do-not-edit list), and the
 period-bounds change alters the statistics query contract from V1.1.
@@ -382,11 +462,20 @@ secret-adjacent.
 
 Carry each into the plan's Decision log as it is answered.
 
-- D200–D205 in §0, all still open.
-- Category name uniqueness: warn in the UI, or add the DB constraint MVP D19
-  deliberately left out?
+- ~~D200–D205 in §0~~ — all answered in `docs/plans/mini-app-v2.md`
+  (D203 later superseded by D211, D204 superseded by scope in V3, D206 by D301).
+- ~~Category name uniqueness~~ — **answered (D311)**: the UI warns, the schema
+  keeps MVP D19's non-uniqueness. Archiving makes a constraint actively
+  awkward — an archived "Groceries" would block creating a new one.
+- ~~Per-tag counts~~ — **answered (D305)**: a count on the list endpoint,
+  behind `include_usage=true`.
 - Does the Mini App need offline write queueing, or is read-only offline enough
   for v1? (Recommendation: read-only — a queued write that fails a permission
-  check hours later is worse than no queue.)
+  check hours later is worse than no queue.) Still read-only through V3.
 - Should the bot link to the Mini App from `/start`, and if so does that replace
   any bot command or merely add a button?
+- **Un-archiving** (D312): the archived list is readable but nothing restores a
+  row from the UI. Left open deliberately — revisit if it is ever asked for.
+- **Removing `months_back`** (D300): kept as a deprecated alias through V3 so
+  cached webviews keep working. Its removal is a follow-up unit, safe once
+  every device has loaded a post-U1.2 build.
