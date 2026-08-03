@@ -21,6 +21,19 @@ class Action(StrEnum):
     DELETE = "delete"
 
 
+class PeriodPreset(StrEnum):
+    """Named period selectors resolved server-side by `services/period.py`'s
+    `resolve_period` (plan mini-app-v3 Decision log D300) — the client names
+    a period, it never computes UTC instants itself."""
+
+    TODAY = "today"
+    YESTERDAY = "yesterday"
+    THIS_MONTH = "this_month"
+    LAST_MONTH = "last_month"
+    LAST_3_MONTHS = "last_3_months"
+    CUSTOM = "custom"  # requires start_date AND end_date
+
+
 class Currency(StrEnum):
     """ISO 4217 codes for the 15 currencies offered at account creation (D211)."""
 
