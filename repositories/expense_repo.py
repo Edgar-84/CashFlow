@@ -87,18 +87,27 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         return await self.get(id)
 
     async def get_by_period(
-        self, account_id: UUID, start: datetime, end: datetime
+        self, account_id: UUID, start: datetime, end: datetime, *, tz: str = "UTC"
     ) -> list[ExpenseResponse]:
+        # Filters on spent_at (the day the expense happened), not created_at
+        # (the audit trail of when the row was written) — D314. spent_at is a
+        # bare DATE with no timezone of its own; start/end are UTC instants
+        # representing local midnight in `tz` (resolve_period/month_bounds),
+        # so they must be converted back to `tz`'s wall-clock date before
+        # comparison — comparing the UTC calendar date directly is wrong
+        # whenever `tz` is ahead of UTC (D323, closes a review-found bug).
         rows = await self._conn.fetch(
             f"""
             {self._SELECT_WITH_AUTHOR}
             WHERE expenses.account_id = $1
-              AND expenses.created_at >= $2 AND expenses.created_at < $3
+              AND expenses.spent_at >= ($2 AT TIME ZONE $4)::date
+              AND expenses.spent_at <  ($3 AT TIME ZONE $4)::date
             ORDER BY expenses.created_at DESC
             """,
             account_id,
             start,
             end,
+            tz,
         )
         expenses = [self._model.model_validate(dict(row)) for row in rows]
         return await self._attach_tags(expenses)
@@ -117,18 +126,24 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         return await self._attach_tags(expenses)
 
     async def sum_by_category_month(
-        self, account_id: UUID, start: datetime, end: datetime
+        self, account_id: UUID, start: datetime, end: datetime, *, tz: str = "UTC"
     ) -> dict[UUID, int]:
+        # Filters on spent_at, not created_at — same D314/D323 rule as
+        # get_by_period, including the AT TIME ZONE conversion (see its
+        # comment): a bare UTC-date comparison is wrong for tz ahead of UTC.
         rows = await self._conn.fetch(
             """
             SELECT category_id, SUM(amount)::bigint AS total
             FROM expenses
-            WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
+            WHERE account_id = $1
+              AND spent_at >= ($2 AT TIME ZONE $4)::date
+              AND spent_at <  ($3 AT TIME ZONE $4)::date
             GROUP BY category_id
             """,
             account_id,
             start,
             end,
+            tz,
         )
         return {row["category_id"]: row["total"] for row in rows}
 

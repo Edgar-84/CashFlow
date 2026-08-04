@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -229,3 +229,83 @@ async def test_check_limit_scopes_by_account(db_conn: asyncpg.Connection) -> Non
 
     assert mine == 0.0
     assert theirs == 90.0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_check_limit_counts_by_spent_at_not_created_at(db_conn: asyncpg.Connection) -> None:
+    """D314: budget progress follows spent_at — a backdated expense counts
+    toward the budget of the month it was spent in, not the month it was
+    typed in (this is the row that makes backdating meaningful)."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    await make_budget_plan(db_conn, account_id=account_id, category_id=category_id, amount=10000)
+
+    july_start = datetime(2026, 7, 1, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    september_start = datetime(2026, 9, 1, tzinfo=UTC)
+
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=8000,
+        created_at=datetime(2026, 8, 10, tzinfo=UTC),
+        spent_at=date(2026, 7, 15),
+    )
+
+    repo = BudgetPlanRepository(db_conn)
+    july_result = await repo.check_limit(
+        account_id, category_id, start=july_start, end=august_start
+    )
+    august_result = await repo.check_limit(
+        account_id, category_id, start=august_start, end=september_start
+    )
+
+    assert july_result == 80.0
+    assert august_result == 0.0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_check_limit_counts_by_local_spent_at_not_utc_calendar_date(
+    db_conn: asyncpg.Connection,
+) -> None:
+    """D323: start/end are UTC instants representing local midnight in `tz`
+    (Europe/Belgrade is UTC+2 in August) — spent_at must be compared against
+    that LOCAL calendar date, or a family east of UTC gets its budget
+    progress miscounted by a day at the month boundary."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    await make_budget_plan(db_conn, account_id=account_id, category_id=category_id, amount=10000)
+
+    # August 2026 bounds in Europe/Belgrade (UTC+2, CEST), expressed in UTC.
+    august_start = datetime(2026, 7, 31, 22, 0, tzinfo=UTC)
+    september_start = datetime(2026, 8, 31, 22, 0, tzinfo=UTC)
+
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=8000,
+        spent_at=date(2026, 8, 31),
+    )
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=9999,
+        spent_at=date(2026, 7, 31),
+    )
+
+    repo = BudgetPlanRepository(db_conn)
+    result = await repo.check_limit(
+        account_id, category_id, start=august_start, end=september_start, tz="Europe/Belgrade"
+    )
+
+    assert result == 80.0

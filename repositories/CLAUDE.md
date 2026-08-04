@@ -19,9 +19,27 @@ constructor injection.
   — fill percentage (0.0–100.0+) for the given period; `None` if no plan
   exists for that (account, category). Takes explicit tz-aware bounds from
   the caller rather than computing "current month" internally, same as
-  `expense_repo`'s period methods (see plan Decision log D20) — the repo has
-  no notion of the family's local timezone.
+  `expense_repo`'s period methods (see plan Decision log D20).
 - `permission_repo`: fetch per-(user, resource) row for the auth pipeline.
+
+### Timezone exception: `spent_at`-filtered methods take an explicit `tz`
+`get_by_period`, `sum_by_category_month` and `check_limit` all filter on
+`expenses.spent_at`, a bare `DATE` with no timezone of its own (D314). The
+"repo has no notion of the family's local timezone" principle above holds
+for `TIMESTAMPTZ` columns (`created_at`) because instant comparison needs no
+localization — it does **not** hold for a `DATE` column: `start`/`end` are
+UTC instants representing local midnight in some `tz`, and recovering the
+correct local calendar date from a UTC instant requires knowing that `tz`.
+These three methods therefore take an explicit `tz: str = "UTC"` keyword
+param and convert with `(start AT TIME ZONE $tz)::date` in SQL rather than
+comparing the column to the raw instant — the naive comparison silently
+files boundary expenses a day early/late for any `tz` ahead of UTC (D323).
+Callers that don't yet plumb `family_tz` through (`budget_service.get_progress`,
+`expense_service`'s budget-notification check — both still call
+`services.period.month_bounds()` with no `tz`) are unaffected today because
+they only ever pass UTC-aligned bounds, but they will need to pass their
+real `family_tz` here the day that gap is closed, or the same class of bug
+reappears.
 
 ## Connection & transaction model (how it works today)
 - One `asyncpg.Pool` for the whole app, created in `main.py`'s lifespan via
