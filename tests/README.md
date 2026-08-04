@@ -333,6 +333,14 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | `test_update_foreign_category_raises_not_found` | `update()` with a foreign `category_id` → `NotFoundError` |
 | `test_update_foreign_tag_raises_not_found` | `update()` with a foreign `tag_ids` entry → `NotFoundError` |
 | `test_update_own_category_and_tags_pass` | `update()` with an own `category_id`/`tag_ids` succeeds |
+| `test_create_defaults_spent_at_to_today_in_family_tz` | U0.2b/D314: omitting `spent_at` on `create()` stores today's date in `family_tz` (injected `now`), not UTC |
+| `test_create_explicit_spent_at_is_stored` | `create()` with an explicit `spent_at` stores that date |
+| `test_create_future_spent_at_raises_value_error` | `create()` with a `spent_at` after `family_tz`'s today (injected `now`) raises `ValueError` |
+| `test_create_spent_at_today_in_family_tz_accepted_at_boundary` | Boundary case: 23:30 local in a UTC+2 zone still accepts `spent_at` = that local day |
+| `test_create_spent_at_tomorrow_in_family_tz_rejected_at_boundary` | Same instant, `spent_at` = the next local day → `ValueError` |
+| `test_update_changes_spent_at` | `update()` applies a new `spent_at` |
+| `test_update_explicit_null_spent_at_is_ignored_not_nulled` | An explicit `{"spent_at": null}` is ignored — `spent_at` is `NOT NULL` (D30/D32 pattern) |
+| `test_update_future_spent_at_raises_value_error` | `update()` with a future `spent_at` (injected `now`) raises `ValueError` |
 
 ## Service tests (`test_notification_service.py`) → [`services/notification_service.py`](../services/notification_service.py)
 Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`. No real network (U3.1 AC).
@@ -406,6 +414,11 @@ first time — plan Decision log handoff note).
 | `test_update_expense_with_foreign_category_is_404` | `PATCH /expenses/{id}` with an unknown `category_id` → 404 |
 | `test_create_expense_with_non_positive_amount_is_422` | `POST /expenses` with `amount=0` → 422 (model validation, U1.6) |
 | `test_update_expense_with_non_positive_amount_is_422` | `PATCH /expenses/{id}` with `amount=-100` → 422 (U1.6) |
+| `test_create_expense_without_spent_at_defaults_to_today` | U0.2b/D314: `POST /expenses` with no `spent_at` stores today's date (test settings' `family_tz` default, UTC) — the bot needs no change |
+| `test_create_expense_with_explicit_spent_at` | `POST /expenses` with `spent_at` stores that date |
+| `test_create_expense_with_future_spent_at_is_422` | `POST /expenses` with a future `spent_at` → 422 |
+| `test_update_expense_spent_at` | `PATCH /expenses/{id}` moves `spent_at` |
+| `test_update_expense_with_future_spent_at_is_422` | `PATCH /expenses/{id}` with a future `spent_at` → 422 |
 
 ## API/route tests (`test_categories_api.py`) → [`api/categories.py`](../api/categories.py)
 Hermetic — the real app with `CategoryRepository`/`UserRepository`/`PermissionRepository`

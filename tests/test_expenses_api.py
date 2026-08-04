@@ -5,7 +5,7 @@ replaced by in-memory fakes via app.dependency_overrides (tests/CLAUDE.md) — n
 """
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -555,3 +555,100 @@ async def test_update_expense_with_foreign_category_is_404(
     )
 
     assert response.status_code == 404
+
+
+# --- U0.2b: spent_at on the write path (D314) ------------------------------
+
+
+async def test_create_expense_without_spent_at_defaults_to_today(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    category: CategoryResponse,
+) -> None:
+    # No FAMILY_TZ override in test settings (config.Settings default "UTC")
+    # — the bot's own test suite needs no change for this default (D314 AC).
+    override_repos([])
+
+    response = await client.post(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        json={"amount": 1500, "category_id": str(category.id)},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["spent_at"] == datetime.now(UTC).date().isoformat()
+
+
+async def test_create_expense_with_explicit_spent_at(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    category: CategoryResponse,
+) -> None:
+    override_repos([])
+
+    response = await client.post(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        json={"amount": 1500, "category_id": str(category.id), "spent_at": "2026-07-01"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["spent_at"] == "2026-07-01"
+
+
+async def test_create_expense_with_future_spent_at_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    category: CategoryResponse,
+) -> None:
+    override_repos([])
+    tomorrow = datetime.now(UTC).date() + timedelta(days=1)
+
+    response = await client.post(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        json={"amount": 1500, "category_id": str(category.id), "spent_at": tomorrow.isoformat()},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_update_expense_spent_at(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    expense = make_expense(account_id=account_id, user_id=member.id)
+    override_repos([expense])
+
+    response = await client.patch(
+        f"/expenses/{expense.id}",
+        headers=auth_headers(member.tg_id),
+        json={"spent_at": "2026-07-01"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["spent_at"] == "2026-07-01"
+
+
+async def test_update_expense_with_future_spent_at_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    expense = make_expense(account_id=account_id, user_id=member.id)
+    override_repos([expense])
+    tomorrow = datetime.now(UTC).date() + timedelta(days=1)
+
+    response = await client.patch(
+        f"/expenses/{expense.id}",
+        headers=auth_headers(member.tg_id),
+        json={"spent_at": tomorrow.isoformat()},
+    )
+
+    assert response.status_code == 422

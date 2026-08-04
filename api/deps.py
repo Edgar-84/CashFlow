@@ -145,7 +145,13 @@ def get_expense_service(
     notification_service: Annotated[NotificationService, Depends(get_notification_service)],
 ) -> ExpenseService:
     return ExpenseService(
-        expense_repo, budget_plan_repo, category_repo, tag_repo, user_repo, notification_service
+        expense_repo,
+        budget_plan_repo,
+        category_repo,
+        tag_repo,
+        user_repo,
+        notification_service,
+        get_settings().family_tz,
     )
 
 
