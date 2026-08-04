@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
+from pydantic import ValidationError
 
 from models.category import CategoryCreate, CategoryResponse, CategoryUpdate
 from models.errors import ConflictError, NotFoundError
@@ -51,6 +52,7 @@ class FakeCategoryRepo:
             name=data["name"],
             account_id=data["account_id"],
             created_at=datetime.now(UTC),
+            color_slot=data.get("color_slot"),
         )
         self._categories[category.id] = category
         return category
@@ -78,7 +80,11 @@ class FakeCategoryRepo:
 
 
 def make_category(
-    *, account_id: UUID, name: str = "Groceries", is_active: bool = True
+    *,
+    account_id: UUID,
+    name: str = "Groceries",
+    is_active: bool = True,
+    color_slot: int | None = None,
 ) -> CategoryResponse:
     return CategoryResponse(
         id=uuid4(),
@@ -86,6 +92,7 @@ def make_category(
         account_id=account_id,
         created_at=datetime.now(UTC),
         is_active=is_active,
+        color_slot=color_slot,
     )
 
 
@@ -180,6 +187,85 @@ async def test_create_forces_account_id_from_caller() -> None:
     assert created.account_id == account_id
 
 
+async def test_create_without_color_slot_assigns_lowest_free_slot() -> None:
+    account_id = uuid4()
+    existing = make_category(account_id=account_id, name="A", color_slot=1)
+    service = CategoryService(FakeCategoryRepo([existing]))
+
+    created = await service.create(CategoryCreate(name="B"), account_id)
+
+    assert created.color_slot == 2
+
+
+async def test_create_without_color_slot_skips_used_slots_out_of_order() -> None:
+    account_id = uuid4()
+    slot_1 = make_category(account_id=account_id, name="A", color_slot=1)
+    slot_3 = make_category(account_id=account_id, name="C", color_slot=3)
+    service = CategoryService(FakeCategoryRepo([slot_1, slot_3]))
+
+    created = await service.create(CategoryCreate(name="D"), account_id)
+
+    assert created.color_slot == 2
+
+
+async def test_create_without_color_slot_returns_none_once_all_six_taken() -> None:
+    account_id = uuid4()
+    taken = [
+        make_category(account_id=account_id, name=str(slot), color_slot=slot)
+        for slot in range(1, 7)
+    ]
+    service = CategoryService(FakeCategoryRepo(taken))
+
+    created = await service.create(CategoryCreate(name="Seventh"), account_id)
+
+    assert created.color_slot is None
+
+
+async def test_create_without_color_slot_ignores_other_accounts_slots() -> None:
+    account_id = uuid4()
+    other_account_id = uuid4()
+    other = make_category(account_id=other_account_id, name="A", color_slot=1)
+    service = CategoryService(FakeCategoryRepo([other]))
+
+    created = await service.create(CategoryCreate(name="B"), account_id)
+
+    assert created.color_slot == 1
+
+
+async def test_create_without_color_slot_frees_archived_categorys_slot() -> None:
+    account_id = uuid4()
+    archived = make_category(account_id=account_id, name="Old", is_active=False, color_slot=1)
+    service = CategoryService(FakeCategoryRepo([archived]))
+
+    created = await service.create(CategoryCreate(name="New"), account_id)
+
+    assert created.color_slot == 1
+
+
+async def test_create_with_explicit_color_slot_keeps_it_even_if_taken() -> None:
+    # Duplicates are allowed by design (six colours, unbounded categories) —
+    # an explicit color_slot bypasses the free-slot search entirely.
+    account_id = uuid4()
+    existing = make_category(account_id=account_id, name="A", color_slot=3)
+    service = CategoryService(FakeCategoryRepo([existing]))
+
+    created = await service.create(CategoryCreate(name="B", color_slot=3), account_id)
+
+    assert created.color_slot == 3
+
+
+@pytest.mark.parametrize("color_slot", [0, 7, -1])
+def test_category_create_rejects_out_of_range_color_slot(color_slot: int) -> None:
+    with pytest.raises(ValidationError):
+        CategoryCreate(name="Groceries", color_slot=color_slot)
+
+
+@pytest.mark.parametrize("color_slot", [0, 7, -1])
+def test_category_update_rejects_out_of_range_color_slot(color_slot: int) -> None:
+    with pytest.raises(ValidationError):
+        CategoryUpdate(color_slot=color_slot)
+
+
 async def test_update_changes_fields() -> None:
     account_id = uuid4()
     category = make_category(account_id=account_id)
@@ -200,6 +286,39 @@ async def test_update_explicit_null_is_ignored_not_nulled() -> None:
     updated = await service.update(category.id, CategoryUpdate(name=None), account_id)
 
     assert updated.name == "Groceries"
+
+
+async def test_update_only_name_leaves_color_slot_untouched() -> None:
+    account_id = uuid4()
+    category = make_category(account_id=account_id, color_slot=4)
+    service = CategoryService(FakeCategoryRepo([category]))
+
+    updated = await service.update(category.id, CategoryUpdate(name="Renamed"), account_id)
+
+    assert updated.color_slot == 4
+
+
+async def test_update_explicit_color_slot_changes_it() -> None:
+    account_id = uuid4()
+    category = make_category(account_id=account_id, color_slot=4)
+    service = CategoryService(FakeCategoryRepo([category]))
+
+    updated = await service.update(category.id, CategoryUpdate(color_slot=5), account_id)
+
+    assert updated.color_slot == 5
+
+
+async def test_update_explicit_null_color_slot_is_ignored_not_cleared() -> None:
+    # Same D30 convention as name: there is no "clear back to auto"
+    # affordance for color_slot (Contracts section) — explicit null is
+    # treated as omitted, not as SET color_slot = NULL.
+    account_id = uuid4()
+    category = make_category(account_id=account_id, color_slot=4)
+    service = CategoryService(FakeCategoryRepo([category]))
+
+    updated = await service.update(category.id, CategoryUpdate(color_slot=None), account_id)
+
+    assert updated.color_slot == 4
 
 
 async def test_update_missing_raises_not_found() -> None:
