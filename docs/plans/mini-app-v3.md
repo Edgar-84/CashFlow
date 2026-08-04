@@ -487,7 +487,7 @@ touched** (D316) — it keeps its `months_back` chips.
       validation result, not a crash.
       Files: `webapp/src/api/client.ts`, `webapp/src/api/types.ts`,
       `webapp/tests/client.test.ts`. Model: sonnet.
-- [ ] **U1.3 Design tokens: 12 slots + accent** — `docs/ui/design-system.md`'s
+- [x] **U1.3 Design tokens: 12 slots + accent** — `docs/ui/design-system.md`'s
       colour table, implemented. No behaviour change; nothing consumes
       `--accent` until U1.7. AC: `tokens.css` defines slots 1–12 and
       `--accent`/`--accent-ink` with **both** light and dark values, and every
@@ -1342,8 +1342,21 @@ every unit below.
   fix to keep `verify.sh` green. 5 new tests in `webapp/tests/client.test.ts`
   covering the `PeriodQuery` half of the AC; the pre-existing `months_back`
   tests are untouched since that path still exists. verify.sh green.
-- Next: **U1.3** — Design tokens: 12 slots + accent. Start with `/clear`,
-  then `/unit U1.3 docs/plans/mini-app-v3.md`.
+- **U1.3 done**: `tokens.css` gained `--category-slot-7`…`-12` and
+  `--accent`/`--accent-ink` (both light and dark) in both the `:root` and
+  `:root[data-theme="dark"]` blocks, values copied verbatim from the
+  design-system.md table — no telegram.ts change needed since `applyTheme()`
+  only ever touched the five base chrome tokens, never the category palette
+  or `--accent` (those already relied on the `data-theme` CSS selector, not
+  JS). `category-colors.ts`'s `DEFAULT_MAX_SLOTS` went 6 → 12; `lib/donut.ts`'s
+  own six-slice fold is a separate constant and untouched, so the AC's "donut
+  still folds at 6" holds without any donut.ts edit. No new decisions —
+  implemented to the plan's AC. Tests: replaced the old "past 6 is null" test
+  with one proving the 12-slot default (categories 1–12 get real slots, 13–14
+  are null) plus a new explicit-`maxSlots=6` test to keep that call shape
+  covered; added a slot-12 case to `categorySlotCssVar`. verify.sh green.
+- Next: **U1.4** — `components/period-selector.ts`. Start with `/clear`,
+  then `/unit U1.4 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
