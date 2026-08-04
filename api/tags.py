@@ -16,8 +16,12 @@ router = APIRouter(prefix="/tags", tags=["tags"])
 async def list_tags(
     user: Annotated[UserResponse, Depends(PermissionChecker(Resource.TAGS, Action.READ))],
     service: Annotated[TagService, Depends(get_tag_service)],
+    include_archived: bool = False,
+    include_usage: bool = False,
 ) -> list[TagResponse]:
-    return await service.list(user.account_id)
+    return await service.list(
+        user.account_id, include_archived=include_archived, include_usage=include_usage
+    )
 
 
 @router.get("/{tag_id}", response_model=TagResponse)
