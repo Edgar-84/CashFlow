@@ -149,6 +149,8 @@ interface PeriodValue {
 
 interface PeriodSelectorProps {
   value: PeriodValue;
+  now: Date;                 // anchors `describe`'s label — injected so the
+                              // component never reads the clock itself (D327)
   disabled?: boolean;        // offline
   onUnitChange(unit: PeriodUnit): void;   // host resets offset to 0
   onOffsetChange(offset: number): void;   // host clamps at 0
