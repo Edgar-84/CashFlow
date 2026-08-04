@@ -346,7 +346,7 @@ criteria; a value not in those files does not go into CSS.
       Files: `migrations/versions/`(new), `docs/SCHEMA.sql`,
       `models/category.py`, `models/tag.py`, `models/expense.py`, tests.
       RISKY (migration) → reviewer subagent. Model: sonnet.
-- [ ] **U0.2 Statistics adopts `period` + `offset`** — routes + service consume
+- [x] **U0.2 Statistics adopts `period` + `offset`** — routes + service consume
       `resolve_period`; `months_back` stays as a deprecated alias; the
       four-family mutual-exclusivity table above is enforced.
       AC: `period=day&offset=0` returns the same totals as the equivalent
@@ -957,6 +957,15 @@ every unit below.
   rows with controlled `created_at` values, proven against a real throwaway
   Postgres via `scripts/integration_docker.sh`. This is the pattern future
   migration units with a backfill should follow.
+- D321 (2026-08-04): **`offset` given without `period` is 422**, not silently
+  ignored. The Contracts table only says offset is "only with a non-custom
+  period" — it doesn't say what happens if a client sends `offset` alone.
+  `resolve_period(None, offset=...)` would silently drop a non-zero offset
+  (the `unit is None` branch returns `month_bounds` unconditionally), so
+  without this check a client typo (`offset=-1` with no `period`) would
+  silently resolve to the current month instead of failing loud. `api/
+  statistics.py::_validate_period` rejects it before the service ever calls
+  `resolve_period`.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1007,10 +1016,24 @@ every unit below.
   `alembic upgrade head` there: take the CP0 snapshot first (STATE gotcha
   below still applies to the *deploy* step, even though the unit itself is
   done).
-- Next: **U0.2** — statistics adopts `period` + `offset`. Start with
-  `/clear`, then `/unit U0.2 docs/plans/mini-app-v3.md`.
-- **Execution order in M0**: U0.1a (done) → U0.3 (done) → **U0.2** →
-  U0.2a → U0.2b → U0.2c → U0.4… The migration ran ahead of the statistics
+- Done: **U0.2** — `api/statistics.py`'s three routes (`by-period`,
+  `by-category`, `by-tag`) and `services/statistics_service.py` now accept
+  `period`/`offset`/`start_date`/`end_date` and resolve them via
+  `resolve_period`; `months_back` stays as the deprecated alias (still the
+  only way to express `months_back=2`'s 3-month window, D316). Mutual
+  exclusivity across the four selector families is enforced in
+  `api/statistics.py::_validate_period`; `resolve_period`'s `ValueError`
+  (missing `start_date`/`end_date` under `period=custom`, `offset` with
+  `period=custom`, oversized custom range) is mapped to 422 by each route.
+  `offset` without `period` is a new 422 (D321) — not in the Contracts table,
+  added to avoid a silently-dropped offset. verify.sh green. New tests in
+  `tests/test_statistics_service.py` (period/offset ↔ explicit start/end and
+  ↔ months_back equivalence, per AC) and `tests/test_statistics_api.py`
+  (every named conflict combo → 422); `tests/README.md` updated.
+- Next: **U0.2a** — period filtering moves to `spent_at`. Start with
+  `/clear`, then `/unit U0.2a docs/plans/mini-app-v3.md`.
+- **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
+  **U0.2a** → U0.2b → U0.2c → U0.4… The migration ran ahead of the statistics
   work so the period queries are written against `spent_at` once rather than
   written against `created_at` and rewritten a unit later.
 - Gotchas:
