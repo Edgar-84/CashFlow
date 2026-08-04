@@ -69,6 +69,17 @@ def tag(account_id: UUID) -> TagResponse:
     )
 
 
+@pytest.fixture
+def archived_tag(account_id: UUID) -> TagResponse:
+    return TagResponse(
+        id=uuid4(),
+        name="old",
+        account_id=account_id,
+        created_at=datetime.now(UTC),
+        is_active=False,
+    )
+
+
 OverrideRepos = Callable[..., FakeTagRepo]
 
 
@@ -76,12 +87,16 @@ OverrideRepos = Callable[..., FakeTagRepo]
 def override_repos(
     app: FastAPI, admin: UserResponse, member: UserResponse, viewer: UserResponse
 ) -> OverrideRepos:
-    def _apply(tags: list[TagResponse] | None = None) -> FakeTagRepo:
+    def _apply(
+        tags: list[TagResponse] | None = None,
+        *,
+        expense_counts: dict[UUID, int] | None = None,
+    ) -> FakeTagRepo:
         app.dependency_overrides[deps.get_user_repo] = lambda: TgLookupFakeUserRepo(
             [admin, member, viewer]
         )
         app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo([])
-        repo = FakeTagRepo(tags)
+        repo = FakeTagRepo(tags, expense_counts=expense_counts)
         app.dependency_overrides[deps.get_tag_repo] = lambda: repo
         return repo
 
@@ -97,6 +112,47 @@ async def test_list_tags_as_member_returns_account_tags(
 
     assert response.status_code == 200
     assert [t["id"] for t in response.json()] == [str(tag.id)]
+
+
+async def test_list_tags_omits_archived_by_default(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    tag: TagResponse,
+    archived_tag: TagResponse,
+) -> None:
+    override_repos([tag, archived_tag])
+
+    response = await client.get("/tags", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert [t["id"] for t in response.json()] == [str(tag.id)]
+
+
+async def test_list_tags_includes_archived_with_flag(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    tag: TagResponse,
+    archived_tag: TagResponse,
+) -> None:
+    override_repos([tag, archived_tag])
+
+    response = await client.get("/tags?include_archived=true", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert {t["id"] for t in response.json()} == {str(tag.id), str(archived_tag.id)}
+
+
+async def test_list_tags_with_usage_populates_expense_count(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, tag: TagResponse
+) -> None:
+    override_repos([tag], expense_counts={tag.id: 5})
+
+    response = await client.get("/tags?include_usage=true", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert response.json()[0]["expense_count"] == 5
 
 
 async def test_get_tag_as_viewer(
@@ -194,6 +250,21 @@ async def test_delete_tag_as_admin(
 
     assert response.status_code == 204
     assert await repo.get(tag.id) is None
+
+
+async def test_delete_tag_with_expenses_as_admin_archives_not_deletes(
+    client: AsyncClient, override_repos: OverrideRepos, admin: UserResponse, tag: TagResponse
+) -> None:
+    # U0.5 (mirrors D302): a tag still attached to an expense is archived,
+    # not deleted, so its expense_tags rows (and history) survive.
+    repo = override_repos([tag], expense_counts={tag.id: 1})
+
+    response = await client.delete(f"/tags/{tag.id}", headers=auth_headers(admin.tg_id))
+
+    assert response.status_code == 204
+    survivor = await repo.get(tag.id)
+    assert survivor is not None
+    assert survivor.is_active is False
 
 
 async def test_delete_tag_as_member_is_403(

@@ -84,6 +84,10 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_delete_missing_returns_false` | `delete()` on a missing id returns `False` |
 | `test_list_filters_by_account` | `list(account_id=...)` scopes results to one account |
 | `test_duplicate_name_per_account_is_currently_allowed` | Same unenforced-uniqueness behavior as categories (D19) |
+| `test_count_expenses` | `count_expenses()` counts distinct `expense_tags` rows for the tag, 0 when none |
+| `test_list_with_usage_populates_expense_count` | `list_with_usage()` populates `expense_count` per tag via the `LEFT JOIN expense_tags` (U0.5) |
+| `test_list_with_usage_excludes_archived_unless_requested` | `list_with_usage(include_archived=False)` omits `is_active=false` rows; `include_archived=True` includes them |
+| `test_archiving_tag_preserves_expense_tags_rows` | Archiving (`UPDATE is_active=false`) leaves `expense_tags` rows intact — the regression U0.5 exists to prevent, since a hard delete would cascade them away |
 
 ### `test_expense_repo.py` → [`repositories/expense_repo.py`](../repositories/expense_repo.py)
 | Test | Checks |
@@ -261,6 +265,10 @@ Hermetic — `TagRepositoryProtocol` replaced with an in-memory `FakeTagRepo`. N
 | Test | Checks |
 |---|---|
 | `test_list_scopes_by_account` | `list()` excludes another account's tags |
+| `test_list_omits_archived_by_default` | `list()` excludes `is_active=false` rows unless asked |
+| `test_list_includes_archived_when_requested` | `list(include_archived=True)` includes them |
+| `test_list_without_usage_leaves_expense_count_none` | `list()` without `include_usage` never calls `list_with_usage`, so `expense_count` stays `None` even if the repo has counts |
+| `test_list_with_usage_populates_expense_count` | `list(include_usage=True)` delegates to `list_with_usage()` and surfaces its `expense_count` |
 | `test_get_returns_tag_in_account` | `get()` returns a tag belonging to the given account |
 | `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
 | `test_get_foreign_account_raises_not_found` | `get()` on a tag from another account raises `NotFoundError` |
@@ -268,7 +276,8 @@ Hermetic — `TagRepositoryProtocol` replaced with an in-memory `FakeTagRepo`. N
 | `test_update_changes_fields` | `update()` applies a partial `TagUpdate` |
 | `test_update_explicit_null_is_ignored_not_nulled` | An explicit `{"name": null}` is ignored, same D30 precedent |
 | `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
-| `test_delete_removes_tag` | `delete()` removes the row via the repo |
+| `test_delete_unused_tag_hard_deletes` | `delete()` on a tag with zero attached expenses removes the row (U0.5) |
+| `test_delete_tag_with_expenses_archives_instead_of_deleting` | `delete()` on a tag still attached to an expense sets `is_active=false` instead of deleting it, `expense_tags` rows survive (U0.5, mirrors D302) |
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
 
 ## Service tests (`test_period.py`) → [`services/period.py`](../services/period.py)
@@ -459,6 +468,9 @@ replaced by in-memory fakes via `app.dependency_overrides`. No DB.
 | Test | Checks |
 |---|---|
 | `test_list_tags_as_member_returns_account_tags` | Member `GET /tags` returns the account's tags (default matrix: read-only) |
+| `test_list_tags_omits_archived_by_default` | `GET /tags` omits `is_active=false` rows by default |
+| `test_list_tags_includes_archived_with_flag` | `GET /tags?include_archived=true` includes them |
+| `test_list_tags_with_usage_populates_expense_count` | `GET /tags?include_usage=true` populates `expense_count` |
 | `test_get_tag_as_viewer` | Viewer `GET /tags/{id}` returns the tag |
 | `test_get_missing_tag_is_404` | Unknown id → 404 |
 | `test_create_tag_as_admin` | Admin `POST /tags` → 201 |
@@ -466,7 +478,8 @@ replaced by in-memory fakes via `app.dependency_overrides`. No DB.
 | `test_create_tag_as_viewer_is_403` | Viewer `POST /tags` → 403 |
 | `test_update_tag_as_admin` | Admin `PATCH /tags/{id}` applies a partial update |
 | `test_update_tag_as_member_is_403` | Member `PATCH /tags/{id}` → 403 |
-| `test_delete_tag_as_admin` | Admin `DELETE /tags/{id}` → 204, row removed |
+| `test_delete_tag_as_admin` | Admin `DELETE /tags/{id}` on an unused tag → 204, row removed |
+| `test_delete_tag_with_expenses_as_admin_archives_not_deletes` | Admin `DELETE /tags/{id}` on a tag with an attached expense → 204, row survives with `is_active=false` (U0.5) |
 | `test_delete_tag_as_member_is_403` | Member `DELETE /tags/{id}` → 403 |
 
 ## API/route tests (`test_budgets_api.py`) → [`api/budgets.py`](../api/budgets.py)

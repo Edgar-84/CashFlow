@@ -12,12 +12,30 @@ from services.tag_service import TagService
 
 
 class FakeTagRepo:
-    def __init__(self, tags: list[TagResponse] | None = None) -> None:
+    def __init__(
+        self,
+        tags: list[TagResponse] | None = None,
+        *,
+        expense_counts: dict[UUID, int] | None = None,
+    ) -> None:
         self._tags: dict[UUID, TagResponse] = {t.id: t for t in (tags or [])}
+        self._expense_counts = expense_counts or {}
+
+    async def list_with_usage(
+        self, account_id: UUID, *, include_archived: bool
+    ) -> list[TagResponse]:
+        return [
+            t.model_copy(update={"expense_count": self._expense_counts.get(t.id, 0)})
+            for t in self._tags.values()
+            if t.account_id == account_id and (include_archived or t.is_active)
+        ]
 
     async def list(self, **filters: Any) -> list[TagResponse]:
-        account_id = filters.get("account_id")
-        return [t for t in self._tags.values() if t.account_id == account_id]
+        return [
+            t
+            for t in self._tags.values()
+            if all(getattr(t, key) == value for key, value in filters.items())
+        ]
 
     async def get(self, id: UUID) -> TagResponse | None:
         return self._tags.get(id)
@@ -43,9 +61,18 @@ class FakeTagRepo:
     async def delete(self, id: UUID) -> bool:
         return self._tags.pop(id, None) is not None
 
+    async def count_expenses(self, tag_id: UUID) -> int:
+        return self._expense_counts.get(tag_id, 0)
 
-def make_tag(*, account_id: UUID, name: str = "urgent") -> TagResponse:
-    return TagResponse(id=uuid4(), name=name, account_id=account_id, created_at=datetime.now(UTC))
+
+def make_tag(*, account_id: UUID, name: str = "urgent", is_active: bool = True) -> TagResponse:
+    return TagResponse(
+        id=uuid4(),
+        name=name,
+        account_id=account_id,
+        created_at=datetime.now(UTC),
+        is_active=is_active,
+    )
 
 
 async def test_list_scopes_by_account() -> None:
@@ -58,6 +85,48 @@ async def test_list_scopes_by_account() -> None:
     result = await service.list(account_id)
 
     assert result == [mine]
+
+
+async def test_list_omits_archived_by_default() -> None:
+    account_id = uuid4()
+    active = make_tag(account_id=account_id, name="Active")
+    archived = make_tag(account_id=account_id, name="Archived", is_active=False)
+    service = TagService(FakeTagRepo([active, archived]))
+
+    result = await service.list(account_id)
+
+    assert result == [active]
+
+
+async def test_list_includes_archived_when_requested() -> None:
+    account_id = uuid4()
+    active = make_tag(account_id=account_id, name="Active")
+    archived = make_tag(account_id=account_id, name="Archived", is_active=False)
+    service = TagService(FakeTagRepo([active, archived]))
+
+    result = await service.list(account_id, include_archived=True)
+
+    assert {t.id for t in result} == {active.id, archived.id}
+
+
+async def test_list_without_usage_leaves_expense_count_none() -> None:
+    account_id = uuid4()
+    tag = make_tag(account_id=account_id)
+    service = TagService(FakeTagRepo([tag], expense_counts={tag.id: 3}))
+
+    result = await service.list(account_id)
+
+    assert result[0].expense_count is None
+
+
+async def test_list_with_usage_populates_expense_count() -> None:
+    account_id = uuid4()
+    tag = make_tag(account_id=account_id)
+    service = TagService(FakeTagRepo([tag], expense_counts={tag.id: 3}))
+
+    result = await service.list(account_id, include_usage=True)
+
+    assert result[0].expense_count == 3
 
 
 async def test_get_returns_tag_in_account() -> None:
@@ -126,7 +195,7 @@ async def test_update_missing_raises_not_found() -> None:
         await service.update(uuid4(), TagUpdate(name="X"), uuid4())
 
 
-async def test_delete_removes_tag() -> None:
+async def test_delete_unused_tag_hard_deletes() -> None:
     account_id = uuid4()
     tag = make_tag(account_id=account_id)
     repo = FakeTagRepo([tag])
@@ -135,6 +204,22 @@ async def test_delete_removes_tag() -> None:
     await service.delete(tag.id, account_id)
 
     assert await repo.get(tag.id) is None
+
+
+async def test_delete_tag_with_expenses_archives_instead_of_deleting() -> None:
+    # U0.5 (mirrors D302): a tag still attached to an expense is archived,
+    # not deleted — `expense_tags.tag_id` is ON DELETE CASCADE, so a
+    # hard-delete here would silently destroy that expense's tag history.
+    account_id = uuid4()
+    tag = make_tag(account_id=account_id)
+    repo = FakeTagRepo([tag], expense_counts={tag.id: 1})
+    service = TagService(repo)
+
+    await service.delete(tag.id, account_id)
+
+    survivor = await repo.get(tag.id)
+    assert survivor is not None
+    assert survivor.is_active is False
 
 
 async def test_delete_missing_raises_not_found() -> None:

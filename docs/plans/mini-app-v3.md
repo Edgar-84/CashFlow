@@ -412,7 +412,7 @@ criteria; a value not in those files does not go into CSS.
       `tests/test_categories_api.py`.
       RISKY (delete semantics + data retention) → reviewer subagent.
       Model: sonnet.
-- [ ] **U0.5 Tag usage counts + archive-or-delete** — mechanical mirror of
+- [x] **U0.5 Tag usage counts + archive-or-delete** — mechanical mirror of
       U0.4 over `expense_tags`. AC: a tag on at least one expense is archived,
       and **its `expense_tags` rows survive** (today's `ON DELETE CASCADE`
       would have deleted them — this is the regression this unit exists to
@@ -1198,16 +1198,37 @@ every unit below.
   pre-existing/out of scope; two sequential count queries in `delete()`
   instead of one `EXISTS`, by design per the plan's two-method contract).
   verify.sh green.
-- Next: **U0.5** — Tag usage counts + archive-or-delete, the mechanical
-  mirror of U0.4 over `expense_tags` — watch for the same `list`/
-  `list_with_usage` ordering landmine in `TagRepositoryProtocol`/
-  `FakeTagRepo`. Start with `/clear`, then
-  `/unit U0.5 docs/plans/mini-app-v3.md`.
+- **U0.5 done**: `TagRepository.list_with_usage`/`count_expenses` (same
+  `LEFT JOIN … GROUP BY` shape as U0.4, over `expense_tags` instead of
+  `expenses`; no `count_budget_plans` equivalent — tags have no budget-plan
+  FK), `TagService.list(include_archived, include_usage)` and `.delete()`'s
+  archive-if-in-use rule, `GET /tags` gains the same two query flags. Unlike
+  categories, `tags`' delete path has no `ForeignKeyViolationError` defensive
+  branch: `expense_tags.tag_id` is `ON DELETE CASCADE`, not `RESTRICT` (per
+  `TagService`'s existing docstring), so a hard-delete of an in-use tag would
+  never raise — it would silently drop the join rows, which is exactly the
+  regression the new `count_expenses`-gate prevents. Avoided the `list`/
+  `list_with_usage` ordering landmine by defining `list_with_usage` first in
+  both `TagRepositoryProtocol` and `FakeTagRepo`, as flagged above. New/changed
+  tests: 6 in `test_tag_service.py` (list archived-filtering ×2,
+  usage-population ×2, delete-hard-deletes, delete-archives-on-expense), 4 in
+  `test_tags_api.py` (mirroring list/delete at the HTTP layer), 4 in
+  `test_tag_repo.py` (`count_expenses`, `list_with_usage` usage +
+  archived-filtering, plus `test_archiving_tag_preserves_expense_tags_rows` —
+  the AC's CASCADE-survival assertion, run against a real throwaway Postgres
+  via `scripts/integration_docker.sh`). `tests/README.md` updated. verify.sh
+  green. Reviewer: 1 round, APPROVE, no BLOCKERs — 2 NITs left as-is
+  (`count_expenses` has no `account_id` scoping, safe only because
+  `TagService.delete` always 404s on cross-account first; `list_with_usage`'s
+  `ORDER BY created_at` vs. plain `list()`'s no ordering) — both identical to
+  already-accepted NITs from U0.4's own review, not new gaps.
+- Next: **U0.6** — Colour slot on create/update. Start with `/clear`, then
+  `/unit U0.6 docs/plans/mini-app-v3.md`.
 - **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
-  U0.2a (done) → U0.2b (done) → U0.2c (done) → U0.4 (done) → U0.5… The
-  migration ran ahead of the statistics work so the period queries are
-  written against `spent_at` once rather than written against `created_at`
-  and rewritten a unit later.
+  U0.2a (done) → U0.2b (done) → U0.2c (done) → U0.4 (done) → U0.5 (done) →
+  U0.6… The migration ran ahead of the statistics work so the period queries
+  are written against `spent_at` once rather than written against
+  `created_at` and rewritten a unit later.
 - Gotchas:
   - **Take the CP0 Supabase snapshot before `alembic upgrade head` ever runs
     against production** for this migration — still not done as of U0.3
