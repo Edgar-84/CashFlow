@@ -23,11 +23,29 @@ Implement exactly ONE unit from an approved plan.
 6. Run bash scripts/verify.sh and fix failures.
 7. Update the plan file: tick the unit checkbox, append to Decision log
    if any decision was made, refresh STATE.
-8. Report: files changed, decisions, verify result, plus a drafted commit
-   message (task-methodology skill's commit message format) and a drafted
-   PR body (task-methodology skill's PR body template). Do NOT commit and
-   do NOT open the PR yet — the human reviews the diff first.
-9. Ask: "Prepare PR for this unit?" If the human confirms, stage exactly
+8. Review loop: launch the `reviewer` subagent (Agent tool, run in the
+   foreground — its verdict gates the next step) with a clear,
+   self-contained prompt. It has no memory of this session, so give it
+   everything it needs: the unit id, the plan file path, and an
+   instruction to run `git diff master...HEAD` (or the equivalent for the
+   unit's base) plus `bash scripts/verify.sh`, then review per the
+   code-review skill.
+   - If it returns any BLOCKER, or a WARN that is safe and in-scope to fix
+     now, fix it directly (stay inside the unit's boundaries — no
+     drive-by edits) and re-run `bash scripts/verify.sh`, then launch a
+     fresh reviewer subagent on the updated diff.
+   - Repeat until the reviewer returns APPROVE with no unresolved
+     BLOCKERs.
+   - A WARN/NIT that is legitimate but genuinely out of scope for this
+     unit (e.g. a pre-existing issue elsewhere) may be left — note it in
+     the report instead of fixing it.
+9. Report: files changed, decisions, verify result, a one-line summary of
+   the review loop (rounds run, what was found and fixed, anything
+   knowingly deferred), plus a drafted commit message (task-methodology
+   skill's commit message format) and a drafted PR body (task-methodology
+   skill's PR body template). Do NOT commit and do NOT open the PR yet —
+   the human reviews the diff first.
+10. Ask: "Prepare PR for this unit?" If the human confirms, stage exactly
    the files touched by this unit (never `git add -A`), commit with the
    drafted message, push the branch (`-u origin <branch>` if not already
    tracking), and open the PR with the drafted body — run commit/push/PR

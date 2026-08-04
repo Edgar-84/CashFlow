@@ -20,4 +20,8 @@ class TagResponse(TagBase):
     id: UUID
     account_id: UUID
     created_at: datetime
+    is_active: bool = True
+    # populated only when the caller asks for usage (include_usage=true, U0.5);
+    # None means "not requested", never "zero"
+    expense_count: int | None = None
     model_config = ConfigDict(from_attributes=True)

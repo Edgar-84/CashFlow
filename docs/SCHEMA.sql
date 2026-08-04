@@ -27,14 +27,17 @@ CREATE TABLE categories (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name       TEXT NOT NULL,
   account_id UUID NOT NULL REFERENCES accounts(id),
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  is_active  BOOLEAN NOT NULL DEFAULT true,   -- false = archived (in use, kept for history, D302)
+  color_slot SMALLINT                          -- 1..12 palette slot index, NULL = auto (D308); no CHECK, validated by Pydantic
 );
 
 CREATE TABLE tags (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name       TEXT NOT NULL,
   account_id UUID NOT NULL REFERENCES accounts(id),
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  is_active  BOOLEAN NOT NULL DEFAULT true    -- false = archived (in use, kept for history, D302)
 );
 
 CREATE TABLE expenses (
@@ -46,6 +49,7 @@ CREATE TABLE expenses (
   account_id  UUID NOT NULL REFERENCES accounts(id),
   created_at  TIMESTAMPTZ DEFAULT now(),
   updated_at  TIMESTAMPTZ DEFAULT now(),
+  spent_at    DATE NOT NULL DEFAULT current_date,  -- the day the expense happened, distinct from created_at (D314)
   CONSTRAINT expenses_amount_positive CHECK (amount > 0)
 );
 

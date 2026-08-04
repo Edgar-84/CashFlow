@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import cast
 from uuid import uuid4
 
@@ -85,6 +85,34 @@ def test_category_models() -> None:
     assert create.name == "Groceries"
     assert update.name == "Food"
     assert response.name == "Groceries"
+    assert response.is_active is True
+    assert response.color_slot is None
+    assert response.expense_count is None
+
+    colored = CategoryResponse(
+        id=uuid4(),
+        name="Rent",
+        account_id=uuid4(),
+        created_at=datetime.now(UTC),
+        is_active=False,
+        color_slot=7,
+        expense_count=3,
+    )
+    assert colored.is_active is False
+    assert colored.color_slot == 7
+    assert colored.expense_count == 3
+
+
+@pytest.mark.parametrize("color_slot", [0, 13])
+def test_category_response_rejects_out_of_range_color_slot(color_slot: int) -> None:
+    with pytest.raises(ValidationError):
+        CategoryResponse(
+            id=uuid4(),
+            name="Rent",
+            account_id=uuid4(),
+            created_at=datetime.now(UTC),
+            color_slot=color_slot,
+        )
 
 
 def test_tag_models() -> None:
@@ -96,6 +124,8 @@ def test_tag_models() -> None:
     assert create.name == "urgent"
     assert update.name == "later"
     assert response.name == "urgent"
+    assert response.is_active is True
+    assert response.expense_count is None
 
 
 def test_expense_models_require_category_id() -> None:
@@ -118,6 +148,7 @@ def test_expense_models_require_category_id() -> None:
         account_id=uuid4(),
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
+        spent_at=date(2026, 7, 4),
         tags=[
             TagResponse(id=uuid4(), name="urgent", account_id=uuid4(), created_at=datetime.now(UTC))
         ],
@@ -125,6 +156,7 @@ def test_expense_models_require_category_id() -> None:
     assert response.amount == 1500
     assert len(response.tags) == 1
     assert response.user_name is None
+    assert response.spent_at == date(2026, 7, 4)
 
     named = ExpenseResponse.model_validate(
         {
