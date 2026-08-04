@@ -21,17 +21,17 @@ class Action(StrEnum):
     DELETE = "delete"
 
 
-class PeriodPreset(StrEnum):
-    """Named period selectors resolved server-side by `services/period.py`'s
-    `resolve_period` (plan mini-app-v3 Decision log D300) — the client names
-    a period, it never computes UTC instants itself."""
+class PeriodUnit(StrEnum):
+    """A period shape resolved server-side by `services/period.py`'s
+    `resolve_period` (plan mini-app-v3 Decision log D313) — paired with an
+    `offset` (0 = current, negative = back N units) rather than a fixed
+    preset name, so the client never computes UTC instants itself."""
 
-    TODAY = "today"
-    YESTERDAY = "yesterday"
-    THIS_MONTH = "this_month"
-    LAST_MONTH = "last_month"
-    LAST_3_MONTHS = "last_3_months"
-    CUSTOM = "custom"  # requires start_date AND end_date
+    DAY = "day"
+    WEEK = "week"  # starts Monday (D315)
+    MONTH = "month"
+    YEAR = "year"
+    CUSTOM = "custom"  # requires start_date AND end_date, forbids offset
 
 
 class Currency(StrEnum):

@@ -315,7 +315,7 @@ criteria; a value not in those files does not go into CSS.
       `[start, end)` shape, `_day_bounds`/`_local_midnight`, the DST handling
       and most of `tests/test_period.py` all survive. Only the selector changes
       from a preset enum to unit + offset.
-- [ ] **U0.1a `PeriodUnit` + offset replaces `PeriodPreset`** (D313) — pure,
+- [x] **U0.1a `PeriodUnit` + offset replaces `PeriodPreset`** (D313) — pure,
       no route, no service wiring. Deletes `PeriodPreset`, adds `PeriodUnit`,
       reworks `resolve_period`'s signature, adds `WEEK`/`YEAR` bounds.
       AC: `day`/`week`/`month`/`year` at `offset=0` and `offset=-1` each
@@ -946,10 +946,28 @@ every unit below.
   from the three-chip design to tabs + arrows; a new **M3 — Add expense
   redesign** was inserted, which pushed the smoke milestone to **M4/U4.1**.
   Screens 06/07 (M2) are unchanged apart from the 12-slot palette.
-- Next: **U0.1a** — `PeriodUnit` + offset replaces `PeriodPreset` (D313).
-  Pure, no routes. Start with `/clear`, then
-  `/unit U0.1a docs/plans/mini-app-v3.md`.
-- **Execution order in M0 changed**: U0.1a → **U0.3 (migration)** → U0.2 →
+- Done: **U0.1a** — `PeriodPreset` deleted from `models/enums.py`, replaced by
+  `PeriodUnit` (`day|week|month|year|custom`); `resolve_period` reworked to
+  `(unit, *, offset=0, start_date, end_date, now, tz)`. `DAY`/`WEEK`/`MONTH`/
+  `YEAR` each resolve via `offset` (`<= 0`, `ValueError` above zero); `WEEK`
+  anchors on the local Monday of the target week (`_local_midnight`, D315);
+  `MONTH` uses a new `_shift_month` calendar-arithmetic helper (replacing the
+  now-unused `_month_start_before`) that reproduces `month_bounds` exactly at
+  `offset=0`; `YEAR` is direct `(year + offset)` arithmetic; `CUSTOM` keeps
+  its exact U0.1 body and now rejects any non-zero `offset`. `unit=None` still
+  returns `month_bounds` unconditionally. 33 tests in `tests/test_period.py`
+  (10 replaced/added for offset semantics — day/week/month/year at offset 0
+  and -1, the Sunday-belongs-to-preceding-Monday case, the offset=-3-is-21-
+  days-before-offset=0 case, year spanning the previous calendar year,
+  offset>0 rejected for every unit, CUSTOM rejecting non-zero offset — every
+  DST/inclusive-end-date/naive-`now` test from U0.1 kept, edited onto the new
+  signature). verify.sh green. No new decisions — implemented exactly to
+  D313's contract.
+- Next: **U0.3** — schema migration (archive flags, colour slot, `spent_at`).
+  ⚠ STOP-AND-ASK GATE before touching `migrations/versions/`; take the CP0
+  Supabase snapshot first. Start with `/clear`, then
+  `/unit U0.3 docs/plans/mini-app-v3.md`.
+- **Execution order in M0**: U0.1a (done) → **U0.3 (migration)** → U0.2 →
   U0.2a → U0.2b → U0.2c → U0.4… The migration moved ahead of the statistics
   work so the period queries are written against `spent_at` once rather than
   written against `created_at` and rewritten a unit later.
