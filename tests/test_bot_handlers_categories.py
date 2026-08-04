@@ -36,19 +36,34 @@ def make_state() -> FSMContext:
     return FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=1, user_id=1))
 
 
-def make_category(name: str = "Groceries") -> CategoryResponse:
-    return CategoryResponse(id=uuid4(), account_id=uuid4(), created_at=datetime.now(UTC), name=name)
+def make_category(name: str = "Groceries", is_active: bool = True) -> CategoryResponse:
+    return CategoryResponse(
+        id=uuid4(), account_id=uuid4(), created_at=datetime.now(UTC), name=name, is_active=is_active
+    )
 
 
 class FakeCategoryBackendClient:
-    def __init__(self, categories: list[CategoryResponse] | None = None) -> None:
+    def __init__(
+        self, categories: list[CategoryResponse] | None = None, *, archive_on_delete: bool = False
+    ) -> None:
         self.categories = categories if categories is not None else [make_category()]
         self.created: list[CategoryCreate] = []
         self.updated: list[tuple[object, CategoryUpdate]] = []
         self.deleted: list[object] = []
+        # U0.8: mirrors the backend — an in-use category is archived
+        # (GET keeps returning it with is_active=False) rather than removed
+        # (GET 404s), and DELETE reports 204 either way.
+        self._archive_on_delete = archive_on_delete
 
     async def list_categories(self) -> list[CategoryResponse]:
         return self.categories
+
+    async def get_category(self, category_id: object) -> CategoryResponse:
+        if category_id in self.deleted:
+            if self._archive_on_delete:
+                return make_category(is_active=False)
+            raise _status_error(404)
+        return make_category()
 
     async def create_category(self, data: CategoryCreate) -> CategoryResponse:
         self.created.append(data)
@@ -256,6 +271,24 @@ async def test_delete_category_happy_path() -> None:
     assert await state.get_state() is None
     assert client.deleted == [category.id]
     callback.message.edit_text.assert_awaited_once_with("Category deleted.")
+
+
+async def test_delete_category_in_use_reports_archived_not_deleted() -> None:
+    category = make_category("Groceries")
+    client = FakeCategoryBackendClient(categories=[category], archive_on_delete=True)
+    state = make_state()
+    callback = make_callback()
+
+    await h.on_delete_category_selected(
+        callback, CategoryCallback(category_id=category.id), state, client
+    )
+
+    assert await state.get_state() is None
+    assert client.deleted == [category.id]
+    text = callback.message.edit_text.await_args.args[0]
+    assert "hidden" in text.lower()
+    assert "past expenses" in text.lower()
+    assert text != "Category deleted."
 
 
 async def test_delete_category_no_categories() -> None:

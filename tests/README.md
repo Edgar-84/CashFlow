@@ -813,9 +813,10 @@ Hermetic — a `FakeCategoryBackendClient` stands in for `bot/client.py`'s
 objects and a real `FSMContext` over aiogram's `MemoryStorage`. One real-
 `Dispatcher` test guards the same registration-order class of bug as
 `test_bot_handlers_expenses.py` (D39/D40 precedent). U4.4 AC: CRUD flows
-against a fake API; permission-denied (403) and in-use (409, category still
-referenced by expenses/budget plans, plan D5) rendered as human messages, not
-a stack trace.
+against a fake API; permission-denied (403) rendered as a human message, not
+a stack trace. U0.8 AC: deleting an in-use category reports it was hidden,
+not removed — the 409 "still in use" branch is kept only for the defensive
+race case (D302 archives in-use categories on 204 instead).
 
 | Test | Checks |
 |---|---|
@@ -829,9 +830,10 @@ a stack trace.
 | `test_rename_category_happy_path` | `/renamecategory` → select → new name ends in an `update_category` call for the selected id (AC) |
 | `test_rename_category_no_categories` | `/renamecategory` with none shows a message and never enters the FSM |
 | `test_rename_category_permission_denied_shows_friendly_message` | A 403 from `update_category` shows a permission message, not a traceback (AC) |
-| `test_delete_category_happy_path` | `/deletecategory` → select ends in a `delete_category` call for the selected id (AC) |
+| `test_delete_category_happy_path` | `/deletecategory` → select ends in a `delete_category` call for the selected id, unused category still reports a plain "Category deleted." (U0.8 AC) |
+| `test_delete_category_in_use_reports_archived_not_deleted` | Deleting a category the fake reports as archived after `DELETE` (`is_active=False`, mirroring D302) shows "hidden"/"past expenses" copy instead of "Category deleted." (U0.8 AC) |
 | `test_delete_category_no_categories` | `/deletecategory` with none shows a message and never enters the FSM |
-| `test_delete_category_conflict_shows_friendly_message` | A 409 from `delete_category` (still referenced by expenses/budget plans) shows a human message, not a traceback (AC) |
+| `test_delete_category_conflict_shows_friendly_message` | A 409 from `delete_category` (the defensive race branch — D302 archives in-use categories instead, so 409 is now unreachable except via a genuine race) shows a human message, not a traceback (AC) |
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `CategoryManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_category_name_entered` |
 
@@ -845,7 +847,8 @@ mirror of U4.4 for tags — CRUD flows against a fake API; permission-denied
 (403) rendered as a human message, not a stack trace. Unlike categories,
 there is no 409 case: tag deletion is `ON DELETE CASCADE`, not `RESTRICT`,
 and tag names have no per-account unique constraint (D19), so the backend
-never returns 409 for tags.
+never returns 409 for tags. U0.8 AC: deleting an in-use tag reports it was
+hidden, not removed (D302 mirrored for tags).
 
 | Test | Checks |
 |---|---|
@@ -859,7 +862,8 @@ never returns 409 for tags.
 | `test_rename_tag_happy_path` | `/renametag` → select → new name ends in an `update_tag` call for the selected id (AC) |
 | `test_rename_tag_no_tags` | `/renametag` with none shows a message and never enters the FSM |
 | `test_rename_tag_permission_denied_shows_friendly_message` | A 403 from `update_tag` shows a permission message, not a traceback (AC) |
-| `test_delete_tag_happy_path` | `/deletetag` → select ends in a `delete_tag` call for the selected id (AC) |
+| `test_delete_tag_happy_path` | `/deletetag` → select ends in a `delete_tag` call for the selected id, unused tag still reports a plain "Tag deleted." (U0.8 AC) |
+| `test_delete_tag_in_use_reports_archived_not_deleted` | Deleting a tag the fake reports as archived after `DELETE` (`is_active=False`, mirroring D302) shows "hidden"/"past expenses" copy instead of "Tag deleted." (U0.8 AC) |
 | `test_delete_tag_no_tags` | `/deletetag` with none shows a message and never enters the FSM |
 | `test_delete_tag_permission_denied_shows_friendly_message` | A 403 from `delete_tag` shows a permission message, not a traceback (AC) |
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |

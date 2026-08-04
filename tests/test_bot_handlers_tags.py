@@ -40,19 +40,34 @@ def make_state() -> FSMContext:
     return FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=1, user_id=1))
 
 
-def make_tag(name: str = "Recurring") -> TagResponse:
-    return TagResponse(id=uuid4(), account_id=uuid4(), created_at=datetime.now(UTC), name=name)
+def make_tag(name: str = "Recurring", is_active: bool = True) -> TagResponse:
+    return TagResponse(
+        id=uuid4(), account_id=uuid4(), created_at=datetime.now(UTC), name=name, is_active=is_active
+    )
 
 
 class FakeTagBackendClient:
-    def __init__(self, tags: list[TagResponse] | None = None) -> None:
+    def __init__(
+        self, tags: list[TagResponse] | None = None, *, archive_on_delete: bool = False
+    ) -> None:
         self.tags = tags if tags is not None else [make_tag()]
         self.created: list[TagCreate] = []
         self.updated: list[tuple[object, TagUpdate]] = []
         self.deleted: list[object] = []
+        # U0.8: mirrors the backend — an in-use tag is archived (GET keeps
+        # returning it with is_active=False) rather than removed (GET 404s),
+        # and DELETE reports 204 either way.
+        self._archive_on_delete = archive_on_delete
 
     async def list_tags(self) -> list[TagResponse]:
         return self.tags
+
+    async def get_tag(self, tag_id: object) -> TagResponse:
+        if tag_id in self.deleted:
+            if self._archive_on_delete:
+                return make_tag(is_active=False)
+            raise _status_error(404)
+        return make_tag()
 
     async def create_tag(self, data: TagCreate) -> TagResponse:
         self.created.append(data)
@@ -256,6 +271,22 @@ async def test_delete_tag_happy_path() -> None:
     assert await state.get_state() is None
     assert client.deleted == [tag.id]
     callback.message.edit_text.assert_awaited_once_with("Tag deleted.")
+
+
+async def test_delete_tag_in_use_reports_archived_not_deleted() -> None:
+    tag = make_tag("Recurring")
+    client = FakeTagBackendClient(tags=[tag], archive_on_delete=True)
+    state = make_state()
+    callback = make_callback()
+
+    await h.on_delete_tag_selected(callback, TagCallback(tag_id=tag.id), state, client)
+
+    assert await state.get_state() is None
+    assert client.deleted == [tag.id]
+    text = callback.message.edit_text.await_args.args[0]
+    assert "hidden" in text.lower()
+    assert "past expenses" in text.lower()
+    assert text != "Tag deleted."
 
 
 async def test_delete_tag_no_tags() -> None:

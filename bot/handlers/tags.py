@@ -34,18 +34,42 @@ class TagBackendClient(Protocol):
     lets tests pass a fake without depending on the concrete httpx-backed class."""
 
     async def list_tags(self) -> list[TagResponse]: ...
+    async def get_tag(self, tag_id: UUID) -> TagResponse: ...
     async def create_tag(self, data: TagCreate) -> TagResponse: ...
     async def update_tag(self, tag_id: UUID, data: TagUpdate) -> TagResponse: ...
     async def delete_tag(self, tag_id: UUID) -> None: ...
 
 
 _BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
+_DELETED_MESSAGE = "Tag deleted."
+_ARCHIVED_MESSAGE = (
+    "Tag hidden — it's still attached to past expenses, so it no longer "
+    "appears when adding new ones, but old expenses keep showing it."
+)
 
 
 def _error_message(exc: httpx.HTTPStatusError) -> str:
     if exc.response.status_code == 403:
         return "You don't have permission to do that."
     return "Something went wrong. Please try again."
+
+
+async def _delete_confirmation_message(client: TagBackendClient, tag_id: UUID) -> str:
+    # D302 mirrored for tags (U0.5): DELETE always returns 204, whether the
+    # tag was archived (is_active=False, in use) or hard-deleted (gone) — GET
+    # is the only way to tell them apart, and it needs no new endpoint
+    # (models/tag.py already exposes is_active; services/tag_service.py's
+    # get() never filters archived rows).
+    try:
+        tag = await client.get_tag(tag_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 404:
+            logger.exception("Failed to confirm tag deletion outcome")
+        return _DELETED_MESSAGE
+    except httpx.HTTPError:
+        logger.exception("Failed to confirm tag deletion outcome")
+        return _DELETED_MESSAGE
+    return _DELETED_MESSAGE if tag.is_active else _ARCHIVED_MESSAGE
 
 
 async def cmd_list_tags(message: Message, client: TagBackendClient) -> None:
@@ -175,8 +199,9 @@ async def on_delete_tag_selected(
             await callback.message.edit_text(_BACKEND_UNREACHABLE)
         return
     await state.clear()
+    text = await _delete_confirmation_message(client, callback_data.tag_id)
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Tag deleted.")
+        await callback.message.edit_text(text)
 
 
 async def on_cancel_command(message: Message, state: FSMContext) -> None:
