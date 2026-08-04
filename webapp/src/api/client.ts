@@ -10,6 +10,7 @@
  * human messages, never a raw status code (webapp/CLAUDE.md).
  */
 
+import type { PeriodQuery } from "../lib/period";
 import type {
   BudgetPlanCreate,
   BudgetPlanResponse,
@@ -96,6 +97,14 @@ interface RequestOptions {
   params?: QueryParams;
   json?: unknown;
 }
+
+/** `PeriodQuery` (D313, the primary selector — Home moves to this in U1.5) or
+ * the legacy `{ months_back }` alias (D300). Screen 05 (Statistics) is out of
+ * scope for this plan's period-selector work (D316) and keeps sending
+ * `months_back` — `last_3_months` has no `PeriodQuery` equivalent, so the
+ * alias cannot be dropped from this client until Statistics is revisited.
+ * Accepted cost: two period vocabularies coexist here (D316). */
+export type StatisticsQuery = PeriodQuery | { months_back?: number };
 
 export class ApiClient {
   private readonly baseUrl: string;
@@ -231,23 +240,19 @@ export class ApiClient {
     return this.request<void>("DELETE", `/budgets/${id}`);
   }
 
-  // -- statistics --------------------------------------------------------
+  // -- statistics ----------------------------------------------------------
+  // Cast: every `StatisticsQuery` member's values are `string | number |
+  // undefined`, but neither has an explicit index signature for QueryParams.
 
-  statisticsByPeriod(opts: { months_back?: number } = {}): Promise<PeriodTotal> {
-    return this.request<PeriodTotal>("GET", "/statistics/by-period", {
-      params: { months_back: opts.months_back },
-    });
+  statisticsByPeriod(query: StatisticsQuery = {}): Promise<PeriodTotal> {
+    return this.request<PeriodTotal>("GET", "/statistics/by-period", { params: query as QueryParams });
   }
 
-  statisticsByCategory(opts: { months_back?: number } = {}): Promise<CategoryTotal[]> {
-    return this.request<CategoryTotal[]>("GET", "/statistics/by-category", {
-      params: { months_back: opts.months_back },
-    });
+  statisticsByCategory(query: StatisticsQuery = {}): Promise<CategoryTotal[]> {
+    return this.request<CategoryTotal[]>("GET", "/statistics/by-category", { params: query as QueryParams });
   }
 
-  statisticsByTag(opts: { months_back?: number } = {}): Promise<TagTotal[]> {
-    return this.request<TagTotal[]>("GET", "/statistics/by-tag", {
-      params: { months_back: opts.months_back },
-    });
+  statisticsByTag(query: StatisticsQuery = {}): Promise<TagTotal[]> {
+    return this.request<TagTotal[]>("GET", "/statistics/by-tag", { params: query as QueryParams });
   }
 }
