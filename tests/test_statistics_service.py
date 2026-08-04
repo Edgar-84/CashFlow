@@ -5,6 +5,7 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from models.enums import PeriodUnit
 from models.expense import ExpenseResponse
 from models.tag import TagResponse
 from services.statistics_service import StatisticsService
@@ -277,6 +278,132 @@ async def test_by_period_tag_filter() -> None:
     result = await service.by_period(account_id, now=now, tag_id=food_tag)
 
     assert result.total == 1000
+
+
+# --- period/offset (U0.2) ---
+
+
+async def test_by_period_period_day_matches_explicit_start_end() -> None:
+    """AC: `period=day&offset=0` returns the same totals as the equivalent
+    explicit `start`/`end` call."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, 10, 0, tzinfo=UTC)
+    in_day = datetime(2026, 7, 17, 5, 0, tzinfo=UTC)
+    outside_day = datetime(2026, 7, 16, 23, 0, tzinfo=UTC)
+    e1 = make_expense(account_id=account_id, amount=1000, created_at=in_day)
+    e2 = make_expense(account_id=account_id, amount=9999, created_at=outside_day)
+    via_period = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+    via_explicit = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    period_result = await via_period.by_period(account_id, now=now, period=PeriodUnit.DAY, offset=0)
+    explicit_result = await via_explicit.by_period(
+        account_id,
+        now=now,
+        start=datetime(2026, 7, 17, tzinfo=UTC),
+        end=datetime(2026, 7, 18, tzinfo=UTC),
+    )
+
+    assert period_result.total == explicit_result.total == 1000
+    assert period_result.start == explicit_result.start
+    assert period_result.end == explicit_result.end
+
+
+async def test_months_back_0_matches_period_month_offset_0() -> None:
+    """AC: `months_back=0` and `period=month&offset=0` return identical
+    bounds — the alias proven, not assumed."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    service = StatisticsService(FakeExpensePeriodRepo([]))
+
+    via_months_back = await service.by_period(account_id, now=now, months_back=0)
+    via_period = await service.by_period(account_id, now=now, period=PeriodUnit.MONTH, offset=0)
+
+    assert via_months_back.start == via_period.start
+    assert via_months_back.end == via_period.end
+
+
+async def test_months_back_1_matches_period_month_offset_minus_1() -> None:
+    """AC: `months_back=1` matches `period=month&offset=-1`."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    service = StatisticsService(FakeExpensePeriodRepo([]))
+
+    via_months_back = await service.by_period(account_id, now=now, months_back=1)
+    via_period = await service.by_period(account_id, now=now, period=PeriodUnit.MONTH, offset=-1)
+
+    assert via_months_back.start == via_period.start
+    assert via_months_back.end == via_period.end
+
+
+async def test_months_back_2_has_no_period_offset_equivalent() -> None:
+    """AC: `months_back=2` still resolves its 3-month window — no
+    `{period, offset}` pair can express it, so it must keep working
+    unmodified alongside the new `period` selector."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    in_window = datetime(2026, 4, 15, tzinfo=UTC)
+    expense = make_expense(account_id=account_id, amount=1500, created_at=in_window)
+    service = StatisticsService(FakeExpensePeriodRepo([expense]))
+
+    result = await service.by_period(account_id, now=now, months_back=2)
+
+    assert result.start == datetime(2026, 4, 1, tzinfo=UTC)
+    assert result.end == datetime(2026, 7, 1, tzinfo=UTC)
+    assert result.total == 1500
+
+
+async def test_by_period_custom_start_date_end_date() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    in_window = datetime(2026, 3, 15, tzinfo=UTC)
+    outside_window = datetime(2026, 7, 5, tzinfo=UTC)
+    e1 = make_expense(account_id=account_id, amount=1000, created_at=in_window)
+    e2 = make_expense(account_id=account_id, amount=9999, created_at=outside_window)
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    result = await service.by_period(
+        account_id,
+        now=now,
+        period=PeriodUnit.CUSTOM,
+        start_date=datetime(2026, 1, 1, tzinfo=UTC).date(),
+        end_date=datetime(2026, 3, 31, tzinfo=UTC).date(),
+    )
+
+    assert result.total == 1000
+
+
+async def test_by_category_period_offset_passthrough() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    category_id = uuid4()
+    last_month = datetime(2026, 6, 15, tzinfo=UTC)
+    this_month = datetime(2026, 7, 5, tzinfo=UTC)
+    e1 = make_expense(
+        account_id=account_id, category_id=category_id, amount=700, created_at=last_month
+    )
+    e2 = make_expense(
+        account_id=account_id, category_id=category_id, amount=9999, created_at=this_month
+    )
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    result = await service.by_category(account_id, now=now, period=PeriodUnit.MONTH, offset=-1)
+
+    assert [(r.category_id, r.total) for r in result] == [(category_id, 700)]
+
+
+async def test_by_tag_period_offset_passthrough() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    tag_id = uuid4()
+    last_month = datetime(2026, 6, 15, tzinfo=UTC)
+    this_month = datetime(2026, 7, 5, tzinfo=UTC)
+    e1 = make_expense(account_id=account_id, amount=700, created_at=last_month, tag_ids=[tag_id])
+    e2 = make_expense(account_id=account_id, amount=9999, created_at=this_month, tag_ids=[tag_id])
+    service = StatisticsService(FakeExpensePeriodRepo([e1, e2]))
+
+    result = await service.by_tag(account_id, now=now, period=PeriodUnit.MONTH, offset=-1)
+
+    assert [(r.tag_id, r.total) for r in result] == [(tag_id, 700)]
 
 
 # --- by_category ---

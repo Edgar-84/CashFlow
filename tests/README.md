@@ -525,6 +525,13 @@ Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeE
 | `test_by_period_months_back_family_tz_rollover_closes_d120` | `months_back=1` bounds are computed from `family_tz`, not UTC, at a Europe/Belgrade month-rollover instant — the discrepancy D120 accepted is gone (U0.4 AC) |
 | `test_by_period_category_filter` | `category_id` restricts the sum to that category, applied before aggregation |
 | `test_by_period_tag_filter` | `tag_id` restricts the sum to expenses carrying that tag, applied before aggregation |
+| `test_by_period_period_day_matches_explicit_start_end` | `period=day&offset=0` produces identical bounds/total to the equivalent explicit `start`/`end` call (U0.2 AC) |
+| `test_months_back_0_matches_period_month_offset_0` | `months_back=0` and `period=month&offset=0` return identical bounds — the alias proven, not assumed (U0.2 AC) |
+| `test_months_back_1_matches_period_month_offset_minus_1` | `months_back=1` matches `period=month&offset=-1` (U0.2 AC) |
+| `test_months_back_2_has_no_period_offset_equivalent` | `months_back=2`'s 3-month window still resolves unmodified alongside the new `period` selector (U0.2 AC) |
+| `test_by_period_custom_start_date_end_date` | `period=custom` with `start_date`/`end_date` resolves via `resolve_period` and restricts the aggregate |
+| `test_by_category_period_offset_passthrough` | `period`/`offset` are threaded through to `by_category` the same way as `by_period` |
+| `test_by_tag_period_offset_passthrough` | `period`/`offset` are threaded through to `by_tag` the same way as `by_period` |
 | `test_by_category_groups_totals_by_category` | `by_category()` groups totals per `category_id`; each `total` is `int` |
 | `test_by_category_own_user_id_filters_to_own_expenses` | `user_id` filter applies before aggregation |
 | `test_by_tag_groups_totals_by_tag` | `by_tag()` groups totals per `tag_id`, incl. an expense tagged with two tags contributing to both |
@@ -551,6 +558,15 @@ Action.READ)`-gated — statistics has no `Resource` enum entry of its own (plan
 | `test_by_period_months_back_and_start_is_422` | `months_back` combined with `start` → 422 (D207: mutually exclusive) |
 | `test_by_period_months_back_out_of_range_is_422` | `months_back=3` (outside the documented 0–2 presets) → 422 |
 | `test_by_period_months_back_1_is_last_month` | `months_back=1` query param restricts `by-period` to the prior calendar month, end to end (U0.4 AC) |
+| `test_by_period_period_offset` | `period=month&offset=-1` restricts `by-period` to the prior calendar month, end to end (U0.2 AC) |
+| `test_by_period_period_and_offset_positive_is_422` | `offset=1` → 422 — the future is unreachable at the API (U0.2 AC) |
+| `test_by_period_offset_without_period_is_422` | `offset` given without `period` → 422 |
+| `test_by_period_start_date_without_custom_is_422` | `start_date` given without `period=custom` → 422 (U0.2 AC) |
+| `test_by_period_period_and_months_back_is_422` | `period` combined with `months_back` → 422 (mutually exclusive selector families, U0.2 AC) |
+| `test_by_period_period_and_start_is_422` | `period` combined with `start` → 422 (mutually exclusive selector families, U0.2 AC) |
+| `test_by_period_custom_with_offset_is_422` | `period=custom` combined with a non-zero `offset` → 422 (`resolve_period`'s `ValueError` mapped by the route) |
+| `test_by_period_custom_missing_dates_is_422` | `period=custom` without `start_date`/`end_date` → 422 (`resolve_period`'s `ValueError` mapped by the route) |
+| `test_by_category_period_offset_passthrough` | `period`/`offset` are threaded through to `by-category` the same way as `by-period` |
 | `test_by_category_months_back_passthrough` | `months_back` is threaded through to `by-category` the same way as `by-period` |
 
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)

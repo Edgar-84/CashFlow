@@ -308,6 +308,158 @@ async def test_by_period_months_back_1_is_last_month(
     assert response.json()["total"] == 1200
 
 
+async def test_by_period_period_offset(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
+) -> None:
+    last_month = datetime.now(UTC).replace(day=1) - timedelta(days=1)
+    this_month = datetime.now(UTC)
+    override_repos(
+        [
+            make_expense(account_id=account_id, amount=1200, created_at=last_month),
+            make_expense(account_id=account_id, amount=9999, created_at=this_month),
+        ]
+    )
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "offset": -1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1200
+
+
+async def test_by_period_period_and_offset_positive_is_422(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "offset": 1},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_by_period_offset_without_period_is_422(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"offset": -1},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_by_period_start_date_without_custom_is_422(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "start_date": "2026-01-01"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_by_period_period_and_months_back_is_422(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "months_back": 1},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_by_period_period_and_start_is_422(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "start": "2026-07-01T00:00:00Z"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_by_period_custom_with_offset_is_422(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={
+            "period": "custom",
+            "offset": -1,
+            "start_date": "2026-01-01",
+            "end_date": "2026-01-31",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+async def test_by_period_custom_missing_dates_is_422(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"period": "custom"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_by_category_period_offset_passthrough(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
+) -> None:
+    category_id = uuid4()
+    last_month = datetime.now(UTC).replace(day=1) - timedelta(days=1)
+    this_month = datetime.now(UTC)
+    override_repos(
+        [
+            make_expense(
+                account_id=account_id, category_id=category_id, amount=700, created_at=last_month
+            ),
+            make_expense(
+                account_id=account_id, category_id=category_id, amount=9999, created_at=this_month
+            ),
+        ]
+    )
+
+    response = await client.get(
+        "/statistics/by-category",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "offset": -1},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [{"category_id": str(category_id), "total": 700}]
+
+
 async def test_by_category_months_back_passthrough(
     client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
 ) -> None:
