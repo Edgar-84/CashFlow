@@ -498,7 +498,7 @@ touched** (D316) — it keeps its `months_back` chips.
       Files: `webapp/src/styles/tokens.css`,
       `webapp/src/lib/category-colors.ts`,
       `webapp/tests/category-colors.test.ts`. Model: haiku.
-- [ ] **U1.4 `components/period-selector.ts`** — pure render + thin mount, the
+- [x] **U1.4 `components/period-selector.ts`** — pure render + thin mount, the
       first module in `src/components/`. AC: **every acceptance criterion in
       `docs/ui/components/period-selector.md`**, notably — five tabs in the
       documented order and wording; the active tab is 600 weight with a 2px
@@ -1067,6 +1067,16 @@ every unit below.
   index-signature requirement, which neither union member declares even
   though every member's values are `string | number | undefined` — a known TS
   limitation, not a soundness gap.
+- D327 (2026-08-05): **`PeriodSelectorProps` gains `now: Date`**, not in the
+  component doc's original TS snippet. The component renders its label via
+  `lib/period.ts::describe(value, now)`, and every sibling in this plan that
+  needs the current instant takes it as an injected param rather than reading
+  the clock itself — `resolve_period`'s own `now`, U0.2b's `_local_today`, and
+  U1.8's explicit "the module calls `new Date()` nowhere" AC for
+  `date-range-picker.ts`. A hidden `new Date()` here would be the one
+  inconsistent exception and would make `renderPeriodSelector` non-deterministic
+  under test. `docs/ui/components/period-selector.md`'s Inputs interface
+  updated in the same change.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1355,8 +1365,47 @@ every unit below.
   with one proving the 12-slot default (categories 1–12 get real slots, 13–14
   are null) plus a new explicit-`maxSlots=6` test to keep that call shape
   covered; added a slot-12 case to `categorySlotCssVar`. verify.sh green.
-- Next: **U1.4** — `components/period-selector.ts`. Start with `/clear`,
-  then `/unit U1.4 docs/plans/mini-app-v3.md`.
+- **U1.4 done**: `webapp/src/components/period-selector.ts` — the first
+  module in `src/components/`. `renderPeriodSelector(props)` (pure, HTML
+  string) + `mount(root, props)` (thin DOM glue, the same "not meaningfully
+  unit-testable under Node" gap every screen's `mount` already carries —
+  `vitest.config`'s `environment: "node"` means `document` is undefined in
+  tests). Five tabs (`Day`/`Week`/`Month`/`Year`/`Period`) drive
+  `onUnitChange`, except the "Period" tab which calls `onOpenPicker` instead
+  (D313: there is no meaningful `unit: "custom"` state until the picker
+  returns dates). The label (always) and the "Period" tab both call
+  `onOpenPicker`. The `›` arrow at `offset: 0` renders `aria-disabled="true"`
+  and stays visible; `mount`'s click handler for it also short-circuits
+  before calling `onOffsetChange`, so the no-op holds even though it isn't
+  the native `disabled` attribute. `unit: "custom"` omits both arrow elements
+  entirely rather than hiding them via CSS. `disabled` (offline) sets the
+  native `disabled` attribute on every tab/arrow/label and a `.disabled`
+  class on the container (50% opacity) — matches the `.tile:disabled`/
+  `budgets.ts` convention already in `app.css`. No colour token other than
+  `--ink`/`--ink-secondary`/`--separator` appears anywhere in the render
+  output; `--accent` and `--category-slot-*` are absent by construction.
+  `app.css` gained the `.period-tab*`/`.period-nav`/`.period-arrow`/
+  `.period-label*` rules — sizes copied verbatim from
+  `design-system.md` (44px tab/nav rows, 44×44 arrow hit targets, 14px/
+  15px type). Focus-visible outline is `--ink`, not `.chip:focus-visible`'s
+  `--category-slot-1` convention (reviewer-found BLOCKER, fixed same unit):
+  this component's own AC forbids rendering any category colour, so its
+  focus ring can't borrow the chip pattern verbatim; no dedicated focus
+  token exists yet (design-system's own open question), `--ink` is the
+  nearest compliant choice. D327: `PeriodSelectorProps` gained `now: Date`
+  (component
+  doc updated in the same change) so the label comes from
+  `describe(value, now)` without the module ever calling `new Date()` itself.
+  9 new tests in `webapp/tests/period-selector.test.ts`, all against
+  `renderPeriodSelector`'s output (five-tab order/wording, active-tab
+  class/aria-selected, no accent/category-colour token, offset-0
+  `aria-disabled`, both-arrows-present at offset −1, both-arrows-absent
+  under `unit: "custom"` with the range label, label/Period-tab tappability,
+  disabled state on every element). `mount`'s callback wiring (which tap
+  fires which callback) is exercised for real for the first time once U1.5
+  wires this component into Home — same gap, not a new one. verify.sh green.
+- Next: **U1.5** — Home wires the period selector. Start with `/clear`, then
+  `/unit U1.5 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

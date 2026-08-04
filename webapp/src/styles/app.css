@@ -905,6 +905,115 @@ body {
   cursor: pointer;
 }
 
+/* -- period selector (U1.4) -------------------------------------------------
+   docs/ui/components/period-selector.md. Chrome is ink only — no --accent,
+   no category colour; the active tab is weight + underline, never colour
+   alone. The component is never itself in a loading state, so it has no
+   skeleton variant. */
+.period-selector {
+  margin-bottom: 12px;
+}
+
+.period-selector.disabled {
+  opacity: 0.5;
+}
+
+.period-tabs {
+  display: flex;
+  height: 44px;
+}
+
+.period-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink-secondary);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.period-tab.active {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.period-tab-text {
+  padding-bottom: 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.period-tab.active .period-tab-text {
+  border-bottom-color: var(--ink);
+}
+
+.period-nav {
+  display: flex;
+  align-items: center;
+  height: 44px;
+}
+
+.period-arrow {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.period-arrow[aria-disabled="true"] {
+  color: var(--ink-secondary);
+  opacity: 0.4;
+  cursor: default;
+}
+
+.period-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.period-label-text {
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.period-tab:active,
+.period-arrow:active,
+.period-label:active {
+  opacity: 0.6;
+}
+
+.period-tab:focus-visible,
+.period-arrow:focus-visible,
+.period-label:focus-visible {
+  /* --ink, not the .chip:focus-visible --category-slot-1 convention: this
+     component's own AC forbids rendering any category colour. */
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */

@@ -53,5 +53,20 @@ Implement exactly ONE unit from an approved plan.
    them (git commit/push are pre-approved for this project in
    .claude/settings.local.json). If the human declines, wants edits, or
    doesn't respond with a clear yes, do nothing further.
+11. If the PR was opened, watch its CI status: `gh pr checks <PR> --watch`
+   (this blocks until the CI workflow finishes; the Deploy workflow is
+   separate and only fires after a merge to master, so don't watch for it
+   here).
+   - If checks fail, report which ones and stop — do not ask about
+     merging a red PR.
+   - If checks pass, ask: "CI is green — do you have an approve and want
+     to merge this PR?" If the human confirms, merge with
+     `gh pr merge <PR> --merge` (merge commit, matching this repo's
+     history and branch-protection settings — not squash/rebase) and
+     report the result. Merging into master triggers CI on master, which
+     on success triggers the Deploy workflow automatically
+     (`.github/workflows/deploy.yml`, `workflow_run` on CI) — no
+     additional action needed to start the deploy. If the human declines
+     or doesn't respond with a clear yes, do nothing further.
 
 Arguments (unit id + plan file): $ARGUMENTS
