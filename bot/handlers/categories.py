@@ -30,6 +30,7 @@ class CategoryBackendClient(Protocol):
     lets tests pass a fake without depending on the concrete httpx-backed class."""
 
     async def list_categories(self) -> list[CategoryResponse]: ...
+    async def get_category(self, category_id: UUID) -> CategoryResponse: ...
     async def create_category(self, data: CategoryCreate) -> CategoryResponse: ...
     async def update_category(
         self, category_id: UUID, data: CategoryUpdate
@@ -38,14 +39,42 @@ class CategoryBackendClient(Protocol):
 
 
 _BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
+_DELETED_MESSAGE = "Category deleted."
+_ARCHIVED_MESSAGE = (
+    "Category hidden — it's still attached to past expenses, so it no longer "
+    "appears when adding new ones, but old expenses keep showing it."
+)
 
 
 def _error_message(exc: httpx.HTTPStatusError) -> str:
     if exc.response.status_code == 403:
         return "You don't have permission to do that."
     if exc.response.status_code == 409:
+        # D302 (U0.4): an in-use category is archived, not rejected — this
+        # only fires on the repo's defensive race-condition branch
+        # (services/category_service.py), where it stays true: something
+        # started referencing the category between the usage check and the
+        # delete call.
         return "This category is still in use by expenses or budget plans."
     return "Something went wrong. Please try again."
+
+
+async def _delete_confirmation_message(client: CategoryBackendClient, category_id: UUID) -> str:
+    # D302: DELETE always returns 204, whether the category was archived
+    # (is_active=False, in use) or hard-deleted (gone) — GET is the only way
+    # to tell them apart, and it needs no new endpoint (models/category.py
+    # already exposes is_active; services/category_service.py's get() never
+    # filters archived rows).
+    try:
+        category = await client.get_category(category_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 404:
+            logger.exception("Failed to confirm category deletion outcome")
+        return _DELETED_MESSAGE
+    except httpx.HTTPError:
+        logger.exception("Failed to confirm category deletion outcome")
+        return _DELETED_MESSAGE
+    return _DELETED_MESSAGE if category.is_active else _ARCHIVED_MESSAGE
 
 
 async def cmd_list_categories(message: Message, client: CategoryBackendClient) -> None:
@@ -183,8 +212,9 @@ async def on_delete_category_selected(
             await callback.message.edit_text(_BACKEND_UNREACHABLE)
         return
     await state.clear()
+    text = await _delete_confirmation_message(client, callback_data.category_id)
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Category deleted.")
+        await callback.message.edit_text(text)
 
 
 async def on_cancel_command(message: Message, state: FSMContext) -> None:

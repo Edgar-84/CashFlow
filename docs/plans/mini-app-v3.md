@@ -442,7 +442,7 @@ criteria; a value not in those files does not go into CSS.
       Files: `services/expense_service.py`, `services/budget_service.py`,
       `tests/test_expense_service.py`, `tests/test_budget_service.py`.
       Model: sonnet.
-- [ ] **U0.8 Bot copy follows the new semantics** — the only bot change in
+- [x] **U0.8 Bot copy follows the new semantics** — the only bot change in
       this plan. `bot/handlers/categories.py`'s "still in use by expenses or
       budget plans" 409 message and both handlers' "Category/Tag deleted."
       confirmation are now wrong for the in-use case.
@@ -1269,13 +1269,39 @@ every unit below.
   made), 1 in `test_budget_service.py` (create on archived category →
   `ConflictError` + no plan written). `tests/README.md` updated. No new
   decisions — implemented exactly to the plan's AC. verify.sh green.
-- Next: **U0.8** — Bot copy follows the new semantics. Start with `/clear`,
-  then `/unit U0.8 docs/plans/mini-app-v3.md`.
-- **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
-  U0.2a (done) → U0.2b (done) → U0.2c (done) → U0.4 (done) → U0.5 (done) →
-  U0.6 (done) → U0.7 (done) → U0.8… The migration ran ahead of the statistics
-  work so the period queries are written against `spent_at` once rather than
-  written against `created_at` and rewritten a unit later.
+- **U0.8 done**: `DELETE /categories/{id}` and `DELETE /tags/{id}` both still
+  return bare 204 either way (no contract change — U0.4/U0.5 archive-or-delete
+  is unchanged); the bot tells the two outcomes apart itself by following the
+  delete with a `GET /categories/{id}`/`GET /tags/{id}` (`_delete_confirmation_
+  message` in each handler module), which already returns the row un-filtered
+  by `is_active` (`CategoryService.get`/`TagService.get` never applied the
+  archived filter, only `list()` did). 404 or `is_active=True` → the existing
+  "Category/Tag deleted." copy; `is_active=False` → new copy naming that it's
+  hidden but past expenses keep it. The 409 `_error_message` branch and its
+  copy are untouched — D302 archives in-use categories on the normal path, so
+  409 only fires on the pre-existing defensive `ForeignKeyViolationError` race
+  (count was 0, something referenced the category before the delete landed),
+  where "still in use" stays literally true. No change to
+  `bot/keyboards.py`/`categories_keyboard`/`tags_keyboard` or to
+  `list_categories`/`list_tags` — `GET /categories`/`GET /tags` already default
+  `include_archived=false` since U0.4/U0.5, so archived rows were already
+  absent from the bot's pickers before this unit (D306, verified by reading
+  the code, not a new test — nothing in the bot changes that path). Added
+  `get_category`/`get_tag` to the two `Protocol` classes (the concrete
+  `BackendClient` already had both methods, unused by these handlers until
+  now). 2 new tests (one per module): in-use delete shows the "hidden" copy,
+  not "deleted". `FakeCategoryBackendClient`/`FakeTagBackendClient` gained an
+  `archive_on_delete` flag and a `get_category`/`get_tag` fake to drive both
+  branches. `tests/README.md` updated. No new decisions — implemented exactly
+  to the plan's AC. verify.sh green.
+- Next: **U1.1** — `lib/period.ts`. Start with `/clear`, then
+  `/unit U1.1 docs/plans/mini-app-v3.md`. M0 is fully done; M1 begins the
+  webapp period-selection work — read `docs/ui/components/period-selector.md`
+  first (task-methodology skill: decompose the spec, not the screenshot).
+- **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
+  U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
+  statistics work so the period queries are written against `spent_at` once
+  rather than written against `created_at` and rewritten a unit later.
 - Gotchas:
   - **Take the CP0 Supabase snapshot before `alembic upgrade head` ever runs
     against production** for this migration — still not done as of U0.3
@@ -1306,8 +1332,6 @@ every unit below.
     "simplify" the alias away — see D316.
   - M3 is ordered after M2 because screen 02's "More" and "+ Add tag" navigate
     to screens 06 and 07. Building M3 first ships two dead buttons.
-  - U0.4 and U0.8 are a pair — see Risks. Do not leave the repo between them
-    for long.
   - `resolve_period` returns half-open `[start, end)` UTC-aware bounds because
     that is what `expense_repo.get_by_period` expects; `end_date` from the
     client is *inclusive*, so the conversion adds a day. Getting this backwards
