@@ -27,6 +27,7 @@ function expense(overrides: Partial<ExpenseResponse> = {}): ExpenseResponse {
     amount: 1250,
     comment: null,
     category_id: "cat-groceries",
+    spent_at: "2026-07-29",
     user_id: "user-1",
     account_id: "acc-1",
     created_at: "2026-07-29T10:00:00Z",

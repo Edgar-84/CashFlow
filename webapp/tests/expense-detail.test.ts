@@ -29,6 +29,7 @@ function expenseResponse(overrides: Partial<ExpenseResponse> = {}): ExpenseRespo
     amount: 3840,
     comment: "weekly shop",
     category_id: "cat-groceries",
+    spent_at: "2026-08-02",
     user_id: "user-1",
     account_id: "acc-1",
     created_at: "2026-08-02T09:00:00Z",

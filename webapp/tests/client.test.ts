@@ -207,6 +207,62 @@ describe("ApiClient — query params", () => {
   });
 });
 
+describe("ApiClient — PeriodQuery (D313)", () => {
+  it("period=custom serializes start_date/end_date and nothing else", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse({}));
+
+    await client.statisticsByPeriod({ period: "custom", start_date: "2026-07-09", end_date: "2026-07-17" });
+
+    const { url } = lastCall(fetchFn);
+    expect(url).toBe(
+      "https://api.test/statistics/by-period?period=custom&start_date=2026-07-09&end_date=2026-07-17",
+    );
+  });
+
+  it("a unit serializes period and offset and nothing else", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse([]));
+
+    await client.statisticsByCategory({ period: "month", offset: -1 });
+
+    const { url } = lastCall(fetchFn);
+    expect(url).toBe("https://api.test/statistics/by-category?period=month&offset=-1");
+  });
+
+  it("offset=0 is sent explicitly rather than omitted", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse([]));
+
+    await client.statisticsByTag({ period: "day", offset: 0 });
+
+    const { url } = lastCall(fetchFn);
+    expect(url).toBe("https://api.test/statistics/by-tag?period=day&offset=0");
+  });
+
+  it("never sends months_back for a PeriodQuery call", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse({}));
+
+    await client.statisticsByPeriod({ period: "week", offset: 0 });
+
+    const { url } = lastCall(fetchFn);
+    expect(url).not.toContain("months_back");
+  });
+
+  it("a 422 from a conflicting selector surfaces as a typed ApiError, not a crash", async () => {
+    const { client } = makeClient(
+      jsonResponse(
+        { detail: "at most one of period/offset, months_back, or start/end may be given" },
+        { status: 422 },
+      ),
+    );
+
+    await expect(
+      client.statisticsByPeriod({ period: "month", offset: 0 }),
+    ).rejects.toBeInstanceOf(ApiError);
+    await expect(
+      client.statisticsByPeriod({ period: "month", offset: 0 }),
+    ).rejects.not.toBeInstanceOf(RetryableError);
+  });
+});
+
 describe("ApiClient — payload discipline", () => {
   let fetchFn: ReturnType<typeof vi.fn>;
   let client: ApiClient;

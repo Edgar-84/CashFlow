@@ -477,7 +477,7 @@ touched** (D316) — it keeps its `months_back` chips.
       absence of any such export).
       Files: `webapp/src/lib/period.ts`, `webapp/tests/period.test.ts`.
       Model: sonnet.
-- [ ] **U1.2 ApiClient period params + types** — the three statistics methods
+- [x] **U1.2 ApiClient period params + types** — the three statistics methods
       take a `PeriodQuery`; `api/types.ts` mirrors U0.2b's `spent_at` and
       U0.2c's `account_name`. AC: against a fake fetch — `period=custom`
       serializes `start_date`/`end_date` as `YYYY-MM-DD` and nothing else; a
@@ -1043,6 +1043,30 @@ every unit below.
   `Response` and `Create`/`Update` are deliberately asymmetric until U2.2
   ships; that unit is expected to widen `Create`/`Update` to `1–12` once
   slots 7–12 are validated, not to touch this unit's range again.
+- D326 (2026-08-04): **U1.2's three `ApiClient` statistics methods take
+  `StatisticsQuery = PeriodQuery | { months_back?: number }`**, not a bare
+  `PeriodQuery`. U1.2's own file list is `api/client.ts`/`api/types.ts`/
+  `tests/client.test.ts` only — `screens/home.ts` and `screens/statistics.ts`
+  still call with `{ months_back }` (Home migrates in U1.5; Statistics never
+  does, per D316) — so a bare `PeriodQuery` parameter would fail
+  `pnpm typecheck` on those two unlisted, out-of-scope files without a single
+  line in this unit's diff explaining why. The union keeps both call shapes
+  compiling and is exactly D316's "two period vocabularies coexist in the
+  client," made concrete in the one place both vocabularies cross. The
+  client.test.ts AC (`period=custom` serializes only its two date fields, a
+  unit sends `period`+`offset` with `offset=0` explicit, no `months_back` key
+  ever appears on a `PeriodQuery` call, a 422 yields a typed `ApiError`) is
+  asserted against the `PeriodQuery` half only — the `months_back` half keeps
+  its pre-existing coverage unchanged. Rejected: a bare `PeriodQuery` (matches
+  the plan prose most literally, but breaks two unlisted files and would force
+  either widening this unit's scope past its file list or leaving `verify.sh`
+  red); two differently-named methods, one per vocabulary (avoids the union,
+  but `StatisticsApi`/`HomeApi` in the unmodified screens already declare a
+  single method name per statistic, so this would still require touching
+  them). `params: query as QueryParams` casts past `QueryParams`'s explicit
+  index-signature requirement, which neither union member declares even
+  though every member's values are `string | number | undefined` — a known TS
+  limitation, not a soundness gap.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1306,9 +1330,20 @@ every unit below.
   31-day month starting on a Sunday" — a fixed grid size, not a
   variable 5/6-row one. No new decisions; implemented to the plan's AC.
   33 new tests in `webapp/tests/period.test.ts`. verify.sh green.
-- Next: **U1.2** — ApiClient period params + types. Start with `/clear`, then
-  `/unit U1.2 docs/plans/mini-app-v3.md`. Its `PeriodQuery` should import
-  `lib/period.ts`'s type rather than redeclare it.
+- **U1.2 done**: `ApiClient.statisticsByPeriod`/`ByCategory`/`ByTag` now take
+  `StatisticsQuery = PeriodQuery | { months_back?: number }` (D326) — imports
+  `PeriodQuery` from `lib/period.ts` rather than redeclaring it, per the U1.1
+  handoff note. `api/types.ts` gained `ExpenseResponse`/`Create`/`Update
+  .spent_at` (U0.2b already merged; `account_name` on `UserMeResponse` turned
+  out already present from an earlier unit, nothing to add there). Adding
+  `ExpenseResponse.spent_at` as a required field broke three out-of-scope
+  fixture literals (`tests/add-expense.test.ts`, `expense-detail.test.ts`,
+  `expenses.test.ts`) — fixed by adding the one field to each, the minimal
+  fix to keep `verify.sh` green. 5 new tests in `webapp/tests/client.test.ts`
+  covering the `PeriodQuery` half of the AC; the pre-existing `months_back`
+  tests are untouched since that path still exists. verify.sh green.
+- Next: **U1.3** — Design tokens: 12 slots + accent. Start with `/clear`,
+  then `/unit U1.3 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

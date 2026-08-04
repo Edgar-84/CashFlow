@@ -69,6 +69,9 @@ export interface ExpenseResponse {
   amount: number;
   comment: string | null;
   category_id: Uuid;
+  /** The day the expense happened, `YYYY-MM-DD` — distinct from `created_at`
+   * (D314). Filters and statistics aggregate on this, not `created_at`. */
+  spent_at: string;
   user_id: Uuid;
   account_id: Uuid;
   created_at: IsoTimestamp;
@@ -84,15 +87,20 @@ export interface ExpenseCreate {
   amount: number;
   comment?: string | null;
   category_id: Uuid;
+  /** `YYYY-MM-DD`. Omitted defaults to today in `family_tz` (D314) — the
+   * bot needs no change for this reason. A future date is rejected (422). */
+  spent_at?: string;
   tag_ids?: Uuid[];
 }
 
 /** PATCH /expenses/{id} payload — every field optional (partial update,
- * four-schema pattern). */
+ * four-schema pattern). `spent_at`, like `amount`/`category_id`, is a
+ * NOT NULL column with no "clear" semantics — omit it to leave unchanged. */
 export interface ExpenseUpdate {
   amount?: number;
   comment?: string | null;
   category_id?: Uuid;
+  spent_at?: string;
   tag_ids?: Uuid[];
 }
 
