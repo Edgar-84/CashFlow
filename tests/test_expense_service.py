@@ -1,6 +1,6 @@
 """Unit tests for services/expense_service.py — mocked repository, no DB (tests/CLAUDE.md)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -43,6 +43,7 @@ class FakeExpenseRepo:
             amount=data["amount"],
             comment=data.get("comment"),
             category_id=data["category_id"],
+            spent_at=data.get("spent_at", date.today()),
             user_id=data["user_id"],
             account_id=account_id,
             created_at=datetime.now(UTC),
@@ -183,6 +184,7 @@ def make_service(
     tag_repo: Any = None,
     user_repo: Any = None,
     notification_service: Any = None,
+    family_tz: str = "UTC",
 ) -> ExpenseService:
     return ExpenseService(
         repo,
@@ -191,6 +193,7 @@ def make_service(
         tag_repo if tag_repo is not None else FakeTagRepo(),
         user_repo if user_repo is not None else FakeUserRepo(),
         notification_service if notification_service is not None else FakeNotificationService(),
+        family_tz,
     )
 
 
@@ -780,3 +783,113 @@ async def test_update_own_category_and_tags_pass() -> None:
 
     assert updated.category_id == category.id
     assert [t.id for t in updated.tags] == [tag.id]
+
+
+# --- U0.2b: spent_at on the write path (D314) ------------------------------
+
+
+async def test_create_defaults_spent_at_to_today_in_family_tz() -> None:
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
+    service = make_service(
+        FakeExpenseRepo([]), category_repo=FakeCategoryRepo([category]), family_tz="Europe/Belgrade"
+    )
+    # 23:30 UTC on the 3rd is already 01:30 on the 4th in Belgrade (UTC+2).
+    now = datetime(2026, 8, 3, 23, 30, tzinfo=UTC)
+    data = ExpenseCreate(amount=500, category_id=category.id)
+
+    created = await service.create(data, caller, now=now)
+
+    assert created.spent_at == date(2026, 8, 4)
+
+
+async def test_create_explicit_spent_at_is_stored() -> None:
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
+    service = make_service(FakeExpenseRepo([]), category_repo=FakeCategoryRepo([category]))
+    data = ExpenseCreate(amount=500, category_id=category.id, spent_at=date(2026, 7, 1))
+
+    created = await service.create(data, caller)
+
+    assert created.spent_at == date(2026, 7, 1)
+
+
+async def test_create_future_spent_at_raises_value_error() -> None:
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
+    service = make_service(FakeExpenseRepo([]), category_repo=FakeCategoryRepo([category]))
+    now = datetime(2026, 8, 3, 12, 0, tzinfo=UTC)
+    data = ExpenseCreate(amount=500, category_id=category.id, spent_at=date(2026, 8, 4))
+
+    with pytest.raises(ValueError):
+        await service.create(data, caller, now=now)
+
+
+async def test_create_spent_at_today_in_family_tz_accepted_at_boundary() -> None:
+    # 21:30 UTC on the 3rd is 23:30 local in Belgrade (UTC+2) — still the 3rd.
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
+    service = make_service(
+        FakeExpenseRepo([]), category_repo=FakeCategoryRepo([category]), family_tz="Europe/Belgrade"
+    )
+    now = datetime(2026, 8, 3, 21, 30, tzinfo=UTC)
+    data = ExpenseCreate(amount=500, category_id=category.id, spent_at=date(2026, 8, 3))
+
+    created = await service.create(data, caller, now=now)
+
+    assert created.spent_at == date(2026, 8, 3)
+
+
+async def test_create_spent_at_tomorrow_in_family_tz_rejected_at_boundary() -> None:
+    # Same instant as the accepted-boundary test above; the 4th is still the
+    # future by one local calendar day.
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    category = make_category(account_id=account_id)
+    service = make_service(
+        FakeExpenseRepo([]), category_repo=FakeCategoryRepo([category]), family_tz="Europe/Belgrade"
+    )
+    now = datetime(2026, 8, 3, 21, 30, tzinfo=UTC)
+    data = ExpenseCreate(amount=500, category_id=category.id, spent_at=date(2026, 8, 4))
+
+    with pytest.raises(ValueError):
+        await service.create(data, caller, now=now)
+
+
+async def test_update_changes_spent_at() -> None:
+    account_id = uuid4()
+    expense = make_expense(account_id=account_id)
+    service = make_service(FakeExpenseRepo([expense]))
+
+    updated = await service.update(expense.id, ExpenseUpdate(spent_at=date(2026, 7, 1)), account_id)
+
+    assert updated.spent_at == date(2026, 7, 1)
+
+
+async def test_update_explicit_null_spent_at_is_ignored_not_nulled() -> None:
+    # spent_at is a NOT NULL column with no "clear" semantics (D30/D32
+    # pattern, same as amount/category_id) — an explicit null must not reach
+    # the repo as SET spent_at = NULL.
+    account_id = uuid4()
+    expense = make_expense(account_id=account_id)
+    service = make_service(FakeExpenseRepo([expense]))
+
+    updated = await service.update(expense.id, ExpenseUpdate(spent_at=None), account_id)
+
+    assert updated.spent_at == expense.spent_at
+
+
+async def test_update_future_spent_at_raises_value_error() -> None:
+    account_id = uuid4()
+    expense = make_expense(account_id=account_id)
+    service = make_service(FakeExpenseRepo([expense]))
+    now = datetime(2026, 8, 3, 12, 0, tzinfo=UTC)
+
+    with pytest.raises(ValueError):
+        await service.update(
+            expense.id, ExpenseUpdate(spent_at=date(2026, 8, 4)), account_id, now=now
+        )

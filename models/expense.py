@@ -10,6 +10,9 @@ class ExpenseBase(BaseModel):
     amount: int  # minor units (kopecks/cents) — NEVER float
     comment: str | None = None
     category_id: UUID  # NOT NULL (D2) — every account has a seeded "General" category
+    # the day the expense happened, distinct from created_at (D314). None on
+    # write means "default to today in family_tz" (ExpenseService.create).
+    spent_at: date | None = None
 
 
 class ExpenseCreate(ExpenseBase):
@@ -26,6 +29,7 @@ class ExpenseUpdate(BaseModel):
     comment: str | None = None
     category_id: UUID | None = None
     tag_ids: list[UUID] | None = None
+    spent_at: date | None = None
 
 
 class ExpenseResponse(ExpenseBase):
@@ -34,9 +38,9 @@ class ExpenseResponse(ExpenseBase):
     account_id: UUID
     created_at: datetime
     updated_at: datetime  # DB-trigger-maintained (set_updated_at) — never set by app code
-    # the day the expense happened, distinct from created_at (D314). Not yet
-    # on ExpenseCreate/Update — writing it is U0.2b; default here only eases
-    # constructing fixtures that predate the column.
+    # narrows ExpenseBase's Optional back to a concrete date — a stored row
+    # always has one; the default_factory only eases constructing fixtures
+    # that predate the column.
     spent_at: date = Field(default_factory=date.today)
     tags: list[TagResponse] = []
     # populated by a repo LEFT JOIN on users.name; None for old fixtures or a

@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from api.deps import PermissionChecker, PermissionDecision, enforce_ownership, get_expense_service
 from models.enums import Action, Resource
@@ -52,7 +52,12 @@ async def create_expense(
     user: Annotated[UserResponse, Depends(PermissionChecker(Resource.EXPENSES, Action.CREATE))],
     service: Annotated[ExpenseService, Depends(get_expense_service)],
 ) -> ExpenseResponse:
-    return await service.create(data, user)
+    try:
+        return await service.create(data, user)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
 
 @router.patch("/{expense_id}", response_model=ExpenseResponse)
@@ -65,7 +70,12 @@ async def update_expense(
 ) -> ExpenseResponse:
     expense = await service.get(expense_id, user.account_id)
     enforce_ownership(request.state.permission_decision, user, expense.user_id)
-    return await service.update(expense_id, data, user.account_id)
+    try:
+        return await service.update(expense_id, data, user.account_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
 
 @router.delete("/{expense_id}", status_code=204)

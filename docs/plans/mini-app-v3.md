@@ -374,7 +374,7 @@ criteria; a value not in those files does not go into CSS.
       Files: `repositories/expense_repo.py`, `repositories/budget_plan_repo.py`,
       `tests/test_expense_repo.py`, `tests/test_budget_service.py`.
       Model: sonnet.
-- [ ] **U0.2b `spent_at` on the expense write path** (D314) —
+- [x] **U0.2b `spent_at` on the expense write path** (D314) —
       `ExpenseCreate`/`ExpenseUpdate`/`ExpenseResponse` carry it; the service
       defaults it to today **in `family_tz`**.
       AC: `POST /expenses` without `spent_at` stores the current family date —
@@ -1118,10 +1118,28 @@ every unit below.
   tests exercise the repos directly — closed by having
   `FakeExpensePeriodRepo.calls` record `tz` and asserting it in
   `test_by_period_default_uses_family_tz_not_utc`. verify.sh green.
-- Next: **U0.2b** — `spent_at` on the expense write path. Start with
-  `/clear`, then `/unit U0.2b docs/plans/mini-app-v3.md`.
+- Done: **U0.2b** — `ExpenseBase` gains `spent_at: date | None = None`
+  (`ExpenseCreate`/`ExpenseUpdate` inherit it optional; `ExpenseResponse`
+  keeps its own required-with-fixture-default override, narrowing Base's
+  Optional back to a concrete date). `ExpenseService` takes a `family_tz`
+  (threaded from `get_settings().family_tz` in `api/deps.py::
+  get_expense_service`, the same pattern `get_statistics_service` already
+  uses) and a private `_local_today(tz, now=None)` helper — `now` is
+  injectable, mirroring `resolve_period`'s own `now` param, so the DST/
+  boundary AC ("23:30 local in a UTC+N zone") is deterministically testable.
+  `create()` defaults an omitted `spent_at` to `_local_today`; both
+  `create()`/`update()` reject a future `spent_at` with `ValueError`, mapped
+  to 422 in `api/expenses.py` (same `except ValueError` pattern
+  `api/statistics.py` already uses). `update()` folds `spent_at` into the
+  existing D30/D32 "explicit null is ignored, not nulled" list alongside
+  `amount`/`category_id` — it's a `NOT NULL` column with no clear semantics.
+  13 new tests (8 in `test_expense_service.py` incl. the two boundary cases,
+  5 in `test_expenses_api.py`); `tests/README.md` updated. No new decisions —
+  implemented to the Contracts section and the gotcha below. verify.sh green.
+- Next: **U0.2c** — `UserMeResponse.account_name`. Start with `/clear`, then
+  `/unit U0.2c docs/plans/mini-app-v3.md`.
 - **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
-  U0.2a (done) → **U0.2b** → U0.2c → U0.4… The migration ran ahead of the
+  U0.2a (done) → U0.2b (done) → U0.2c → U0.4… The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
   rather than written against `created_at` and rewritten a unit later.
 - Gotchas:
@@ -1132,9 +1150,6 @@ every unit below.
     (`(created_at AT TIME ZONE family_tz)::date`). A plain `created_at::date`
     moves late-night expenses into the wrong month — D120 again. Implemented
     in U0.3; see D320 for how it's tested without real `alembic` locally.
-  - U0.2b must add `spent_at` to `ExpenseCreate`/`ExpenseUpdate` (with the
-    service defaulting it to today in `family_tz`) — U0.3 deliberately left
-    the write side alone (D319).
   - U0.6 must add `color_slot` to `CategoryCreate`/`CategoryUpdate` with the
     `0`/`7`+ range check already proven on `CategoryResponse` in U0.3 — same
     reason (D319).

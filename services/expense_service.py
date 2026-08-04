@@ -1,8 +1,9 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, date, datetime
 from typing import Any, Protocol
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from models.budget_plan import BudgetPlanResponse
 from models.category import CategoryResponse
@@ -13,6 +14,16 @@ from models.user import UserResponse
 from services.period import month_bounds
 
 logger = logging.getLogger(__name__)
+
+
+def _local_today(tz: str, now: datetime | None = None) -> date:
+    """Today's wall-clock date in `tz` (D314) — the family-local default for
+    an omitted `spent_at` and the boundary for the future-date guard, same
+    "localize, then take the date" rule services.period uses. `now` is
+    injectable (mirrors resolve_period) so the DST/boundary cases in D314's
+    AC are deterministically testable rather than depending on the wall
+    clock at test-run time."""
+    return (now or datetime.now(UTC)).astimezone(ZoneInfo(tz)).date()
 
 
 class ExpenseRepositoryProtocol(Protocol):
@@ -94,6 +105,7 @@ class ExpenseService:
         tag_repo: TagLookupRepositoryProtocol,
         user_repo: UserRepositoryProtocol,
         notification_service: NotificationSenderProtocol,
+        family_tz: str = "UTC",
     ) -> None:
         self._expense_repo = expense_repo
         self._budget_plan_repo = budget_plan_repo
@@ -101,6 +113,7 @@ class ExpenseService:
         self._tag_repo = tag_repo
         self._user_repo = user_repo
         self._notification_service = notification_service
+        self._family_tz = family_tz
 
     async def get(self, expense_id: UUID, account_id: UUID) -> ExpenseResponse:
         expense = await self._expense_repo.get(expense_id)
@@ -108,15 +121,27 @@ class ExpenseService:
             raise NotFoundError(f"Expense {expense_id} not found")
         return expense
 
-    async def create(self, data: ExpenseCreate, user: UserResponse) -> ExpenseResponse:
+    async def create(
+        self, data: ExpenseCreate, user: UserResponse, *, now: datetime | None = None
+    ) -> ExpenseResponse:
         await self._validate_category(data.category_id, user.account_id)
         await self._validate_tags(data.tag_ids, user.account_id)
+        spent_at = data.spent_at or _local_today(self._family_tz, now)
+        self._validate_not_future(spent_at, now)
         payload = data.model_dump()
+        payload["spent_at"] = spent_at
         payload["account_id"] = user.account_id
         payload["user_id"] = user.id
         expense = await self._expense_repo.create(payload)
         await self._check_budget_and_notify(expense, user)
         return expense
+
+    def _validate_not_future(self, spent_at: date, now: datetime | None = None) -> None:
+        """D314: `spent_at` in the future is unreachable, consistent with
+        `resolve_period`'s `offset > 0` rule. Checked against the family-local
+        date, not UTC, so 23:30 local in a UTC+N zone still reads as today."""
+        if spent_at > _local_today(self._family_tz, now):
+            raise ValueError(f"spent_at {spent_at} is in the future")
 
     async def _validate_category(self, category_id: UUID, account_id: UUID) -> None:
         """U1.1: `category_id` must belong to the caller's account — foreign
@@ -206,21 +231,28 @@ class ExpenseService:
             )
 
     async def update(
-        self, expense_id: UUID, data: ExpenseUpdate, account_id: UUID
+        self,
+        expense_id: UUID,
+        data: ExpenseUpdate,
+        account_id: UUID,
+        *,
+        now: datetime | None = None,
     ) -> ExpenseResponse:
         current = await self.get(expense_id, account_id)  # 404 if missing or foreign
         payload = data.model_dump(exclude_unset=True)
-        # amount/category_id are NOT NULL columns with no "clear" semantics
-        # (D30/D32 pattern) — an explicit null must not reach the repo as
-        # SET amount = NULL. comment IS nullable (docs/SCHEMA.sql), so an
-        # explicit null there is a real "clear the comment", not dropped.
+        # amount/category_id/spent_at are NOT NULL columns with no "clear"
+        # semantics (D30/D32 pattern) — an explicit null must not reach the
+        # repo as SET amount = NULL. comment IS nullable (docs/SCHEMA.sql), so
+        # an explicit null there is a real "clear the comment", not dropped.
         # tag_ids has no NOT NULL constraint either (junction table) — the
         # repo already treats an explicit null the same as omitted.
-        for key in ("amount", "category_id"):
+        for key in ("amount", "category_id", "spent_at"):
             if key in payload and payload[key] is None:
                 del payload[key]
         if "category_id" in payload:
             await self._validate_category(payload["category_id"], account_id)
+        if "spent_at" in payload:
+            self._validate_not_future(payload["spent_at"], now)
         if payload.get("tag_ids") is not None:
             await self._validate_tags(payload["tag_ids"], account_id)
         if not payload:
