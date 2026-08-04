@@ -18,13 +18,29 @@ class FakeCategoryRepo:
         categories: list[CategoryResponse] | None = None,
         *,
         restricted_ids: set[UUID] | None = None,
+        expense_counts: dict[UUID, int] | None = None,
+        budget_counts: dict[UUID, int] | None = None,
     ) -> None:
         self._categories: dict[UUID, CategoryResponse] = {c.id: c for c in (categories or [])}
         self._restricted_ids = restricted_ids or set()
+        self._expense_counts = expense_counts or {}
+        self._budget_counts = budget_counts or {}
+
+    async def list_with_usage(
+        self, account_id: UUID, *, include_archived: bool
+    ) -> list[CategoryResponse]:
+        return [
+            c.model_copy(update={"expense_count": self._expense_counts.get(c.id, 0)})
+            for c in self._categories.values()
+            if c.account_id == account_id and (include_archived or c.is_active)
+        ]
 
     async def list(self, **filters: Any) -> list[CategoryResponse]:
-        account_id = filters.get("account_id")
-        return [c for c in self._categories.values() if c.account_id == account_id]
+        return [
+            c
+            for c in self._categories.values()
+            if all(getattr(c, key) == value for key, value in filters.items())
+        ]
 
     async def get(self, id: UUID) -> CategoryResponse | None:
         return self._categories.get(id)
@@ -54,10 +70,22 @@ class FakeCategoryRepo:
             )
         return self._categories.pop(id, None) is not None
 
+    async def count_expenses(self, category_id: UUID) -> int:
+        return self._expense_counts.get(category_id, 0)
 
-def make_category(*, account_id: UUID, name: str = "Groceries") -> CategoryResponse:
+    async def count_budget_plans(self, category_id: UUID) -> int:
+        return self._budget_counts.get(category_id, 0)
+
+
+def make_category(
+    *, account_id: UUID, name: str = "Groceries", is_active: bool = True
+) -> CategoryResponse:
     return CategoryResponse(
-        id=uuid4(), name=name, account_id=account_id, created_at=datetime.now(UTC)
+        id=uuid4(),
+        name=name,
+        account_id=account_id,
+        created_at=datetime.now(UTC),
+        is_active=is_active,
     )
 
 
@@ -71,6 +99,48 @@ async def test_list_scopes_by_account() -> None:
     result = await service.list(account_id)
 
     assert result == [mine]
+
+
+async def test_list_omits_archived_by_default() -> None:
+    account_id = uuid4()
+    active = make_category(account_id=account_id, name="Active")
+    archived = make_category(account_id=account_id, name="Archived", is_active=False)
+    service = CategoryService(FakeCategoryRepo([active, archived]))
+
+    result = await service.list(account_id)
+
+    assert result == [active]
+
+
+async def test_list_includes_archived_when_requested() -> None:
+    account_id = uuid4()
+    active = make_category(account_id=account_id, name="Active")
+    archived = make_category(account_id=account_id, name="Archived", is_active=False)
+    service = CategoryService(FakeCategoryRepo([active, archived]))
+
+    result = await service.list(account_id, include_archived=True)
+
+    assert {c.id for c in result} == {active.id, archived.id}
+
+
+async def test_list_without_usage_leaves_expense_count_none() -> None:
+    account_id = uuid4()
+    category = make_category(account_id=account_id)
+    service = CategoryService(FakeCategoryRepo([category], expense_counts={category.id: 3}))
+
+    result = await service.list(account_id)
+
+    assert result[0].expense_count is None
+
+
+async def test_list_with_usage_populates_expense_count() -> None:
+    account_id = uuid4()
+    category = make_category(account_id=account_id)
+    service = CategoryService(FakeCategoryRepo([category], expense_counts={category.id: 3}))
+
+    result = await service.list(account_id, include_usage=True)
+
+    assert result[0].expense_count == 3
 
 
 async def test_get_returns_category_in_account() -> None:
@@ -139,7 +209,7 @@ async def test_update_missing_raises_not_found() -> None:
         await service.update(uuid4(), CategoryUpdate(name="X"), uuid4())
 
 
-async def test_delete_removes_category() -> None:
+async def test_delete_unused_category_hard_deletes() -> None:
     account_id = uuid4()
     category = make_category(account_id=account_id)
     repo = FakeCategoryRepo([category])
@@ -148,6 +218,36 @@ async def test_delete_removes_category() -> None:
     await service.delete(category.id, account_id)
 
     assert await repo.get(category.id) is None
+
+
+async def test_delete_category_with_expenses_archives_instead_of_deleting() -> None:
+    # D302: a category still pointed at by an expense is archived, not
+    # deleted — the row (and every expense pointing at it) must survive.
+    account_id = uuid4()
+    category = make_category(account_id=account_id)
+    repo = FakeCategoryRepo([category], expense_counts={category.id: 1})
+    service = CategoryService(repo)
+
+    await service.delete(category.id, account_id)
+
+    survivor = await repo.get(category.id)
+    assert survivor is not None
+    assert survivor.is_active is False
+
+
+async def test_delete_category_with_only_budget_plan_archives_not_deletes() -> None:
+    # D307: a budget plan alone (no expenses) is also enough to archive
+    # rather than hard-delete — the plan's history must not be lost.
+    account_id = uuid4()
+    category = make_category(account_id=account_id)
+    repo = FakeCategoryRepo([category], budget_counts={category.id: 1})
+    service = CategoryService(repo)
+
+    await service.delete(category.id, account_id)
+
+    survivor = await repo.get(category.id)
+    assert survivor is not None
+    assert survivor.is_active is False
 
 
 async def test_delete_missing_raises_not_found() -> None:
@@ -159,9 +259,12 @@ async def test_delete_missing_raises_not_found() -> None:
 
 async def test_delete_referenced_category_raises_conflict() -> None:
     # docs/SCHEMA.sql: expenses.category_id / budget_plans.category_id are
-    # ON DELETE RESTRICT (plan Decision log D5). The repo surfaces this as a
-    # raw asyncpg.ForeignKeyViolationError; the service must translate it to
-    # a domain ConflictError (mapped to a clean 409 by main.py), not a 500.
+    # ON DELETE RESTRICT (plan Decision log D5). With usage counts now
+    # deciding archive-vs-delete upfront (D302), the repo should never
+    # actually hit this constraint — but the service keeps translating a raw
+    # asyncpg.ForeignKeyViolationError into a domain ConflictError (mapped to
+    # a clean 409 by main.py) as a defensive branch, and this test keeps it
+    # covered even though it's unreachable in practice.
     account_id = uuid4()
     category = make_category(account_id=account_id)
     service = CategoryService(FakeCategoryRepo([category], restricted_ids={category.id}))

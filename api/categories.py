@@ -16,8 +16,12 @@ router = APIRouter(prefix="/categories", tags=["categories"])
 async def list_categories(
     user: Annotated[UserResponse, Depends(PermissionChecker(Resource.CATEGORIES, Action.READ))],
     service: Annotated[CategoryService, Depends(get_category_service)],
+    include_archived: bool = False,
+    include_usage: bool = False,
 ) -> list[CategoryResponse]:
-    return await service.list(user.account_id)
+    return await service.list(
+        user.account_id, include_archived=include_archived, include_usage=include_usage
+    )
 
 
 @router.get("/{category_id}", response_model=CategoryResponse)
