@@ -69,6 +69,17 @@ def category(account_id: UUID) -> CategoryResponse:
     )
 
 
+@pytest.fixture
+def archived_category(account_id: UUID) -> CategoryResponse:
+    return CategoryResponse(
+        id=uuid4(),
+        name="Old Category",
+        account_id=account_id,
+        created_at=datetime.now(UTC),
+        is_active=False,
+    )
+
+
 OverrideRepos = Callable[..., FakeCategoryRepo]
 
 
@@ -77,13 +88,22 @@ def override_repos(
     app: FastAPI, admin: UserResponse, member: UserResponse, viewer: UserResponse
 ) -> OverrideRepos:
     def _apply(
-        categories: list[CategoryResponse] | None = None, *, restricted_ids: set[UUID] | None = None
+        categories: list[CategoryResponse] | None = None,
+        *,
+        restricted_ids: set[UUID] | None = None,
+        expense_counts: dict[UUID, int] | None = None,
+        budget_counts: dict[UUID, int] | None = None,
     ) -> FakeCategoryRepo:
         app.dependency_overrides[deps.get_user_repo] = lambda: TgLookupFakeUserRepo(
             [admin, member, viewer]
         )
         app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo([])
-        repo = FakeCategoryRepo(categories, restricted_ids=restricted_ids)
+        repo = FakeCategoryRepo(
+            categories,
+            restricted_ids=restricted_ids,
+            expense_counts=expense_counts,
+            budget_counts=budget_counts,
+        )
         app.dependency_overrides[deps.get_category_repo] = lambda: repo
         return repo
 
@@ -102,6 +122,54 @@ async def test_list_categories_as_member_returns_account_categories(
 
     assert response.status_code == 200
     assert [c["id"] for c in response.json()] == [str(category.id)]
+
+
+async def test_list_categories_omits_archived_by_default(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    category: CategoryResponse,
+    archived_category: CategoryResponse,
+) -> None:
+    override_repos([category, archived_category])
+
+    response = await client.get("/categories", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert [c["id"] for c in response.json()] == [str(category.id)]
+
+
+async def test_list_categories_includes_archived_with_flag(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    category: CategoryResponse,
+    archived_category: CategoryResponse,
+) -> None:
+    override_repos([category, archived_category])
+
+    response = await client.get(
+        "/categories?include_archived=true", headers=auth_headers(member.tg_id)
+    )
+
+    assert response.status_code == 200
+    assert {c["id"] for c in response.json()} == {str(category.id), str(archived_category.id)}
+
+
+async def test_list_categories_with_usage_populates_expense_count(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    category: CategoryResponse,
+) -> None:
+    override_repos([category], expense_counts={category.id: 5})
+
+    response = await client.get(
+        "/categories?include_usage=true", headers=auth_headers(member.tg_id)
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["expense_count"] == 5
 
 
 async def test_get_category_as_viewer(
@@ -226,13 +294,32 @@ async def test_delete_category_as_member_is_403(
     assert response.status_code == 403
 
 
+async def test_delete_category_with_expenses_as_admin_archives_not_deletes(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    admin: UserResponse,
+    category: CategoryResponse,
+) -> None:
+    # D302: a category still referenced by an expense is archived, not
+    # deleted — the row and every expense pointing at it must survive.
+    repo = override_repos([category], expense_counts={category.id: 1})
+
+    response = await client.delete(f"/categories/{category.id}", headers=auth_headers(admin.tg_id))
+
+    assert response.status_code == 204
+    survivor = await repo.get(category.id)
+    assert survivor is not None
+    assert survivor.is_active is False
+
+
 async def test_delete_referenced_category_as_admin_is_409(
     client: AsyncClient,
     override_repos: OverrideRepos,
     admin: UserResponse,
     category: CategoryResponse,
 ) -> None:
-    # RESTRICT delete (D5) must surface as a clean 409, not a 500.
+    # Defensive branch (D302 makes it unreachable in practice): the RESTRICT
+    # constraint (D5), if it ever fires, must still surface as a clean 409.
     override_repos([category], restricted_ids={category.id})
 
     response = await client.delete(f"/categories/{category.id}", headers=auth_headers(admin.tg_id))

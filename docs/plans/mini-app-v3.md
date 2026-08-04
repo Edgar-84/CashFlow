@@ -396,7 +396,7 @@ criteria; a value not in those files does not go into CSS.
       Files: `models/user.py`, `repositories/user_repo.py`, `api/users.py`,
       `webapp/src/api/types.ts`, `tests/test_users_api.py`.
       Model: haiku.
-- [ ] **U0.4 Category usage counts + archive-or-delete** — the rule from D302
+- [x] **U0.4 Category usage counts + archive-or-delete** — the rule from D302
       in `CategoryService.delete`, plus `list_with_usage` and the two route
       flags. AC: deleting a category with zero expenses **and** zero budget
       plans removes the row; deleting one with expenses leaves the row with
@@ -1161,13 +1161,53 @@ every unit below.
   `test_users_api.py`'s currency test (renamed to assert both fields) and its
   "no leak on `/users`" test, plus `webapp/tests/client.test.ts`'s response-
   parsing fixture. `tests/README.md` updated. verify.sh green.
-- Next: **U0.4** — Category usage counts + archive-or-delete. Start with
-  `/clear`, then `/unit U0.4 docs/plans/mini-app-v3.md`.
+- Done: **U0.4** — `CategoryRepository` gains `list_with_usage(account_id, *,
+  include_archived)` (one `LEFT JOIN expenses … GROUP BY`, `expense_count`
+  populated), `count_expenses(category_id)`, `count_budget_plans(category_id)`.
+  `CategoryService.list` gains `include_archived`/`include_usage` kwargs:
+  without `include_usage` it stays on the generic `repo.list(**filters)`,
+  adding `is_active=True` to the filters unless `include_archived` — no new
+  SQL needed for the common case; with `include_usage` it delegates to
+  `list_with_usage`. `CategoryService.delete` now checks both counts first
+  (D302 "in use" = an expense **or** a budget plan, D307): either one present
+  archives (`is_active=False`) instead of deleting; the old `try/except
+  asyncpg.ForeignKeyViolationError → ConflictError` path is kept as a
+  defensive branch (the counts should make `ON DELETE RESTRICT` unreachable)
+  and stays covered by its existing test. `GET /categories` gains
+  `include_archived`/`include_usage` query params, both defaulting to `false`
+  (D306). One naming gotcha hit while wiring the `Protocol`/`FakeCategoryRepo`
+  duck types: a class method named `list` shadows the builtin `list` for any
+  *later*-defined method's `list[...]` annotation in the same class body
+  (Python binds the name into the class namespace as soon as the `def`
+  finishes, and annotations are resolved against that namespace at
+  definition time even under normal, non-deferred evaluation) — `mypy` catches
+  it as "Function ... is not valid as a type" and it's a real `TypeError` at
+  import time, not just a lint nit. Fixed by declaring `list_with_usage`
+  *before* `list` in both `CategoryRepositoryProtocol` and `FakeCategoryRepo`;
+  no decision-log entry, just a landmine for whoever writes `TagRepository`'s
+  mirror in U0.5. New/changed tests: 5 in `test_category_service.py` (list
+  archived-filtering ×2, usage-population ×2, delete archives-on-expense,
+  delete archives-on-budget-plan-only), 5 in `test_categories_api.py`
+  (mirroring the list/delete cases at the HTTP layer), 4 in
+  `test_category_repo.py` (`count_expenses`, `count_budget_plans`,
+  `list_with_usage` usage + archived-filtering) — the last four run against a
+  real throwaway Postgres via `scripts/integration_docker.sh` since they
+  exercise a hand-written `LEFT JOIN`. `tests/README.md` updated. Reviewer:
+  1 round, APPROVE, no BLOCKERs — 2 NITs left as-is (no `ORDER BY` on the
+  plain `list()` path vs. `list_with_usage`'s `ORDER BY created_at`, both
+  pre-existing/out of scope; two sequential count queries in `delete()`
+  instead of one `EXISTS`, by design per the plan's two-method contract).
+  verify.sh green.
+- Next: **U0.5** — Tag usage counts + archive-or-delete, the mechanical
+  mirror of U0.4 over `expense_tags` — watch for the same `list`/
+  `list_with_usage` ordering landmine in `TagRepositoryProtocol`/
+  `FakeTagRepo`. Start with `/clear`, then
+  `/unit U0.5 docs/plans/mini-app-v3.md`.
 - **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
-  U0.2a (done) → U0.2b (done) → U0.2c (done) → U0.4… The migration ran ahead
-  of the statistics work so the period queries are written against
-  `spent_at` once rather than written against `created_at` and rewritten a
-  unit later.
+  U0.2a (done) → U0.2b (done) → U0.2c (done) → U0.4 (done) → U0.5… The
+  migration ran ahead of the statistics work so the period queries are
+  written against `spent_at` once rather than written against `created_at`
+  and rewritten a unit later.
 - Gotchas:
   - **Take the CP0 Supabase snapshot before `alembic upgrade head` ever runs
     against production** for this migration — still not done as of U0.3
@@ -1204,3 +1244,14 @@ every unit below.
   - The bot must not need a single line changed for archived categories to
     disappear from its keyboards (D306). If a unit finds itself editing
     `bot/keyboards.py`, the default is wrong, not the keyboard.
+  - In a `Protocol` or duck-typed fake, don't name a method `list` and then
+    give a *later*-defined method in the same class a `list[...]` return/param
+    annotation — the name `list` is bound into the class namespace as soon as
+    the `def list(...)` statement finishes, so it shadows the builtin for
+    every annotation evaluated afterward in that class body, and `list[...]`
+    on a plain function object is a `TypeError` at import time (mypy also
+    catches it: "Function ... is not valid as a type"). Define any
+    `list[...]`-returning helper (e.g. `list_with_usage`) *before* `list`
+    itself. Hit in U0.4's `CategoryRepositoryProtocol`/`FakeCategoryRepo`;
+    U0.5's `TagRepositoryProtocol`/`FakeTagRepo` mirror will hit it too if
+    methods are added in the wrong order.

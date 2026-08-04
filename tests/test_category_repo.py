@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
-from factories import make_account
+from factories import make_account, make_budget_plan, make_expense, make_user
 
 from repositories.category_repo import CategoryRepository
 
@@ -78,3 +78,71 @@ async def test_duplicate_name_per_account_is_currently_allowed(
 
     assert first.id != second.id
     assert first.name == second.name == "Groceries"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_count_expenses(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = CategoryRepository(db_conn)
+    category = await repo.create({"name": "Groceries", "account_id": account_id})
+    category_id = category.id
+
+    assert await repo.count_expenses(category_id) == 0
+
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=category_id)
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=category_id)
+
+    assert await repo.count_expenses(category_id) == 2
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_count_budget_plans(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    repo = CategoryRepository(db_conn)
+    category = await repo.create({"name": "Groceries", "account_id": account_id})
+
+    assert await repo.count_budget_plans(category.id) == 0
+
+    await make_budget_plan(db_conn, account_id=account_id, category_id=category.id)
+
+    assert await repo.count_budget_plans(category.id) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_with_usage_populates_expense_count(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = CategoryRepository(db_conn)
+    used = await repo.create({"name": "Groceries", "account_id": account_id})
+    unused = await repo.create({"name": "Transport", "account_id": account_id})
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=used.id)
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=used.id)
+
+    results = await repo.list_with_usage(account_id, include_archived=False)
+
+    by_id = {c.id: c for c in results}
+    assert by_id[used.id].expense_count == 2
+    assert by_id[unused.id].expense_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_with_usage_excludes_archived_unless_requested(
+    db_conn: asyncpg.Connection,
+) -> None:
+    account_id = await make_account(db_conn)
+    repo = CategoryRepository(db_conn)
+    active = await repo.create({"name": "Groceries", "account_id": account_id})
+    archived = await repo.create({"name": "Old", "account_id": account_id})
+    updated = await repo.update(archived.id, {"is_active": False})
+    assert updated is not None
+
+    default_results = await repo.list_with_usage(account_id, include_archived=False)
+    assert {c.id for c in default_results} == {active.id}
+
+    all_results = await repo.list_with_usage(account_id, include_archived=True)
+    assert {c.id for c in all_results} == {active.id, archived.id}

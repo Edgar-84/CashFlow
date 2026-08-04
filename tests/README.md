@@ -71,6 +71,10 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_delete_missing_returns_false` | `delete()` on a missing id returns `False` |
 | `test_list_filters_by_account` | `list(account_id=...)` scopes results to one account |
 | `test_duplicate_name_per_account_is_currently_allowed` | Documents that `docs/SCHEMA.sql` has no `UNIQUE(account_id, name)` — duplicate names within an account currently succeed (plan Decision log D19) |
+| `test_count_expenses` | `count_expenses()` counts rows in `expenses` pointing at the category, 0 when none |
+| `test_count_budget_plans` | `count_budget_plans()` counts rows in `budget_plans` pointing at the category, 0 when none |
+| `test_list_with_usage_populates_expense_count` | `list_with_usage()` populates `expense_count` per category via the `LEFT JOIN expenses` (U0.4) |
+| `test_list_with_usage_excludes_archived_unless_requested` | `list_with_usage(include_archived=False)` omits `is_active=false` rows; `include_archived=True` includes them (D306) |
 
 ### `test_tag_repo.py` → [`repositories/tag_repo.py`](../repositories/tag_repo.py)
 | Test | Checks |
@@ -234,6 +238,10 @@ Hermetic — `CategoryRepositoryProtocol` replaced with an in-memory `FakeCatego
 | Test | Checks |
 |---|---|
 | `test_list_scopes_by_account` | `list()` excludes another account's categories |
+| `test_list_omits_archived_by_default` | `list()` excludes `is_active=false` rows unless asked (D306) |
+| `test_list_includes_archived_when_requested` | `list(include_archived=True)` includes them |
+| `test_list_without_usage_leaves_expense_count_none` | `list()` without `include_usage` never calls `list_with_usage`, so `expense_count` stays `None` even if the repo has counts |
+| `test_list_with_usage_populates_expense_count` | `list(include_usage=True)` delegates to `list_with_usage()` and surfaces its `expense_count` |
 | `test_get_returns_category_in_account` | `get()` returns a category belonging to the given account |
 | `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
 | `test_get_foreign_account_raises_not_found` | `get()` on a category from another account raises `NotFoundError` |
@@ -241,9 +249,11 @@ Hermetic — `CategoryRepositoryProtocol` replaced with an in-memory `FakeCatego
 | `test_update_changes_fields` | `update()` applies a partial `CategoryUpdate` |
 | `test_update_explicit_null_is_ignored_not_nulled` | An explicit `{"name": null}` is ignored, not sent to the repo as `SET name = NULL` (same D30 precedent as users) |
 | `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
-| `test_delete_removes_category` | `delete()` removes the row via the repo |
+| `test_delete_unused_category_hard_deletes` | `delete()` on a category with zero expenses and zero budget plans removes the row (D302) |
+| `test_delete_category_with_expenses_archives_instead_of_deleting` | `delete()` on a category with an expense sets `is_active=false` instead of deleting it, expenses stay pointed at it (D302) |
+| `test_delete_category_with_only_budget_plan_archives_not_deletes` | A budget plan alone (no expenses) is also enough to archive rather than hard-delete (D307) |
 | `test_delete_missing_raises_not_found` | `delete()` on an unknown id raises `NotFoundError` |
-| `test_delete_referenced_category_raises_conflict` | A `RESTRICT`-violating delete (`asyncpg.ForeignKeyViolationError` from the repo) is translated to `ConflictError` (plan Decision log D5) |
+| `test_delete_referenced_category_raises_conflict` | Defensive branch: a `RESTRICT`-violating delete (`asyncpg.ForeignKeyViolationError` from the repo) is still translated to `ConflictError`, though usage counts should make it unreachable (plan Decision log D5, D302) |
 
 ## Service tests (`test_tag_service.py`) → [`services/tag_service.py`](../services/tag_service.py)
 Hermetic — `TagRepositoryProtocol` replaced with an in-memory `FakeTagRepo`. No DB.
@@ -427,6 +437,9 @@ replaced by in-memory fakes via `app.dependency_overrides`. No DB.
 | Test | Checks |
 |---|---|
 | `test_list_categories_as_member_returns_account_categories` | Member `GET /categories` returns the account's categories (default matrix: read-only) |
+| `test_list_categories_omits_archived_by_default` | `GET /categories` omits `is_active=false` rows by default (D306) |
+| `test_list_categories_includes_archived_with_flag` | `GET /categories?include_archived=true` includes them |
+| `test_list_categories_with_usage_populates_expense_count` | `GET /categories?include_usage=true` populates `expense_count` |
 | `test_get_category_as_viewer` | Viewer `GET /categories/{id}` returns the category |
 | `test_get_missing_category_is_404` | Unknown id → 404 |
 | `test_create_category_as_admin` | Admin `POST /categories` → 201 |
@@ -434,9 +447,10 @@ replaced by in-memory fakes via `app.dependency_overrides`. No DB.
 | `test_create_category_as_viewer_is_403` | Viewer `POST /categories` → 403 |
 | `test_update_category_as_admin` | Admin `PATCH /categories/{id}` applies a partial update |
 | `test_update_category_as_member_is_403` | Member `PATCH /categories/{id}` → 403 |
-| `test_delete_category_as_admin` | Admin `DELETE /categories/{id}` → 204, row removed |
+| `test_delete_category_as_admin` | Admin `DELETE /categories/{id}` on an unused category → 204, row removed |
+| `test_delete_category_with_expenses_as_admin_archives_not_deletes` | Admin `DELETE /categories/{id}` on a category with expenses → 204, row survives with `is_active=false` (D302) |
 | `test_delete_category_as_member_is_403` | Member `DELETE /categories/{id}` → 403 |
-| `test_delete_referenced_category_as_admin_is_409` | `RESTRICT`-violating delete → 409 (`ConflictError` mapped by `main.py`'s handler) |
+| `test_delete_referenced_category_as_admin_is_409` | Defensive branch: `RESTRICT`-violating delete → 409 (`ConflictError` mapped by `main.py`'s handler) |
 
 ## API/route tests (`test_tags_api.py`) → [`api/tags.py`](../api/tags.py)
 Hermetic — the real app with `TagRepository`/`UserRepository`/`PermissionRepository`
