@@ -462,7 +462,7 @@ Implements `docs/ui/screens/01-home.md`, `docs/ui/components/period-selector.md`
 and `docs/ui/components/date-range-picker.md`. **Screen 05 (Statistics) is not
 touched** (D316) — it keeps its `months_back` chips.
 
-- [ ] **U1.1 `lib/period.ts`** — pure, no DOM, no I/O. AC: parametrized
+- [x] **U1.1 `lib/period.ts`** — pure, no DOM, no I/O. AC: parametrized
       vitest — `toQuery` emits exactly one selector family and never
       `months_back`; `describe` renders **every row** of the label-format
       table in `docs/ui/components/period-selector.md` ("Today, August 4",
@@ -1294,10 +1294,21 @@ every unit below.
   `archive_on_delete` flag and a `get_category`/`get_tag` fake to drive both
   branches. `tests/README.md` updated. No new decisions — implemented exactly
   to the plan's AC. verify.sh green.
-- Next: **U1.1** — `lib/period.ts`. Start with `/clear`, then
-  `/unit U1.1 docs/plans/mini-app-v3.md`. M0 is fully done; M1 begins the
-  webapp period-selection work — read `docs/ui/components/period-selector.md`
-  first (task-methodology skill: decompose the spec, not the screenshot).
+- **U1.1 `lib/period.ts`** — done. `PeriodValue`/`PeriodQuery` match
+  `docs/ui/components/period-selector.md`'s TS snippet verbatim (component
+  will import these types in U1.4, not redefine them). `describe`/`monthGrid`/
+  `isValidRange` never touch a UTC instant: dates are parsed and formatted
+  by hand (`parseDateString`/`toDateString`), never `new Date("YYYY-MM-DD")`
+  or `.toISOString()` — the former parses as UTC midnight per spec, which
+  would have reintroduced D120 inside the one module explicitly forbidden
+  from doing tz math. `monthGrid` always returns 6 full weeks (42 cells)
+  regardless of the month's actual layout, per the AC's "6×7 ... for a
+  31-day month starting on a Sunday" — a fixed grid size, not a
+  variable 5/6-row one. No new decisions; implemented to the plan's AC.
+  33 new tests in `webapp/tests/period.test.ts`. verify.sh green.
+- Next: **U1.2** — ApiClient period params + types. Start with `/clear`, then
+  `/unit U1.2 docs/plans/mini-app-v3.md`. Its `PeriodQuery` should import
+  `lib/period.ts`'s type rather than redeclare it.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
