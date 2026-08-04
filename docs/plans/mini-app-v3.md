@@ -421,7 +421,7 @@ criteria; a value not in those files does not go into CSS.
       Files: `repositories/tag_repo.py`, `services/tag_service.py`,
       `api/tags.py`, `tests/test_tag_service.py`, `tests/test_tags_api.py`.
       Model: sonnet.
-- [ ] **U0.6 Colour slot on create/update** — `CategoryCreate.color_slot`,
+- [x] **U0.6 Colour slot on create/update** — `CategoryCreate.color_slot`,
       `CategoryUpdate.color_slot`, and next-free-slot assignment when the
       client omits it. AC: creating without a colour assigns the lowest slot
       1–6 not already used by an **active** category in that account, and NULL
@@ -1033,6 +1033,16 @@ every unit below.
   touched: `models/user.py`, `api/deps.py`, `webapp/src/api/types.ts`,
   `tests/test_models.py`, `tests/test_users_api.py`,
   `webapp/tests/client.test.ts`, `tests/README.md`.
+- D325 (2026-08-04): **U0.6's `CategoryCreate`/`CategoryUpdate.color_slot`
+  validates `1–6`, not `1–12`**, even though `CategoryResponse.color_slot`
+  already validates `1–12` (D317, U0.3) and the Contracts section doesn't
+  itself pin a write-side range. The unit's own AC is explicit — "the lowest
+  slot 1–6", "`0`/`7`/`-1` → 422", "six colours, unbounded categories" — and
+  D317 says the 7–12 range exists for **U2.2's picker**, not for this unit's
+  auto-assign, and is still unvalidated against the dataviz tool. Binding:
+  `Response` and `Create`/`Update` are deliberately asymmetric until U2.2
+  ships; that unit is expected to widen `Create`/`Update` to `1–12` once
+  slots 7–12 are validated, not to touch this unit's range again.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1222,13 +1232,33 @@ every unit below.
   `TagService.delete` always 404s on cross-account first; `list_with_usage`'s
   `ORDER BY created_at` vs. plain `list()`'s no ordering) — both identical to
   already-accepted NITs from U0.4's own review, not new gaps.
-- Next: **U0.6** — Colour slot on create/update. Start with `/clear`, then
-  `/unit U0.6 docs/plans/mini-app-v3.md`.
+- **U0.6 done**: `CategoryCreate`/`CategoryUpdate` gain `color_slot: int |
+  None`, `ge=1, le=6` (see D325 for why 6, not `CategoryResponse`'s 12).
+  `CategoryService.create` assigns the lowest free slot when `color_slot` is
+  omitted (`_next_free_color_slot`: lists active categories in the account
+  via the existing `list(account_id=..., is_active=True)`, picks the lowest
+  of 1–6 not in their `color_slot` set, `None` once all six are taken); an
+  explicit `color_slot` bypasses the search entirely, even if already taken
+  (duplicates allowed by design). `update()` needed **no new code** — the
+  existing `exclude_unset`-then-drop-`None`s filter (D30 pattern, already
+  used for `name`) already gives `color_slot` both "omitted leaves it
+  untouched" and "explicit null is ignored, not cleared" for free. 15 new
+  tests in `test_category_service.py` (6 create free-slot cases incl.
+  cross-account isolation and archived-slot reuse, 2 range-validation cases
+  parametrized over `0`/`7`/`-1`, 3 update cases, plus the explicit-duplicate
+  case) — all hermetic against `FakeCategoryRepo`, no DB needed since the
+  logic is pure Python over `list()`'s existing output. `tests/README.md`
+  updated. No route/repo change: `api/categories.py` already passes
+  `CategoryCreate`/`Update` straight through, and `list(account_id=...,
+  is_active=True)` already existed for U0.4's archived-filtering. verify.sh
+  green.
+- Next: **U0.7** — Archived categories are closed for writing. Start with
+  `/clear`, then `/unit U0.7 docs/plans/mini-app-v3.md`.
 - **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
   U0.2a (done) → U0.2b (done) → U0.2c (done) → U0.4 (done) → U0.5 (done) →
-  U0.6… The migration ran ahead of the statistics work so the period queries
-  are written against `spent_at` once rather than written against
-  `created_at` and rewritten a unit later.
+  U0.6 (done) → U0.7… The migration ran ahead of the statistics work so the
+  period queries are written against `spent_at` once rather than written
+  against `created_at` and rewritten a unit later.
 - Gotchas:
   - **Take the CP0 Supabase snapshot before `alembic upgrade head` ever runs
     against production** for this migration — still not done as of U0.3
@@ -1237,9 +1267,6 @@ every unit below.
     (`(created_at AT TIME ZONE family_tz)::date`). A plain `created_at::date`
     moves late-night expenses into the wrong month — D120 again. Implemented
     in U0.3; see D320 for how it's tested without real `alembic` locally.
-  - U0.6 must add `color_slot` to `CategoryCreate`/`CategoryUpdate` with the
-    `0`/`7`+ range check already proven on `CategoryResponse` in U0.3 — same
-    reason (D319).
   - U0.2a moves `budget_plan_repo.check_limit` to `spent_at` too. That is
     deliberate: a backdated expense counts toward the budget of the month it
     was spent in. Leaving `check_limit` on `created_at` would make budgets
@@ -1252,6 +1279,12 @@ every unit below.
     gap this unit didn't introduce and isn't fixing, but the moment it's
     closed elsewhere, forgetting the `tz=` kwarg here reintroduces D323's
     exact bug — silently, since every existing test uses UTC-aligned bounds.
+  - **U2.2's Files list doesn't include `models/category.py`, but it needs
+    to.** `CategoryCreate`/`CategoryUpdate.color_slot` currently validate
+    `1–6` (U0.6, D325) — U2.2's twelve-swatch picker will send `7–12` the
+    first time a user picks one of the new slots, and that 422s until
+    someone widens the range to match `CategoryResponse`'s existing `1–12`.
+    Don't discover this via a failing manual test; widen it as part of U2.2.
   - `months_back=2` (3 months) has **no** `{period, offset}` equivalent. Do not
     "simplify" the alias away — see D316.
   - M3 is ordered after M2 because screen 02's "More" and "+ Add tag" navigate

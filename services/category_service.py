@@ -55,7 +55,22 @@ class CategoryService:
     async def create(self, data: CategoryCreate, account_id: UUID) -> CategoryResponse:
         payload = data.model_dump()
         payload["account_id"] = account_id
+        if payload["color_slot"] is None:
+            payload["color_slot"] = await self._next_free_color_slot(account_id)
         return await self._category_repo.create(payload)
+
+    async def _next_free_color_slot(self, account_id: UUID) -> int | None:
+        # Lowest slot 1-6 not used by an active category in this account;
+        # None once all six are taken. An archived category's slot is free
+        # for reuse (only active rows are considered).
+        # Read-then-write, no locking: concurrent omitted-color_slot creates
+        # could race onto the same slot — accepted, same as an explicit duplicate.
+        active = await self._category_repo.list(account_id=account_id, is_active=True)
+        used = {c.color_slot for c in active if c.color_slot is not None}
+        for slot in range(1, 7):
+            if slot not in used:
+                return slot
+        return None
 
     async def update(
         self, category_id: UUID, data: CategoryUpdate, account_id: UUID

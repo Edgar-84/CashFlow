@@ -250,8 +250,19 @@ Hermetic — `CategoryRepositoryProtocol` replaced with an in-memory `FakeCatego
 | `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
 | `test_get_foreign_account_raises_not_found` | `get()` on a category from another account raises `NotFoundError` |
 | `test_create_forces_account_id_from_caller` | `create()` stamps the caller's `account_id` |
+| `test_create_without_color_slot_assigns_lowest_free_slot` | Omitted `color_slot` picks the lowest slot not used by an active category (U0.6) |
+| `test_create_without_color_slot_skips_used_slots_out_of_order` | Slots 1 and 3 taken → new category gets 2, not 4 |
+| `test_create_without_color_slot_returns_none_once_all_six_taken` | All six slots taken → `color_slot` stays `None`, no wraparound |
+| `test_create_without_color_slot_ignores_other_accounts_slots` | Free-slot search is scoped to the caller's own account |
+| `test_create_without_color_slot_frees_archived_categorys_slot` | An archived category's slot is free for reuse — only active rows count as "used" |
+| `test_create_with_explicit_color_slot_keeps_it_even_if_taken` | An explicit `color_slot` bypasses the free-slot search entirely; duplicates are allowed by design |
+| `test_category_create_rejects_out_of_range_color_slot` | `CategoryCreate(color_slot=0\|7\|-1)` fails Pydantic validation (422 at the API layer) |
+| `test_category_update_rejects_out_of_range_color_slot` | Same range check on `CategoryUpdate` |
 | `test_update_changes_fields` | `update()` applies a partial `CategoryUpdate` |
 | `test_update_explicit_null_is_ignored_not_nulled` | An explicit `{"name": null}` is ignored, not sent to the repo as `SET name = NULL` (same D30 precedent as users) |
+| `test_update_only_name_leaves_color_slot_untouched` | Updating only `name` leaves an existing `color_slot` unchanged (U0.6) |
+| `test_update_explicit_color_slot_changes_it` | An explicit `color_slot` in `update()` is applied |
+| `test_update_explicit_null_color_slot_is_ignored_not_cleared` | An explicit `{"color_slot": null}` is ignored, same D30 precedent — there is no "clear back to auto" affordance |
 | `test_update_missing_raises_not_found` | `update()` on an unknown id raises `NotFoundError` |
 | `test_delete_unused_category_hard_deletes` | `delete()` on a category with zero expenses and zero budget plans removes the row (D302) |
 | `test_delete_category_with_expenses_archives_instead_of_deleting` | `delete()` on a category with an expense sets `is_active=false` instead of deleting it, expenses stay pointed at it (D302) |
