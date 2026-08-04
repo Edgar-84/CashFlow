@@ -1,5 +1,5 @@
-/* App-shell + component layout (docs/design/mini-app-ux.md §6 Visual
-   system). `tokens.css` owns colour variables only ("the token table...
+/* App-shell + component layout (docs/ui/design-system.md — spacing, type,
+   geometry). `tokens.css` owns colour variables only ("the token table...
    nothing else", webapp/CLAUDE.md); this file is everything else —
    geometry, spacing, type — shared across screens as they land. Home
    (U2.1) is the only consumer so far; extend rather than duplicate when

@@ -23,6 +23,16 @@ persistence/IO → wiring (handlers/routes) → integration smoke.
 Contracts are IMMUTABLE for units: if implementation hits a contract
 limitation — stop, record the change in the plan Decision log, then continue.
 
+## Frontend tasks: decompose the spec, never the screenshot
+For any UI work, read the relevant files under `docs/ui/` — `design-system.md`
+plus the screen or component spec — and decompose **those**. Their acceptance
+criteria become the units' acceptance criteria.
+
+If no spec file exists for the screen or component in question, **stop and say
+`ui-spec` needs to run first.** Never decompose from a pasted screenshot or a
+one-line verbal description: the screenshot dies with the session, and every
+unit after it invents its own values.
+
 ## Plan file = persistent memory
 One file per feature: docs/plans/<feature>.md (template: docs/plans/_template.md).
 Sections: Goal / Non-goals, Contracts, Units checklist (each with an

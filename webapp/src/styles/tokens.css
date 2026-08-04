@@ -1,4 +1,4 @@
-/* The token table from docs/design/mini-app-ux.md §6 — nothing else.
+/* The token table from docs/ui/design-system.md — nothing else.
    Light values are the defaults here; src/lib/telegram.ts::applyTheme()
    overwrites these custom properties at runtime from Telegram's colorScheme
    (and sets data-theme, used below as a build-time-free fallback for the

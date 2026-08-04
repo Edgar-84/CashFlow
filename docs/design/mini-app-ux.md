@@ -254,7 +254,8 @@ The one screen with a job the bot never had: it is where a category's colour is
 chosen and stored, which is what makes every donut, dot and bar elsewhere
 consistent. Each row doubles as a mini-report (count + month total).
 
-**Colour (V3, D301/D308)** — the picker is the **six palette swatches from §6**
+**Colour (V3, D301/D308)** — the picker is the **six palette swatches from
+`docs/ui/design-system.md`**
 and nothing else: no hex field, no wheel, no seventh hue. Each swatch carries
 its name and the chosen one is marked with a check, so the choice survives
 greyscale. Two categories may share a slot (six colours, unbounded categories);
@@ -331,41 +332,24 @@ flow that mutates must survive a double submit with exactly one write.
 
 ## 6. Visual system
 
-| Token | Light | Dark | Use |
-|-------|-------|------|-----|
-| App background | `#EDF0EF` | `#101415` | Grouped-list ground |
-| Card | `#FFFFFF` | `#1C2123` | Every content surface |
-| Ink | `#0E1416` | `#F1F5F4` | Text, buttons, chrome |
-| Ink secondary | `#6C7679` | `#97A1A3` | Meta, labels |
-| Separator | `#E4E8E7` | `#272D2F` | Row rules |
+**Moved.** The token table, category palette, type scale, geometry and motion
+values now live in **`docs/ui/design-system.md`**, which is the source of truth
+for anything an implementer types into CSS. `webapp/src/styles/tokens.css`
+tracks that file.
 
-**Category palette** — the validated colourblind-safe set, assigned in fixed
-slot order and **never cycled**. A category keeps its colour when filters change.
+This document keeps the *why*; `docs/ui/` keeps the *what to build*. New
+screens and components are specified as their own files under
+`docs/ui/screens/` and `docs/ui/components/`, produced by the `ui-spec` skill
+from reference screenshots committed to `docs/ui/refs/`.
 
-| Slot | Light | Dark |
-|------|-------|------|
-| 1 | `#2a78d6` | `#3987e5` |
-| 2 | `#eb6834` | `#d95926` |
-| 3 | `#1baf7a` | `#199e70` |
-| 4 | `#eda100` | `#c98500` |
-| 5 | `#e87ba4` | `#d55181` |
-| 6 | `#008300` | `#008300` |
+The two rules from §2 that govern every value there, restated because they are
+design intent rather than numbers:
 
-Status red (`#e34948` / `#e66767`) is **reserved for over-budget** and never
-used as a seventh category. It always ships with an icon and a word, so the
-state survives greyscale and colourblind readers.
-
-More than six categories: fold the tail into "Other" in the donut and keep the
-full list in the ranked bars. Never generate a seventh hue.
-
-**Type**: system UI stack throughout (whatever Telegram renders in). Amounts use
-tabular numerals at 700 weight and −0.035em tracking so columns line up and
-decimals do not dance. Section eyebrows are the only mono, at 10px/0.11em
-uppercase.
-
-**Geometry**: 14px card radius · 12px fields · 9px chips · 999px pills. Donut
-segments carry a 2px gap so adjacent colours never touch. Bar fills are rounded
-only on the data end and anchored to the baseline.
+- **Colour belongs to data.** Chrome is ink; the only saturated colour on any
+  screen is a spending category.
+- **The category palette is assigned by fixed slot order and never cycled**, so
+  a category keeps its colour when filters change. Status red is reserved for
+  over-budget and never becomes a seventh category.
 
 ---
 

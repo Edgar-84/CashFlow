@@ -45,8 +45,19 @@ the periods it was used in.
 - **Multi-currency, conversion, or any change to `accounts.currency`** (D211).
 - Offline write queueing, voice input, self-registration, the admin panel —
   unchanged from v2's non-goals.
-- **Removing `months_back`.** It stays as a deprecated alias for one deploy
-  cycle (D300); its removal is a named follow-up unit, not part of this plan.
+- **Removing `months_back`.** It stays as a deprecated alias (D300). Two
+  reasons now: a webview pinned to an old bundle keeps working, and screen 05
+  still sends it. `months_back=2` also has no `{period, offset}` equivalent —
+  a 3-month span is not a unit. Its removal is a named follow-up, not part of
+  this plan.
+- **Screen 05 (Statistics) is untouched** (D316). It keeps its `months_back`
+  chips and gains neither the period selector nor the calendar. The period
+  story lives on Home for this plan; extending it to Statistics is a separate
+  decision with its own units.
+- **Category icons.** Categories are identified by a **colour circle plus a
+  name**, never a glyph. No icon set, no `categories.icon` column, no icon
+  picker (design-system Iconography, resolved 2026-08-04). What replaces the
+  reference app's glyph vocabulary is user-chosen colour (D317).
 
 ## Constraints
 - All root CLAUDE.md rules, plus `webapp/CLAUDE.md` under `webapp/` and
@@ -59,10 +70,16 @@ the periods it was used in.
 - **The bot's auth path and header pair stay untouched.** Every existing bot
   and API test stays green.
 - Money is `BIGINT` minor units end to end; counts are integers.
-- **One migration, one human gate** — U0.3 adds all three columns
-  (`categories.is_active`, `categories.color_slot`, `tags.is_active`) in a
-  single revision. `migrations/versions/` is on root CLAUDE.md's
-  do-not-edit-without-asking list: that unit stops and asks before writing it.
+- **One migration, one human gate** — U0.3 adds all four columns
+  (`categories.is_active`, `categories.color_slot`, `tags.is_active`,
+  `expenses.spent_at`) in a single revision. `migrations/versions/` is on root
+  CLAUDE.md's do-not-edit-without-asking list: that unit stops and asks before
+  writing it.
+- **Appearance comes from `docs/ui/`, never from a screenshot or this file.**
+  `design-system.md` holds every token; the screen and component specs hold
+  every layout, state and user-visible string. A hex, size or radius not in
+  those files does not go into CSS — extend the design system first, in the
+  same change (root CLAUDE.md).
 - Unit budget per task-methodology: ≤ ~300 diff lines, ≤ 5 files, ≤ 1 new
   decision. Migration/boilerplate units may run larger.
 
@@ -70,15 +87,23 @@ the periods it was used in.
 
 ### Backend — `models/enums.py`
 
+**Revised by D313.** `PeriodPreset` (shipped in U0.1) is replaced by a unit +
+offset pair, because an enum of named presets cannot express "three weeks back"
+or "last year" and the Home tabs need exactly that:
+
 ```python
-class PeriodPreset(StrEnum):
-    TODAY = "today"
-    YESTERDAY = "yesterday"
-    THIS_MONTH = "this_month"
-    LAST_MONTH = "last_month"
-    LAST_3_MONTHS = "last_3_months"
-    CUSTOM = "custom"          # requires start_date AND end_date
+class PeriodUnit(StrEnum):
+    DAY = "day"
+    WEEK = "week"                # starts MONDAY (D315)
+    MONTH = "month"
+    YEAR = "year"
+    CUSTOM = "custom"            # requires start_date AND end_date, forbids offset
 ```
+
+`PeriodPreset` is **deleted**, not deprecated — it never reached a route (U0.2
+was never built), so nothing outside `services/period.py` and its tests
+references it. The deprecated selector that *does* have to survive is
+`months_back`, which is a route-level query param, not this enum.
 
 ### Backend — `services/period.py`
 
@@ -86,8 +111,9 @@ class PeriodPreset(StrEnum):
 MAX_RANGE_DAYS = 366
 
 def resolve_period(
-    preset: PeriodPreset | None,
+    unit: PeriodUnit | None,
     *,
+    offset: int = 0,             # <= 0 always; 0 = current, -1 = previous
     start_date: date | None = None,
     end_date: date | None = None,
     now: datetime | None = None,
@@ -95,17 +121,19 @@ def resolve_period(
 ) -> tuple[datetime, datetime]: ...
 ```
 
-- Returns a **half-open [start, end) pair of UTC-aware datetimes**, exactly the
-  shape `month_bounds` already returns and `expense_repo.get_by_period`
-  already expects.
-- Day boundaries are wall-clock midnights **in `tz`**, then converted to UTC.
-  `end_date` is **inclusive of that whole day** — `end` is the following local
-  midnight. A user picking `9 → 9 July` gets one full day.
-- `preset=None` → the current family month (today's behaviour, unchanged).
+- `unit=None` → the current family month, byte-for-byte today's behaviour.
+- `offset > 0` → `ValueError`. **The future is unreachable server-side**, not
+  merely disabled in the UI.
+- `offset` with `unit=CUSTOM` → `ValueError`.
+- Week bounds start **Monday** local (D315), resolved in `tz` like every other
+  bound. `WEEK`/`YEAR` are new shapes; `MONTH` keeps delegating to
+  `month_bounds` rather than re-deriving month arithmetic.
+- Everything U0.1 already established survives: half-open `[start, end)`
+  UTC-aware pairs, per-midnight localization so DST yields 23h/25h days, and
+  `end_date` inclusive of its whole local day.
 - `CUSTOM` without both dates, `start_date > end_date`, or a span over
   `MAX_RANGE_DAYS` → `ValueError` (the route maps it to 422).
-- `month_bounds` stays and keeps its callers; `resolve_period` delegates to it
-  for the three month-shaped presets rather than re-deriving month arithmetic.
+- `month_bounds` stays and keeps its callers.
 
 ### Backend — statistics routes (all three: `by-period`, `by-category`, `by-tag`)
 
@@ -113,35 +141,77 @@ New query params, on top of the existing ones:
 
 | Param | Type | Notes |
 |-------|------|-------|
-| `period` | `PeriodPreset \| None` | the new primary selector |
+| `period` | `PeriodUnit \| None` | the new primary selector (D313) |
+| `offset` | `int` (`le=0`), default `0` | only with a non-custom `period`; positive → 422 |
 | `start_date` | `date \| None` | `YYYY-MM-DD`, only with `period=custom` |
 | `end_date` | `date \| None` | inclusive |
-| `months_back` | `int \| None` | **deprecated** (D300); `0/1/2` → `this_month`/`last_month`/`last_3_months` |
+| `months_back` | `int \| None` | **deprecated** (D300); `0/1/2` → `month` offset `0`/`-1`, and `last_3_months` |
 | `start` / `end` | `datetime \| None` | unchanged; the bot's explicit-bounds path |
 
 Mutual exclusivity — **at most one selector family per request**, anything else
-is 422 with a message naming the conflict:
-`{period + start_date/end_date}` · `{months_back}` · `{start/end}`.
-`start_date`/`end_date` without `period=custom` → 422. Passing nothing at all →
-the current family month, byte-for-byte as today.
+is 422 with a message naming the conflict. Four families now:
+
+`{period + offset}` · `{period=custom + start_date/end_date}` ·
+`{months_back}` · `{start/end}`
+
+- `start_date`/`end_date` without `period=custom` → 422.
+- `offset` with `period=custom` → 422.
+- `offset > 0` → 422 (the future is closed at the API, not just the UI).
+- Passing nothing at all → the current family month, byte-for-byte as today.
+
+**`months_back` is not removable in this plan.** Screen 05 (Statistics) is out
+of scope (D316) and still sends it, and so does the bot. `months_back=2`
+(`last_3_months`) has **no `{period, offset}` equivalent** — a 3-month span is
+not a unit — so the alias is not merely a compatibility shim, it is the only
+way to express that window. Its removal stays a named follow-up.
+
+### Backend — `expenses.spent_at` (D314)
+
+The date an expense **happened**, distinct from `created_at`, which stays the
+audit trail of when the row was written.
+
+- Every period filter and every statistics aggregation moves from `created_at`
+  to `spent_at`. Three SQL sites: `expense_repo.get_by_period` and the
+  by-category query (`repositories/expense_repo.py`), and
+  `budget_plan_repo.check_limit` (`repositories/budget_plan_repo.py:31`).
+- **Budget progress follows** — a backdated expense counts toward the budget of
+  the month it was spent in, not the month it was typed in. That is the
+  intended meaning, and it is the reason `check_limit` is in the list.
+- `ExpenseBase` gains `spent_at: date`; `ExpenseCreate`/`ExpenseUpdate` accept
+  it, `ExpenseResponse` returns it.
+- **The bot needs no change**: omitting `spent_at` defaults to the current
+  family date, exactly today's behaviour.
+- A `spent_at` in the future → 422, consistent with `offset > 0`.
 
 ### Backend — schema (U0.3, migration)
 
 ```sql
 ALTER TABLE categories ADD COLUMN is_active  BOOLEAN  NOT NULL DEFAULT true;
-ALTER TABLE categories ADD COLUMN color_slot SMALLINT;              -- 1..6, NULL = auto
+ALTER TABLE categories ADD COLUMN color_slot SMALLINT;              -- 1..12, NULL = auto
 ALTER TABLE tags       ADD COLUMN is_active  BOOLEAN  NOT NULL DEFAULT true;
+ALTER TABLE expenses   ADD COLUMN spent_at   DATE     NOT NULL DEFAULT current_date;
 ```
+
+**Still one revision and one human gate** — `spent_at` (D314) joins the three
+archive/colour columns rather than getting a second gate. The constraint in
+this plan's Constraints section is unchanged; only the column count is.
 
 - `color_slot` is the **palette slot index**, not a hex value (D308) — each
   slot has a light and a dark variant in `tokens.css`, so a stored hex would
-  break theming. Validated at the Pydantic layer (1–6 or NULL), same
-  "TEXT/INT + comment, no DB CHECK" convention as `users.role` and
+  break theming. Validated at the Pydantic layer (**1–12** or NULL, widened by
+  D317), same "TEXT/INT + comment, no DB CHECK" convention as `users.role` and
   `accounts.currency`.
 - Backfill in the same revision: `color_slot` = the category's 1-based position
-  within its account ordered by `created_at ASC`, capped at 6 (NULL beyond) —
-  i.e. exactly the colours the app renders today (D206), frozen. Downgrade
-  drops all three columns.
+  within its account ordered by `created_at ASC`, capped at **6** (NULL beyond)
+  — i.e. exactly the colours the app renders today (D206), frozen. Slots 7–12
+  exist for a **user to choose**, and are never auto-assigned by the backfill,
+  so no colour moves on deploy.
+- `spent_at` backfill: `(created_at AT TIME ZONE :family_tz)::date`, so every
+  existing row keeps landing in the period it already appears in. A naive
+  `created_at::date` would shift rows across a month boundary for expenses
+  logged late at night in a UTC+N family timezone — the same class of bug as
+  D120.
+- Downgrade drops all four columns.
 
 ### Backend — categories & tags models
 
@@ -195,15 +265,28 @@ DELETE /tags/{id}         -> 204   (same rule)
 
 ### Frontend — `webapp/src`
 
-- `lib/period.ts` (new, pure): `PeriodSelection` = a preset id, or
-  `{ preset: "custom", startDate, endDate }` (`YYYY-MM-DD` strings);
-  `toQuery(sel)` → the query object `ApiClient` sends; `describe(sel)` → the
-  human label ("Yesterday", "9 – 17 Jul"); `monthGrid(year, month)` → the
-  6×7 day matrix the calendar renders (Monday-first, leading/trailing days
-  marked); `isValidRange(a, b)`.
-- `components/date-range-picker.ts` (new; first module in the `src/components/`
-  directory `webapp/CLAUDE.md` already reserves): pure `render()` + thin
-  `mount()`, no fetching, no `window.Telegram` beyond the shared adapter.
+**Appearance and interaction are specified in `docs/ui/`, not here.** These
+units implement `docs/ui/design-system.md`, `docs/ui/screens/01-home.md`,
+`docs/ui/screens/02-add-expense.md`, and the three component specs under
+`docs/ui/components/`. Their acceptance criteria are the units' acceptance
+criteria; a value not in those files does not go into CSS.
+
+- `lib/period.ts` (new, pure): `PeriodValue` = `{ unit, offset }` or
+  `{ unit: "custom", start, end }` (`YYYY-MM-DD` strings); `toQuery(v)` → the
+  query object `ApiClient` sends; `describe(v)` → the human label, per the
+  label-format table in `docs/ui/components/period-selector.md`;
+  `monthGrid(year, month)` → the 6×7 day matrix the calendar renders
+  (**Monday-first**, leading/trailing days marked); `isValidRange(a, b)`;
+  `clampOffset(n)`.
+- `components/period-selector.ts` (new): the five tabs + `‹ label ›` row.
+- `components/date-range-picker.ts` (new; first modules in the
+  `src/components/` directory `webapp/CLAUDE.md` already reserves): pure
+  `render()` + thin `mount()`, no fetching, no `window.Telegram` beyond the
+  shared adapter.
+- `components/category-picker.ts` (new): the 4-column colour-circle grid.
+- `styles/tokens.css`: category slots grow 6 → 12; `--accent`/`--accent-ink`
+  added for screen 01's Add button (the one declared exception to "chrome is
+  ink", D318).
 - `screens/categories.ts`, `screens/tags.ts` (new) — same layered shape as
   every existing screen: `load*` (never throws, cache fallback) /
   `build*Data` (pure) / `render*` (pure HTML string) / `mount` (DOM glue).
@@ -222,42 +305,97 @@ DELETE /tags/{id}         -> 204   (same rule)
 
 ### M0 — Backend
 
-- [x] **U0.1 `resolve_period` + `PeriodPreset`** — pure, no route, no service
-      wiring. AC: each of the five presets produces the documented window in a
-      non-UTC `family_tz` (use Belgrade, as U0.4 did); `today` at 23:30 local
-      on the last day of a month is that local day, not the UTC one; a custom
-      range is inclusive of `end_date`'s whole local day (a one-day range spans
-      exactly 24h, or 23/25h across a DST switch); `custom` missing a date,
-      reversed dates, and a span over `MAX_RANGE_DAYS` each raise `ValueError`;
-      `preset=None` returns exactly `month_bounds(now, tz)`.
+> **Execution order changed by D313/D314.** The migration (U0.3) now runs
+> **before** U0.2, so the statistics work is written against `spent_at` once
+> instead of being written against `created_at` and rewritten. Order:
+> **U0.1a → U0.3 → U0.2 → U0.2a → U0.2b → U0.2c → U0.4 …**
+
+- [x] **U0.1 `resolve_period` + `PeriodPreset`** — done, and its **contract is
+      superseded by U0.1a** (D313). The work is not wasted: the tz-correct
+      `[start, end)` shape, `_day_bounds`/`_local_midnight`, the DST handling
+      and most of `tests/test_period.py` all survive. Only the selector changes
+      from a preset enum to unit + offset.
+- [ ] **U0.1a `PeriodUnit` + offset replaces `PeriodPreset`** (D313) — pure,
+      no route, no service wiring. Deletes `PeriodPreset`, adds `PeriodUnit`,
+      reworks `resolve_period`'s signature, adds `WEEK`/`YEAR` bounds.
+      AC: `day`/`week`/`month`/`year` at `offset=0` and `offset=-1` each
+      produce the documented window in a non-UTC `family_tz` (Belgrade, as
+      U0.1 used); **weeks start Monday** — a Sunday 23:30 local belongs to the
+      week that began the preceding Monday, not the next one; `offset=-3` on
+      `week` is exactly 21 days before `offset=0`'s start; `year` at
+      `offset=-1` spans 1 Jan – 31 Dec of the previous year in local time;
+      `offset > 0` raises `ValueError` for **every** unit; `offset != 0` with
+      `unit=CUSTOM` raises; `unit=None` returns exactly `month_bounds(now, tz)`;
+      every DST and inclusive-`end_date` guarantee U0.1 established still holds
+      (its tests are edited, not deleted).
       Files: `models/enums.py`, `services/period.py`, `tests/test_period.py`.
       Model: sonnet.
-- [ ] **U0.2 Statistics adopts `period`** — routes + service consume
-      `resolve_period`; `months_back` becomes a deprecated alias mapped onto
-      the enum; the mutual-exclusivity table above is enforced.
-      AC: `period=today|yesterday|...` returns the same totals as the
-      equivalent explicit `start`/`end` call; `months_back=1` and
-      `period=last_month` return identical bounds (alias proven, not assumed);
-      every listed conflicting combination → 422 naming the conflict;
-      `start_date` without `period=custom` → 422; a call with no period params
-      is unchanged; **the whole existing suite green**, including U3.1's
-      `months_back=0` smoke.
-      Files: `api/statistics.py`, `services/statistics_service.py`,
-      `tests/test_statistics_api.py`, `tests/test_statistics_service.py`.
-      Model: sonnet.
-- [ ] **U0.3 Schema: archive flags + colour slot** ⚠ **STOP-AND-ASK GATE**
-      (`migrations/versions/` + `docs/SCHEMA.sql`) — one revision adding all
-      three columns with the `color_slot` backfill; models updated to match.
+- [ ] **U0.3 Schema: archive flags, colour slot, `spent_at`** ⚠ **STOP-AND-ASK
+      GATE** (`migrations/versions/` + `docs/SCHEMA.sql`) — one revision adding
+      all **four** columns with both backfills; models updated to match.
       AC: `alembic upgrade head` then `downgrade -1` is clean on a fresh DB
       (@integration); after upgrade, an account with 8 categories has slots
       1–6 by `created_at ASC` and NULL for the last two — *the colours the app
-      renders today do not move*; every existing row is `is_active = true`;
-      `GET /categories` and `GET /tags` include the new fields and every
-      existing test stays green; a `color_slot` of `0` or `7` fails Pydantic
-      validation, not the DB.
+      renders today do not move*, and **no row is given a slot 7–12** (those
+      are for a user to choose); every existing row is `is_active = true`;
+      every existing expense has `spent_at` equal to its `created_at` **as seen
+      in `family_tz`**, proven by a row created at 23:30 local in a UTC+N zone
+      landing on the local date, not the UTC one; `GET /categories` and
+      `GET /tags` include the new fields and every existing test stays green;
+      a `color_slot` of `0` or `13` fails Pydantic validation, not the DB.
       Files: `migrations/versions/`(new), `docs/SCHEMA.sql`,
-      `models/category.py`, `models/tag.py`, tests.
+      `models/category.py`, `models/tag.py`, `models/expense.py`, tests.
       RISKY (migration) → reviewer subagent. Model: sonnet.
+- [ ] **U0.2 Statistics adopts `period` + `offset`** — routes + service consume
+      `resolve_period`; `months_back` stays as a deprecated alias; the
+      four-family mutual-exclusivity table above is enforced.
+      AC: `period=day&offset=0` returns the same totals as the equivalent
+      explicit `start`/`end` call; `months_back=0` and `period=month&offset=0`
+      return identical bounds, and `months_back=1` matches
+      `period=month&offset=-1` (alias proven, not assumed); `months_back=2`
+      still resolves its 3-month window, which no `{period, offset}` pair can
+      express; every listed conflicting combination → 422 naming the conflict;
+      `offset=1` → 422; `start_date` without `period=custom` → 422; a call with
+      no period params is unchanged; **the whole existing suite green**,
+      including the **v2 plan's** U3.1 `months_back=0` smoke (already shipped;
+      not this plan's U4.1).
+      Files: `api/statistics.py`, `services/statistics_service.py`,
+      `tests/test_statistics_api.py`, `tests/test_statistics_service.py`.
+      Model: sonnet.
+- [ ] **U0.2a Period filtering moves to `spent_at`** (D314) — the three SQL
+      sites named in Contracts. No API surface change; this unit is purely
+      "which column does a period mean".
+      AC: an expense with `spent_at` in July and `created_at` in August appears
+      in July's statistics and **not** August's; the same expense counts toward
+      July's budget progress, not August's (`check_limit` moved too — this is
+      the row that makes backdating meaningful rather than cosmetic); an
+      expense whose two dates agree behaves exactly as before, proven by the
+      existing statistics and budget suites staying green untouched.
+      Files: `repositories/expense_repo.py`, `repositories/budget_plan_repo.py`,
+      `tests/test_expense_repo.py`, `tests/test_budget_service.py`.
+      Model: sonnet.
+- [ ] **U0.2b `spent_at` on the expense write path** (D314) —
+      `ExpenseCreate`/`ExpenseUpdate`/`ExpenseResponse` carry it; the service
+      defaults it to today **in `family_tz`**.
+      AC: `POST /expenses` without `spent_at` stores the current family date —
+      **the bot's existing tests pass with no bot change**, which is the whole
+      point; with `spent_at` it stores that date; a future `spent_at` → 422 (at
+      the boundary: today in `family_tz` is accepted, tomorrow is not, checked
+      at 23:30 local in a UTC+N zone); `PATCH` can move an expense's date and
+      the statistics for both the old and new period change accordingly.
+      Files: `models/expense.py`, `services/expense_service.py`,
+      `api/expenses.py`, `tests/test_expenses_api.py`.
+      Model: sonnet.
+- [ ] **U0.2c `UserMeResponse.account_name`** — verified missing today:
+      `models/user.py::UserMeResponse` adds only `currency`, so screen 02's
+      Account line has nothing to render.
+      AC: `GET /users/me` returns the caller's account name from the same
+      `accounts` join that already supplies `currency` — no second query; the
+      admin `users` routes still return plain `UserResponse` with no
+      `accounts` join, unchanged; `api/types.ts` mirrors the field.
+      Files: `models/user.py`, `repositories/user_repo.py`, `api/users.py`,
+      `webapp/src/api/types.ts`, `tests/test_users_api.py`.
+      Model: haiku.
 - [ ] **U0.4 Category usage counts + archive-or-delete** — the rule from D302
       in `CategoryService.delete`, plus `list_with_usage` and the two route
       flags. AC: deleting a category with zero expenses **and** zero budget
@@ -318,66 +456,119 @@ DELETE /tags/{id}         -> 204   (same rule)
       `tests/test_bot_categories.py`, `tests/test_bot_tags.py`.
       Model: haiku-friendly.
 
-### M1 — Period selection (screens 01 + 05)
+### M1 — Home redesign: period selection + layout (screen 01)
+
+Implements `docs/ui/screens/01-home.md`, `docs/ui/components/period-selector.md`
+and `docs/ui/components/date-range-picker.md`. **Screen 05 (Statistics) is not
+touched** (D316) — it keeps its `months_back` chips.
 
 - [ ] **U1.1 `lib/period.ts`** — pure, no DOM, no I/O. AC: parametrized
       vitest — `toQuery` emits exactly one selector family and never
-      `months_back`; `describe` renders "Today", "Yesterday", "This month",
-      "9 – 17 Jul", and a cross-year range with both years; `monthGrid` returns
-      6×7 cells for a 31-day month starting on a Sunday and for February in a
-      leap year, with leading/trailing days flagged; `isValidRange` rejects
+      `months_back`; `describe` renders **every row** of the label-format
+      table in `docs/ui/components/period-selector.md` ("Today, August 4",
+      "Yesterday, August 3", "August 2" with no weekday, "This week",
+      "2 – 8 Aug", "28 Jul – 3 Aug", a cross-year week with both years,
+      "August", "August 2025", "2026", "9 – 17 Jul"); `monthGrid` returns 6×7
+      cells **Monday-first** for a 31-day month starting on a Sunday and for
+      February in a leap year, with leading/trailing days flagged;
+      `clampOffset` never returns a positive number; `isValidRange` rejects
       reversed and over-`MAX_RANGE_DAYS` ranges; **no function in this module
       converts a date to a UTC instant** (the constraint, asserted by the
-      absence of any such export). Model: sonnet.
+      absence of any such export).
+      Files: `webapp/src/lib/period.ts`, `webapp/tests/period.test.ts`.
+      Model: sonnet.
 - [ ] **U1.2 ApiClient period params + types** — the three statistics methods
-      take a `PeriodQuery`; `api/types.ts` mirrors the U0.3–U0.6 model changes.
-      AC: against a fake fetch — `period=custom` serializes `start_date`/
-      `end_date` as `YYYY-MM-DD` and nothing else; a preset serializes only
-      `period`; `months_back` is no longer sent by any method; a 422 from a
-      conflicting call surfaces as the typed validation result, not a crash.
-      Files: `api/client.ts`, `api/types.ts`, `tests/client.test.ts`.
+      take a `PeriodQuery`; `api/types.ts` mirrors U0.2b's `spent_at` and
+      U0.2c's `account_name`. AC: against a fake fetch — `period=custom`
+      serializes `start_date`/`end_date` as `YYYY-MM-DD` and nothing else; a
+      unit serializes `period` and `offset` and nothing else; `offset=0` is
+      sent explicitly rather than omitted; `months_back` is no longer sent by
+      any method; a 422 from a conflicting call surfaces as the typed
+      validation result, not a crash.
+      Files: `webapp/src/api/client.ts`, `webapp/src/api/types.ts`,
+      `webapp/tests/client.test.ts`. Model: sonnet.
+- [ ] **U1.3 Design tokens: 12 slots + accent** — `docs/ui/design-system.md`'s
+      colour table, implemented. No behaviour change; nothing consumes
+      `--accent` until U1.7. AC: `tokens.css` defines slots 1–12 and
+      `--accent`/`--accent-ink` with **both** light and dark values, and every
+      value matches the design-system table exactly; `lib/category-colors.ts`
+      maps slots 1–12 (not 1–6) and still folds the donut at 6 slices;
+      existing home/statistics snapshots are unchanged because no category
+      yet has a slot above 6.
+      Files: `webapp/src/styles/tokens.css`,
+      `webapp/src/lib/category-colors.ts`,
+      `webapp/tests/category-colors.test.ts`. Model: haiku.
+- [ ] **U1.4 `components/period-selector.ts`** — pure render + thin mount, the
+      first module in `src/components/`. AC: **every acceptance criterion in
+      `docs/ui/components/period-selector.md`**, notably — five tabs in the
+      documented order and wording; the active tab is 600 weight with a 2px
+      `--ink` underline and no tab uses `--accent` or a category colour; `›` at
+      `offset: 0` is rendered, dimmed, `aria-disabled`, and fires nothing;
+      `unit: "custom"` hides both arrows; the label and the "Period" tab both
+      call `onOpenPicker`; changing a unit calls `onUnitChange` and never
+      `onOffsetChange`; every hit target ≥ 44×44.
+      Files: `webapp/src/components/period-selector.ts`,
+      `webapp/tests/period-selector.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U1.3 Home period chips** — Today / Yesterday / This month above the
-      donut (design §4 screen 01, amended). AC: the default on open is still
-      This month (nothing changes for someone who never taps); tapping a chip
-      refetches with that `period` and redraws donut, total and legend;
-      selection haptic on change; the active chip is marked by shape **and**
-      text, never colour alone; loading between periods keeps the donut slot
-      (no reflow); an empty period says "Nothing yesterday", naming the period
-      in force; the over-budget strip stays month-scoped and is hidden for
-      day-scoped periods (budgets are monthly — D310).
-      Files: `screens/home.ts`, `tests/home.test.ts`, `main.ts`,
-      `styles/app.css`. Model: sonnet.
-- [ ] **U1.4 Statistics presets extended** — five presets (Today, Yesterday,
-      This month, Last month, Last 3 months) replacing the three
-      `months_back` ones. AC: each preset sends exactly its `period` and
-      nothing else; the grouping toggle still re-renders without refetching;
-      the previously selected preset survives a retry; the bars/donut/empty
-      states are unchanged for the three month presets (a pure superset — the
-      existing statistics tests keep passing with only the call shape edited).
-      Files: `screens/statistics.ts`, `tests/statistics.test.ts`, `main.ts`.
+- [ ] **U1.5 Home wires the period selector** — Home owns `PeriodValue` state,
+      clamps the offset, refetches, and names the period everywhere it speaks.
+      AC: the default on a cold open is `month`/`offset 0` (nothing changes for
+      someone who never taps); switching a unit resets the offset to 0;
+      arrowing refetches and redraws donut, total and rows; **no tap sequence
+      produces a label naming a date after today**; the period survives
+      navigating to screen 02 and back, and survives a retry, but resets on a
+      cold open; a stale in-flight response is discarded (last tap wins);
+      loading between periods keeps the donut's 200px slot skeletonised with no
+      reflow; an empty period says "Nothing today" / "Nothing in August" naming
+      the period in force; the over-budget strip shows **only** on
+      `month`/`offset 0`; offline freezes the control at the cached period.
+      Files: `webapp/src/screens/home.ts`, `webapp/tests/home.test.ts`,
+      `webapp/src/main.ts`, `webapp/src/styles/app.css`. Model: sonnet.
+- [ ] **U1.6 Home layout: ranked rows + bottom nav** — the legend becomes the
+      full ranked list, and the six tiles move to the bottom. AC: **all**
+      categories with a non-zero total render as rows sorted descending, each
+      with a filled colour circle, name, share % and amount — the donut still
+      folds at six slices but the rows do not fold; a single category renders
+      one row (the old "suppress the legend at ≤1" rule is gone); the six tiles
+      sit at the very bottom as **two rows of three**, text-only, 32px tall,
+      above `env(safe-area-inset-bottom)`; the donut stroke is 30px; a
+      30-character category name ellipses on one line without shrinking the
+      amount.
+      Files: `webapp/src/screens/home.ts`, `webapp/tests/home.test.ts`,
+      `webapp/src/styles/app.css`. Model: sonnet.
+- [ ] **U1.7 Home yellow Add button** (D318) — the in-card Add affordance,
+      alongside MainButton. AC: a 56px `--accent` circle with a `+` sits at the
+      bottom-right **inside the chart card** and opens screen 02; **it is not
+      `position: fixed`** and scrolls with the card, so it never overlaps
+      MainButton — asserted on the computed style, not by eye; MainButton is
+      still shown and still reads "Add expense", and both fire the **same**
+      handler; medium impact haptic on the yellow button only; for a read-only
+      viewer both are hidden while the Add-expense tile stays visible and
+      disabled; `--accent` appears in exactly one rule in `app.css`.
+      Files: `webapp/src/screens/home.ts`, `webapp/tests/home.test.ts`,
+      `webapp/src/styles/app.css`. Model: sonnet.
+- [ ] **U1.8 `components/date-range-picker.ts`** (D303) — the calendar sheet.
+      AC: **every acceptance criterion in
+      `docs/ui/components/date-range-picker.md`**, notably — opens on the
+      current month with today ringed; first tap sets the start and clears any
+      end; a second tap *before* the start re-anchors instead of reversing; the
+      span includes both ends inclusively; **weeks start Monday**, matching
+      `resolve_period`; dates after `maxDate` are dimmed and inert; a span over
+      366 days shows the reason and keeps Apply disabled; the month heading
+      opens a year list; `single` mode applies on one tap with no footer;
+      `maxDate` is an input and the module calls `new Date()` nowhere.
+      Files: `webapp/src/components/date-range-picker.ts`,
+      `webapp/tests/date-range-picker.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U1.5 Calendar range picker component** — `components/date-range-picker.ts`
-      (D303): month grid, tap start → tap end, the span between highlighted,
-      month navigation, quick chips (Last 7 days · Last 30 days · This week),
-      Apply disabled until both ends are chosen. AC: pure-render tests —
-      first tap sets the start and clears any previous end; a second tap
-      *before* the start re-anchors instead of producing a reversed range; the
-      highlighted span matches the chosen ends inclusively; navigating months
-      preserves the selection; a range over `MAX_RANGE_DAYS` shows the reason
-      and keeps Apply disabled; a "today" cell is marked and future dates are
-      not selectable; renders correctly in both themes from tokens only.
-      Files: `components/date-range-picker.ts`,
-      `tests/date-range-picker.test.ts`, `styles/app.css`. Model: sonnet.
-- [ ] **U1.6 "Select period" wired into Statistics** — a sixth chip that opens
-      the picker; applying it refetches with `period=custom` and puts the
-      human range in the header. AC: Apply issues exactly one fetch with the
-      two dates; dismissing without applying leaves the previous period intact
-      and refetches nothing; the custom label reads "9 – 17 Jul", not a pair of
-      ISO strings; the custom range survives a retry and a grouping toggle;
-      BackButton from the open picker closes the picker, not the screen.
-      Files: `screens/statistics.ts`, `tests/statistics.test.ts`, `main.ts`.
-      Model: sonnet.
+- [ ] **U1.9 "Period" tab wired into Home** — the custom range, end to end.
+      AC: Apply issues exactly one fetch with `period=custom` and the two
+      dates; dismissing without applying leaves the previous period intact and
+      refetches nothing; the label reads "9 – 17 Jul", not a pair of ISO
+      strings; the arrows are hidden while a custom range is in force; the
+      range survives a retry; BackButton from the open picker closes the
+      **picker**, not the screen.
+      Files: `webapp/src/screens/home.ts`, `webapp/tests/home.test.ts`,
+      `webapp/src/main.ts`. Model: sonnet.
 
 ### M2 — Categories & Tags (screens 06 + 07)
 
@@ -385,11 +576,12 @@ DELETE /tags/{id}         -> 204   (same rule)
       `color_slot`, position fallback for `null` (D301 supersedes D206);
       Home and Statistics pass the fetched categories through unchanged.
       AC: a category with `color_slot=4` renders slot 4 regardless of its
-      position; a `null`-slot category still gets a stable position-derived
-      colour; **deleting an earlier category no longer shifts a later
-      category's colour** (the D206 risk this closes — asserted directly);
-      two categories sharing a slot both render it; Home and Statistics agree
-      on every colour for the same input. Files: `lib/category-colors.ts`,
+      position; **a category with `color_slot=11` renders slot 11** (the
+      12-slot palette from U1.3, D317); a `null`-slot category still gets a
+      stable position-derived colour capped at slot 6; **deleting an earlier
+      category no longer shifts a later category's colour** (the D206 risk this
+      closes — asserted directly); two categories sharing a slot both render
+      it; Home and Statistics agree on every colour for the same input. Files: `lib/category-colors.ts`,
       `tests/category-colors.test.ts`, `screens/home.ts`,
       `screens/statistics.ts`, `webapp/CLAUDE.md` (its "colour is assigned
       client-side in v1" rule is what this unit replaces). Model: sonnet.
@@ -407,10 +599,16 @@ DELETE /tags/{id}         -> 204   (same rule)
       `tests/categories.test.ts`, `main.ts`, `styles/app.css`. Model: sonnet.
 - [ ] **U2.2 Screen 06b — Create, rename, recolour** — one form surface,
       MainButton = Save enabled only when dirty (design §4). The colour picker
-      is the six palette swatches, each with its name, current one marked by a
-      check, not by colour alone. AC: creating adds the category and returns to
+      is the **twelve** palette swatches (D317), each with its name, current one
+      marked by a check, not by colour alone; a slot already used by another
+      category is **marked as taken but still selectable**.
+      ⚠ **Blocked on the design-system `[?]`**: slots 7–12 have not been run
+      through the dataviz validator. Validate them before this unit ships a
+      picker that offers them.
+      AC: creating adds the category and returns to
       the list with it visible; renaming round-trips; recolouring updates every
-      dot on Home and Statistics on the next render; Save disabled until dirty
+      dot on Home and Statistics on the next render; picking an already-used
+      slot succeeds after showing it is taken; Save disabled until dirty
       and disabled again after a successful save; a duplicate name warns but
       does not block (MVP D19 unchanged, D311); an empty/whitespace name is
       rejected inline, never as a popup; 403 and network failure preserve the
@@ -445,17 +643,91 @@ DELETE /tags/{id}         -> 204   (same rule)
       double submit issues exactly one write; 403/failure paths as in U2.2.
       Files: `screens/tags.ts`, `tests/tags.test.ts`. Model: sonnet.
 
-### M3 — Smoke
+### M3 — Add expense redesign (screen 02)
 
-- [ ] **U3.1 e2e: period + archive through `initData` (@integration)** — one
+Implements `docs/ui/screens/02-add-expense.md` and
+`docs/ui/components/category-picker.md`.
+
+**Ordered after M2 on purpose**: the redesigned screen's "More" cell navigates
+to screen 06 and its "+ Add tag" chip to screen 07. Building it first would
+mean shipping two buttons that go nowhere.
+
+The existing composer is **extended, not rewritten** — the draft model, the
+double-submit guard (D118/D123) and the MainButton contract are untouched by
+every unit below.
+
+- [ ] **U3.1 `components/category-picker.ts`** — the 4-column grid replacing
+      the current inline chips. AC: **every acceptance criterion in
+      `docs/ui/components/category-picker.md`**, notably — 64px filled circles
+      with the name centred underneath and **no glyph, letter or emoji inside
+      any circle**; selection turns the circle into a 12px-radius rounded
+      square and bolds the name (shape + weight, never colour alone); two
+      categories sharing a slot render the same colour without error; the last
+      cell always reads "More" and calls `onMore`, never `onSelect`; a
+      30-character name wraps to two lines then ellipses without misaligning
+      the row; `disabled` suppresses every callback and hides "More".
+      Files: `webapp/src/components/category-picker.ts`,
+      `webapp/tests/category-picker.test.ts`, `webapp/src/styles/app.css`.
+      Model: sonnet.
+- [ ] **U3.2 Amount, account and the category grid** — the top of the screen.
+      AC: the amount input is focused with the numeric keypad up **before any
+      network call resolves**; the currency code renders beside it in
+      `--ink-secondary` and is not tappable; the account name renders under an
+      "Account" label from U0.2c's field and is not tappable; the grid is the
+      U3.1 component; "More" navigates to screen 06 and returning refetches the
+      list with the draft's amount, tags and comment intact; the loading state
+      shows 8 circle skeletons in the final grid positions.
+      Files: `webapp/src/screens/add-expense.ts`,
+      `webapp/tests/add-expense.test.ts`, `webapp/src/styles/app.css`.
+      Model: sonnet.
+- [ ] **U3.3 Date row** — the three pills, the calendar button, and `spent_at`
+      on the wire. AC: pills read "today", "yesterday" and "two days ago" with
+      their dates above, dates resolved in `family_tz` and **not** from the
+      device clock; "today" is selected on open and the created expense's
+      `spent_at` matches the selected pill; the calendar button opens U1.8's
+      picker in `single` mode and BackButton from it closes the **picker**, not
+      the screen; a date chosen outside the three shortcuts appears as a fourth
+      selected pill; **no future date is selectable** in pills or calendar;
+      changing only the date does **not** make the draft dirty, so BackButton
+      does not prompt.
+      Files: `webapp/src/screens/add-expense.ts`,
+      `webapp/tests/add-expense.test.ts`, `webapp/src/styles/app.css`.
+      Model: sonnet.
+- [ ] **U3.4 Tags and comment** — the bottom of the screen. AC: tag chips wrap
+      over multiple rows with **no horizontal scroll and no fold**; "+ Add tag"
+      is always the last chip and navigates to screen 07; a tag created there
+      returns **pre-selected** with the rest of the draft intact; multi-select
+      works and two selected tags both land on the created expense; the comment
+      field has **no character counter** and is capped at 4096 by `maxlength`;
+      focusing the comment scrolls it clear of the keyboard, laid out against
+      `viewportStableHeight` rather than `100vh`.
+      Files: `webapp/src/screens/add-expense.ts`,
+      `webapp/tests/add-expense.test.ts`, `webapp/src/styles/app.css`.
+      Model: sonnet.
+- [ ] **U3.5 Archived-category error paths** — the two failure modes the
+      redesign introduces surface as sentences. AC: a 404 on submit shows
+      "That category no longer exists.", clears the selection and refetches,
+      keeping the rest of the draft; a 409 (D302, writing into an archived
+      category) shows "That category was archived. Choose another." with the
+      same recovery; neither is a popup and neither shows a status code;
+      MainButton returns to its enabled state afterwards.
+      Files: `webapp/src/screens/add-expense.ts`,
+      `webapp/tests/add-expense.test.ts`. Model: sonnet.
+
+### M4 — Smoke
+
+- [ ] **U4.1 e2e: period + archive through `initData` (@integration)** — one
       signed-payload scenario over the real app: create a category with an
-      explicit colour → add an expense today and one yesterday →
-      `period=today` and `period=yesterday` each return exactly one of them →
-      `period=custom` spanning both returns both → archive the category →
-      it vanishes from `GET /categories` but is still present with
-      `include_archived=true`, and the two expenses are still returned by
-      `GET /expenses` and still counted by `/statistics/by-category` for the
-      custom range → a `POST /expenses` into it now 409s.
+      explicit colour → add an expense today and one **backdated** to
+      yesterday via `spent_at` → `period=day&offset=0` and
+      `period=day&offset=-1` each return exactly one of them, **proving the
+      backdated row is filed by `spent_at` and not by `created_at`** →
+      `period=custom` spanning both returns both → `period=week&offset=0`
+      returns both → archive the category → it vanishes from `GET /categories`
+      but is still present with `include_archived=true`, and the two expenses
+      are still returned by `GET /expenses` and still counted by
+      `/statistics/by-category` for the custom range → a `POST /expenses` into
+      it now 409s.
       AC: scenario green on the test DB; excluded from default `verify.sh`
       (integration marker); the v2 smoke scenario still passes unchanged.
       Files: `tests/test_e2e_smoke.py`(+). Model: sonnet.
@@ -468,15 +740,22 @@ DELETE /tags/{id}         -> 204   (same rule)
   It disappears from `/categories` and from the expense-adding keyboard, and
   the old expenses still show its name in `/expenses`. This proves the whole
   M0 archive rule with no frontend involved.
-- **CP2 — after U1.4**: in the Mini App, Home and Statistics both offer Today
-  and Yesterday, and yesterday's number matches what the bot reports for the
-  same window.
-- **CP3 — after U1.6**: pick a range across a month boundary on the calendar;
-  the total equals the sum of the two months' parts.
+- **CP1a — after U0.2b**: from the **bot**, add an expense. It still lands on
+  today and still appears in `/statistics`. The bot must need no change for
+  `spent_at` to work (D314) — if it does, the default is wrong.
+- **CP2 — after U1.5**: in the Mini App, Home offers Day/Week/Month/Year with
+  arrows; yesterday's number matches what the bot reports for the same window,
+  and the `›` arrow is dead on arrival at the current period.
+- **CP3 — after U1.9**: pick a range across a month boundary on the calendar;
+  the total equals the sum of the two months' parts. Then arrow back a year on
+  the Month tab and confirm nothing breaks on an empty period.
 - **CP4 — after U2.3**: create a category, give it a colour, watch Home's donut
   adopt it, then hide the category and confirm the donut for an old period
   still names and colours it.
 - **CP5 — after U2.5**: same round trip for a tag.
+- **CP6 — after U3.3**: add an expense backdated to last month from the Mini
+  App. It appears in last month's donut, not this month's, and it moves last
+  month's budget progress rather than this month's (D314's whole point).
 
 ## Risks
 - **The migration runs against production Supabase.** `is_active` has a
@@ -506,8 +785,9 @@ DELETE /tags/{id}         -> 204   (same rule)
   family scale; if a season of data ever makes it slow, the fix is a cached
   count column, not a client roll-up.
 - **Day-scoped periods vs monthly budgets.** Budgets are monthly (V1.1); Home's
-  over-budget strip has no meaning for "yesterday". U1.3 hides it rather than
-  computing a fractional month figure nobody asked for (D310).
+  over-budget strip has no meaning for "yesterday". U1.5 shows it **only** on
+  `month`/`offset 0` rather than computing a fractional figure nobody asked for
+  (D310, extended to Week/Year/custom by `docs/ui/screens/01-home.md`).
 - **`accounts.currency` has no DB `CHECK`** (inherited from v2's Risks) —
   unchanged by this plan and still a candidate for its own unit.
 
@@ -593,6 +873,64 @@ DELETE /tags/{id}         -> 204   (same rule)
   a rare-enough operation to leave for a follow-up (or a manual `UPDATE`),
   and adding it now would mean a fourth state in every list unit. Revisit if
   it is ever asked for.
+- D313 (2026-08-04, HUMAN): **supersedes D300's enum.** A period is a
+  **`PeriodUnit` (`day|week|month|year|custom`) plus an `offset` (int ≤ 0)**,
+  not a preset name. Home's tabs carry left/right arrows, and an enum of named
+  presets cannot express "three weeks back" or "last year" — `last_week` has
+  nowhere to go on a second tap. `offset > 0` is rejected **at the API**, so
+  the future is unreachable rather than merely un-tappable. Cost, accepted:
+  `PeriodPreset` and part of `resolve_period`, both merged in U0.1, are
+  reworked before anything consumes them (U0.1a). Rejected: adding
+  `this_week`/`last_week`/`this_year`/`last_year` to the enum (cheaper, but the
+  arrows would stop after one step, which is the feature); keeping both the
+  enum and an offset (two ways to name the same period, which is exactly the
+  ambiguity D300's mutual-exclusivity rule exists to prevent).
+- D314 (2026-08-04, HUMAN): **`expenses.spent_at DATE NOT NULL DEFAULT
+  current_date`.** The Add-expense screen offers today / yesterday / two days
+  ago / any date, and `created_at` cannot answer "when did this happen" once
+  it is also answering "when was this typed". Every period filter, every
+  statistic **and budget progress** move to `spent_at`; `created_at` survives
+  as the audit trail. The bot needs no change — omitting the field defaults to
+  today, which is its current behaviour. Backfilled as
+  `(created_at AT TIME ZONE family_tz)::date` so no existing row moves period;
+  a naive `created_at::date` would shift late-night expenses across a month
+  boundary, which is D120's bug wearing a different hat. Rejected: letting the
+  client set `created_at` (no migration, but the audit trail and the event date
+  collapse into one column and the bot's writes silently change meaning).
+- D315 (2026-08-04, HUMAN): **weeks start Monday**, resolved in `family_tz`
+  like every other bound. The reference app starts weeks on Sunday; ISO and the
+  family's locale do not. Binding: `resolve_period`'s `WEEK` bounds and the
+  calendar picker's weekday header must agree — a picker whose weeks start on
+  a different day than the Week tab is a bug users find within a week.
+- D316 (2026-08-04, HUMAN): **screen 05 (Statistics) is out of scope.** It
+  keeps its `months_back` chips; the period selector ships on Home only. This
+  is why `months_back` cannot be deleted in this plan, and why the statistics
+  routes end up accepting four mutually exclusive selector families rather
+  than two. Accepted cost: two period vocabularies coexist in the client until
+  Statistics is revisited.
+- D317 (2026-08-04, HUMAN): **the category palette grows 6 → 12 slots and the
+  user picks the slot** on screen 06. Six was enough while colour was assigned
+  automatically by list position; it is thin once it is a choice, and the
+  reference app shows eight distinct category colours. Two categories **may**
+  share a slot — the picker marks a slot as taken but does not forbid it, which
+  is survivable precisely because identity is always a colour *plus* a name.
+  The backfill still only assigns 1–6, so no existing colour moves. Open: slots
+  7–12 were chosen by eye and have not been run through the dataviz validator
+  (`docs/ui/design-system.md`) — that is blocking for U2.2's picker, not for
+  M1. This also settles the icon question: **no icons**, colour is the
+  expressiveness.
+- D318 (2026-08-04, HUMAN): **screen 01 ships both Telegram's MainButton and a
+  yellow in-card Add button.** `references/telegram-miniapp.md` warns against a
+  custom primary button competing with MainButton; the warning was raised and
+  the answer was to build both. What makes it safe is position: the yellow
+  button lives **inside the chart card** and scrolls with it, so it never
+  overlaps or covers MainButton — the concrete failure the guidance is about.
+  Binding constraint: it must **never** be `position: fixed`, and that is an
+  acceptance criterion in U1.7, not a style note. `--accent` is a named,
+  bounded exception to "chrome is ink" usable by that one element and nothing
+  else. Rejected: FAB only with MainButton hidden (cleaner, one primary, but
+  gives up the native button the user wanted kept); MainButton only (no
+  redundancy, but not the requested design).
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -603,13 +941,32 @@ DELETE /tags/{id}         -> 204   (same rule)
   tests in `tests/test_period.py` (Europe/Belgrade for the general cases,
   America/New_York for the local-vs-UTC-date edge case, both Belgrade 2026
   DST transitions for the 23h/25h span check). verify.sh green.
-- Next: **U0.2** — Statistics adopts `period`: routes + service consume
-  `resolve_period`, `months_back` becomes a deprecated alias, mutual
-  exclusivity enforced. Start with `/clear`, then
-  `/unit U0.2 docs/plans/mini-app-v3.md`.
+- **Replanned 2026-08-04** against the new UI specs in `docs/ui/` (D313–D318).
+  U0.1's contract is superseded before anything consumed it; M1 was rewritten
+  from the three-chip design to tabs + arrows; a new **M3 — Add expense
+  redesign** was inserted, which pushed the smoke milestone to **M4/U4.1**.
+  Screens 06/07 (M2) are unchanged apart from the 12-slot palette.
+- Next: **U0.1a** — `PeriodUnit` + offset replaces `PeriodPreset` (D313).
+  Pure, no routes. Start with `/clear`, then
+  `/unit U0.1a docs/plans/mini-app-v3.md`.
+- **Execution order in M0 changed**: U0.1a → **U0.3 (migration)** → U0.2 →
+  U0.2a → U0.2b → U0.2c → U0.4… The migration moved ahead of the statistics
+  work so the period queries are written against `spent_at` once rather than
+  written against `created_at` and rewritten a unit later.
 - Gotchas:
   - **U0.3 stops and asks** before touching `migrations/versions/`. Take the
-    CP0 snapshot first.
+    CP0 snapshot first. It now adds **four** columns, not three.
+  - `spent_at`'s backfill must go through `family_tz`
+    (`(created_at AT TIME ZONE family_tz)::date`). A plain `created_at::date`
+    moves late-night expenses into the wrong month — D120 again.
+  - U0.2a moves `budget_plan_repo.check_limit` to `spent_at` too. That is
+    deliberate: a backdated expense counts toward the budget of the month it
+    was spent in. Leaving `check_limit` on `created_at` would make budgets
+    disagree with the statistics on the same screen.
+  - `months_back=2` (3 months) has **no** `{period, offset}` equivalent. Do not
+    "simplify" the alias away — see D316.
+  - M3 is ordered after M2 because screen 02's "More" and "+ Add tag" navigate
+    to screens 06 and 07. Building M3 first ships two dead buttons.
   - U0.4 and U0.8 are a pair — see Risks. Do not leave the repo between them
     for long.
   - `resolve_period` returns half-open `[start, end)` UTC-aware bounds because
