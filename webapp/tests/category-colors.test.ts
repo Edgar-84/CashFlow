@@ -20,12 +20,25 @@ describe("assignCategoryColors", () => {
     ]);
   });
 
-  it("gives categories past the slot count a null slot", () => {
+  it("assigns slots up to 12 by default, not just 6", () => {
+    const categories = Array.from({ length: 14 }, (_, i) =>
+      category(`cat-${i}`, `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`),
+    );
+
+    const result = assignCategoryColors(categories);
+
+    expect(result.slice(0, 12).map((c) => c.slot)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]);
+    expect(result.slice(12).map((c) => c.slot)).toEqual([null, null]);
+  });
+
+  it("gives categories past an explicit slot count a null slot", () => {
     const categories = Array.from({ length: 8 }, (_, i) =>
       category(`cat-${i}`, `2026-01-0${i + 1}T00:00:00Z`),
     );
 
-    const result = assignCategoryColors(categories);
+    const result = assignCategoryColors(categories, 6);
 
     expect(result.slice(0, 6).map((c) => c.slot)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(result.slice(6).map((c) => c.slot)).toEqual([null, null]);
@@ -48,6 +61,7 @@ describe("categorySlotCssVar", () => {
   it("maps a slot to its CSS custom property", () => {
     expect(categorySlotCssVar(1)).toBe("var(--category-slot-1)");
     expect(categorySlotCssVar(6)).toBe("var(--category-slot-6)");
+    expect(categorySlotCssVar(12)).toBe("var(--category-slot-12)");
   });
 
   it("maps null to the neutral Other colour", () => {

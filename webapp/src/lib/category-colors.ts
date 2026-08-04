@@ -1,11 +1,12 @@
 /** Client-side category -> colour assignment (D206). There is no
  * `categories.color` column until screen 06 (deferred, D204), so colour is
  * derived from the category's position in the account's list sorted by
- * `created_at ASC`, in the fixed six-slot palette from tokens.css, never
- * cycled. A category keeps its slot across renders; it only shifts if an
- * earlier category is deleted (accepted cost, documented in the plan's
- * Risks). Categories past the sixth get `slot: null` — "Other" everywhere
- * they're shown, same rule `lib/donut.ts::segments()` applies to its tail.
+ * `created_at ASC`, in the fixed twelve-slot palette from tokens.css (D317),
+ * never cycled. A category keeps its slot across renders; it only shifts if
+ * an earlier category is deleted (accepted cost, documented in the plan's
+ * Risks). Categories past the twelfth get `slot: null` — "Other" everywhere
+ * they're shown. This is independent of `lib/donut.ts::segments()`'s
+ * six-slice fold, which is about chart readability, not palette size.
  */
 
 export interface CategoryColor {
@@ -13,7 +14,7 @@ export interface CategoryColor {
   slot: number | null;
 }
 
-const DEFAULT_MAX_SLOTS = 6;
+const DEFAULT_MAX_SLOTS = 12;
 
 export function assignCategoryColors(
   categories: { id: string; created_at: string }[],

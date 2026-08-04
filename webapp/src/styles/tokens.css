@@ -17,8 +17,17 @@
   --category-slot-4: #eda100;
   --category-slot-5: #e87ba4;
   --category-slot-6: #008300;
+  --category-slot-7: #7a5cd0;
+  --category-slot-8: #b5379a;
+  --category-slot-9: #1f9bb5;
+  --category-slot-10: #8a5a3c;
+  --category-slot-11: #7d8b1f;
+  --category-slot-12: #3b4bb0;
 
   --status-red: #e34948;
+
+  --accent: #F0B429;
+  --accent-ink: #1A1206;
 }
 
 :root[data-theme="dark"] {
@@ -34,6 +43,15 @@
   --category-slot-4: #c98500;
   --category-slot-5: #d55181;
   --category-slot-6: #008300;
+  --category-slot-7: #8f74e0;
+  --category-slot-8: #c74fae;
+  --category-slot-9: #29aac4;
+  --category-slot-10: #a06d4d;
+  --category-slot-11: #93a12b;
+  --category-slot-12: #5b58c4;
 
   --status-red: #e66767;
+
+  --accent: #E0A42B;
+  --accent-ink: #1A1206;
 }
