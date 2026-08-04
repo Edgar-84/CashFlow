@@ -101,6 +101,11 @@ class BudgetService:
         if category is None or category.account_id != account_id:
             # 404, not 403 — no cross-account probing (MVP D29 precedent).
             raise NotFoundError(f"Category {data.category_id} not found")
+        if not category.is_active:
+            # U0.7: closed for new assignment, same as an archived category
+            # on an expense — the category exists, it just can't take a new
+            # budget plan.
+            raise ConflictError(f"Category '{category.name}' is archived")
         payload = data.model_dump()
         payload["account_id"] = account_id
         try:

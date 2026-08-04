@@ -79,11 +79,14 @@ class FakeCategoryRepo:
         return self._categories.get(id)
 
 
-def make_category(*, account_id: UUID, category_id: UUID | None = None) -> CategoryResponse:
+def make_category(
+    *, account_id: UUID, category_id: UUID | None = None, is_active: bool = True
+) -> CategoryResponse:
     return CategoryResponse(
         id=category_id or uuid4(),
         name="Groceries",
         account_id=account_id,
+        is_active=is_active,
         created_at=datetime.now(UTC),
     )
 
@@ -397,3 +400,19 @@ async def test_create_own_category_passes() -> None:
     created = await service.create(data, account_id)
 
     assert created.category_id == category.id
+
+
+# --- U0.7: archived categories are closed for writing ----------------------
+
+
+async def test_create_on_archived_category_raises_conflict() -> None:
+    account_id = uuid4()
+    archived = make_category(account_id=account_id, is_active=False)
+    repo = FakeBudgetPlanRepo([])
+    service = make_service(repo, FakeExpenseSumRepo(), category_repo=FakeCategoryRepo([archived]))
+    data = BudgetPlanCreate(category_id=archived.id, amount=10_000)
+
+    with pytest.raises(ConflictError):
+        await service.create(data, account_id)
+
+    assert await repo.list(account_id=account_id) == []

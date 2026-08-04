@@ -431,7 +431,7 @@ criteria; a value not in those files does not go into CSS.
       untouched; an archived category's slot is free for reuse.
       Files: `models/category.py`, `services/category_service.py`,
       `tests/test_category_service.py`. Model: sonnet.
-- [ ] **U0.7 Archived categories are closed for writing** — expense
+- [x] **U0.7 Archived categories are closed for writing** — expense
       create/update and budget-plan create reject them with 409.
       AC: `POST /expenses` with an archived `category_id` → 409 with a message
       naming the category, and **no expense row is written**; `PATCH /expenses`
@@ -1252,13 +1252,30 @@ every unit below.
   `CategoryCreate`/`Update` straight through, and `list(account_id=...,
   is_active=True)` already existed for U0.4's archived-filtering. verify.sh
   green.
-- Next: **U0.7** — Archived categories are closed for writing. Start with
-  `/clear`, then `/unit U0.7 docs/plans/mini-app-v3.md`.
+- **U0.7 done**: `ExpenseService._validate_category` (called on `create()` and
+  on `update()` only when `category_id` is part of the payload) now raises
+  `ConflictError` (409) when the looked-up category has `is_active=False`, on
+  top of its existing account-ownership check. `BudgetService.create` gets
+  the same guard right after its existing account check. Because
+  `update()` only calls `_validate_category` when `category_id` is present in
+  the payload, an expense that stays in a since-archived category is
+  untouched by this unit — amount/comment/tag-only updates never look the
+  category up at all, which is exactly the "archiving closes new assignment,
+  not history" AC and needed no extra code to satisfy. 4 new tests: 3 in
+  `test_expense_service.py` (create into archived → `ConflictError` + no row
+  written, update `category_id` into archived → `ConflictError`, update of
+  other fields on an expense already in an archived category still succeeds
+  — with no category in the fake repo at all, proving the lookup is never
+  made), 1 in `test_budget_service.py` (create on archived category →
+  `ConflictError` + no plan written). `tests/README.md` updated. No new
+  decisions — implemented exactly to the plan's AC. verify.sh green.
+- Next: **U0.8** — Bot copy follows the new semantics. Start with `/clear`,
+  then `/unit U0.8 docs/plans/mini-app-v3.md`.
 - **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
   U0.2a (done) → U0.2b (done) → U0.2c (done) → U0.4 (done) → U0.5 (done) →
-  U0.6 (done) → U0.7… The migration ran ahead of the statistics work so the
-  period queries are written against `spent_at` once rather than written
-  against `created_at` and rewritten a unit later.
+  U0.6 (done) → U0.7 (done) → U0.8… The migration ran ahead of the statistics
+  work so the period queries are written against `spent_at` once rather than
+  written against `created_at` and rewritten a unit later.
 - Gotchas:
   - **Take the CP0 Supabase snapshot before `alembic upgrade head` ever runs
     against production** for this migration — still not done as of U0.3

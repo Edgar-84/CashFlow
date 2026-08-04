@@ -9,7 +9,7 @@ import pytest
 from models.budget_plan import BudgetPlanResponse
 from models.category import CategoryResponse
 from models.enums import Role
-from models.errors import NotFoundError
+from models.errors import ConflictError, NotFoundError
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.tag import TagResponse
 from models.user import UserResponse
@@ -197,11 +197,14 @@ def make_service(
     )
 
 
-def make_category(*, account_id: UUID, category_id: UUID | None = None) -> CategoryResponse:
+def make_category(
+    *, account_id: UUID, category_id: UUID | None = None, is_active: bool = True
+) -> CategoryResponse:
     return CategoryResponse(
         id=category_id or uuid4(),
         name="Groceries",
         account_id=account_id,
+        is_active=is_active,
         created_at=datetime.now(UTC),
     )
 
@@ -893,3 +896,50 @@ async def test_update_future_spent_at_raises_value_error() -> None:
         await service.update(
             expense.id, ExpenseUpdate(spent_at=date(2026, 8, 4)), account_id, now=now
         )
+
+
+# --- U0.7: archived categories are closed for writing ---------------------
+
+
+async def test_create_on_archived_category_raises_conflict_and_writes_nothing() -> None:
+    account_id = uuid4()
+    caller = make_caller(account_id=account_id)
+    archived = make_category(account_id=account_id, is_active=False)
+    repo = FakeExpenseRepo([])
+    service = make_service(repo, category_repo=FakeCategoryRepo([archived]))
+    data = ExpenseCreate(amount=500, category_id=archived.id)
+
+    with pytest.raises(ConflictError):
+        await service.create(data, caller)
+
+    assert await repo.list(account_id=account_id) == []
+
+
+async def test_update_into_archived_category_raises_conflict() -> None:
+    account_id = uuid4()
+    expense = make_expense(account_id=account_id)
+    archived = make_category(account_id=account_id, is_active=False)
+    service = make_service(FakeExpenseRepo([expense]), category_repo=FakeCategoryRepo([archived]))
+
+    with pytest.raises(ConflictError):
+        await service.update(expense.id, ExpenseUpdate(category_id=archived.id), account_id)
+
+
+async def test_update_other_fields_on_expense_in_archived_category_still_succeeds() -> None:
+    # Archiving closes new assignment, it does not freeze history (plan AC):
+    # an expense already sitting in a since-archived category is still
+    # editable as long as the update doesn't touch category_id.
+    account_id = uuid4()
+    archived_category_id = uuid4()
+    expense = make_expense(account_id=account_id, category_id=archived_category_id, amount=1000)
+    # No category in the repo at all — proves _validate_category is never
+    # consulted when category_id isn't part of the update.
+    service = make_service(FakeExpenseRepo([expense]), category_repo=FakeCategoryRepo([]))
+
+    updated = await service.update(
+        expense.id, ExpenseUpdate(amount=2000, comment="still editable"), account_id
+    )
+
+    assert updated.amount == 2000
+    assert updated.comment == "still editable"
+    assert updated.category_id == archived_category_id
