@@ -371,6 +371,9 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | `test_update_changes_spent_at` | `update()` applies a new `spent_at` |
 | `test_update_explicit_null_spent_at_is_ignored_not_nulled` | An explicit `{"spent_at": null}` is ignored — `spent_at` is `NOT NULL` (D30/D32 pattern) |
 | `test_update_future_spent_at_raises_value_error` | `update()` with a future `spent_at` (injected `now`) raises `ValueError` |
+| `test_create_on_archived_category_raises_conflict_and_writes_nothing` | U0.7: `create()` with an archived `category_id` raises `ConflictError` (409) and the repo has no new row |
+| `test_update_into_archived_category_raises_conflict` | `update()` moving an expense's `category_id` into an archived category raises `ConflictError` |
+| `test_update_other_fields_on_expense_in_archived_category_still_succeeds` | An expense already sitting in an archived category is still editable (amount/comment) when the update doesn't touch `category_id` — archiving closes new assignment, not history |
 
 ## Service tests (`test_notification_service.py`) → [`services/notification_service.py`](../services/notification_service.py)
 Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`. No real network (U3.1 AC).
@@ -411,6 +414,7 @@ with in-memory fakes. No DB. `calculate_progress` is pure (no fakes needed).
 | `test_create_foreign_category_raises_not_found` | U1.1: `create()` with a `category_id` belonging to another account → `NotFoundError` (404, not 403 — closes MVP D33/D23); `BudgetPlanUpdate` has no `category_id` field, so `update()` has nothing to validate here |
 | `test_create_nonexistent_category_raises_not_found` | `create()` with an unknown `category_id` → `NotFoundError` |
 | `test_create_own_category_passes` | `create()` with a `category_id` belonging to the caller's account succeeds |
+| `test_create_on_archived_category_raises_conflict` | U0.7: `create()` with an archived `category_id` raises `ConflictError` (409) and the repo has no new plan |
 
 ## API/route tests (`test_expenses_api.py`) → [`api/expenses.py`](../api/expenses.py)
 Hermetic — the real app with `ExpenseRepository`/`UserRepository`/`PermissionRepository`

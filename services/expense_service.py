@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from models.budget_plan import BudgetPlanResponse
 from models.category import CategoryResponse
-from models.errors import NotFoundError
+from models.errors import ConflictError, NotFoundError
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.tag import TagResponse
 from models.user import UserResponse
@@ -146,10 +146,18 @@ class ExpenseService:
     async def _validate_category(self, category_id: UUID, account_id: UUID) -> None:
         """U1.1: `category_id` must belong to the caller's account — foreign
         or nonexistent ids 404, never 403 (no cross-account probing, MVP
-        D29 precedent). Closes MVP D33."""
+        D29 precedent). Closes MVP D33.
+
+        U0.7: an **archived** category is closed for new assignment — 409,
+        not 404 (the category exists, it just can't take new spending).
+        Only called for a create or a category_id *change* (`update` skips
+        it when the field is absent), so leaving an expense untouched in a
+        category that later gets archived never runs this check."""
         category = await self._category_repo.get(category_id)
         if category is None or category.account_id != account_id:
             raise NotFoundError(f"Category {category_id} not found")
+        if not category.is_active:
+            raise ConflictError(f"Category '{category.name}' is archived")
 
     async def _validate_tags(self, tag_ids: list[UUID], account_id: UUID) -> None:
         """U1.1: every `tag_ids` entry must belong to the caller's account,
