@@ -386,7 +386,7 @@ criteria; a value not in those files does not go into CSS.
       Files: `models/expense.py`, `services/expense_service.py`,
       `api/expenses.py`, `tests/test_expenses_api.py`.
       Model: sonnet.
-- [ ] **U0.2c `UserMeResponse.account_name`** — verified missing today:
+- [x] **U0.2c `UserMeResponse.account_name`** — verified missing today:
       `models/user.py::UserMeResponse` adds only `currency`, so screen 02's
       Account line has nothing to render.
       AC: `GET /users/me` returns the caller's account name from the same
@@ -1020,6 +1020,20 @@ every unit below.
   (`scripts/integration_docker.sh`) since this class of bug is invisible to
   mocked unit tests and to `verify.sh` alone.
 
+- D324 (2026-08-04): **U0.2c's Files list named `repositories/user_repo.py`
+  and `api/users.py`; the actual join already lived one layer up.** D211's
+  `GET /users/me` currency read is done in `api/deps.py::
+  get_current_user_with_currency`, which already calls `account_repo.get(user.
+  account_id)` and had `AccountResponse.name` sitting unused right next to
+  `.currency`. Adding `account_name` was therefore a one-line change to that
+  existing dependency — no new repo method, no new query, exactly the "same
+  `accounts` join" the AC asked for. `repositories/user_repo.py` and
+  `api/users.py` are untouched. Function name/docstring kept and extended
+  rather than renamed (single call site, minimal diff). Files actually
+  touched: `models/user.py`, `api/deps.py`, `webapp/src/api/types.ts`,
+  `tests/test_models.py`, `tests/test_users_api.py`,
+  `webapp/tests/client.test.ts`, `tests/README.md`.
+
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
   added to `services/period.py`, delegating to `month_bounds` for the three
@@ -1136,12 +1150,24 @@ every unit below.
   13 new tests (8 in `test_expense_service.py` incl. the two boundary cases,
   5 in `test_expenses_api.py`); `tests/README.md` updated. No new decisions —
   implemented to the Contracts section and the gotcha below. verify.sh green.
-- Next: **U0.2c** — `UserMeResponse.account_name`. Start with `/clear`, then
-  `/unit U0.2c docs/plans/mini-app-v3.md`.
+- Done: **U0.2c** — `UserMeResponse.account_name: str` added next to
+  `currency`. The read side needed no new query: `api/deps.py::
+  get_current_user_with_currency` already fetched the account row for
+  `currency` (D211) and now also reads `.name` off the same object — see
+  D324 for why the plan's original Files list (`user_repo.py`/`api/users.py`)
+  didn't match. `webapp/src/api/types.ts::UserMeResponse` mirrors the field;
+  no screen consumes it yet (that's a later M2 unit). 3 tests
+  touched/added: `test_models.py`'s `UserMeResponse` construction test,
+  `test_users_api.py`'s currency test (renamed to assert both fields) and its
+  "no leak on `/users`" test, plus `webapp/tests/client.test.ts`'s response-
+  parsing fixture. `tests/README.md` updated. verify.sh green.
+- Next: **U0.4** — Category usage counts + archive-or-delete. Start with
+  `/clear`, then `/unit U0.4 docs/plans/mini-app-v3.md`.
 - **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
-  U0.2a (done) → U0.2b (done) → U0.2c → U0.4… The migration ran ahead of the
-  statistics work so the period queries are written against `spent_at` once
-  rather than written against `created_at` and rewritten a unit later.
+  U0.2a (done) → U0.2b (done) → U0.2c (done) → U0.4… The migration ran ahead
+  of the statistics work so the period queries are written against
+  `spent_at` once rather than written against `created_at` and rewritten a
+  unit later.
 - Gotchas:
   - **Take the CP0 Supabase snapshot before `alembic upgrade head` ever runs
     against production** for this migration — still not done as of U0.3

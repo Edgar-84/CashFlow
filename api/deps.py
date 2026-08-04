@@ -264,13 +264,14 @@ async def get_current_user_with_currency(
     user: Annotated[UserResponse, Depends(get_current_user)],
     account_repo: Annotated[AccountRepository, Depends(get_account_repo)],
 ) -> UserMeResponse:
-    """``GET /users/me`` only — adds the caller's account currency (D211).
+    """``GET /users/me`` only — adds the caller's account currency (D211) and
+    name (U0.2c), both from the same account row.
 
     ``account_id`` is FK-enforced NOT NULL, so the account always resolves.
     """
     account = await account_repo.get(user.account_id)
     assert account is not None
-    return UserMeResponse(**user.model_dump(), currency=account.currency)
+    return UserMeResponse(**user.model_dump(), currency=account.currency, account_name=account.name)
 
 
 async def require_admin(
