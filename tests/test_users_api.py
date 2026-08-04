@@ -162,7 +162,7 @@ async def test_get_me_as_member_returns_own_row(
     assert response.json()["id"] == str(member.id)
 
 
-async def test_get_me_includes_account_currency(
+async def test_get_me_includes_account_currency_and_name(
     client: AsyncClient, override_repo: OverrideRepo, member: UserResponse, account: AccountResponse
 ) -> None:
     override_repo()
@@ -171,19 +171,20 @@ async def test_get_me_includes_account_currency(
 
     assert response.status_code == 200
     assert response.json()["currency"] == account.currency.value
+    assert response.json()["account_name"] == account.name
 
 
 async def test_list_users_response_has_no_currency_field(
     client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse
 ) -> None:
-    # UserResponse (every route but /me) stays untouched by D211 — no currency
-    # leaks in, and no accounts JOIN is needed for these routes.
+    # UserResponse (every route but /me) stays untouched by D211/U0.2c — no
+    # currency or account_name leaks in, and no accounts JOIN is needed here.
     override_repo()
 
     response = await client.get("/users", headers=auth_headers(admin.tg_id))
 
     assert response.status_code == 200
-    assert all("currency" not in u for u in response.json())
+    assert all("currency" not in u and "account_name" not in u for u in response.json())
 
 
 async def test_get_me_as_viewer_returns_own_row(

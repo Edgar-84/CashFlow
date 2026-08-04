@@ -59,8 +59,10 @@ def test_account_response_and_user_me_response() -> None:
         account_id=account_id,
         created_at=datetime.now(UTC),
         currency=account.currency,
+        account_name=account.name,
     )
     assert me.currency == Currency.PLN
+    assert me.account_name == "Smith Family"
 
 
 def test_account_response_rejects_unsupported_currency() -> None:

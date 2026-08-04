@@ -29,7 +29,8 @@ class UserResponse(UserBase):
 
 
 class UserMeResponse(UserResponse):
-    """`GET /users/me` only — adds the caller's account currency (D211).
+    """`GET /users/me` only — adds the caller's account currency (D211) and
+    name (U0.2c), both from the same `accounts` join.
 
     Deliberately not merged into ``UserResponse``: every other ``users``
     route/consumer (admin CRUD, ``PermissionChecker``, existing tests) reads
@@ -38,3 +39,4 @@ class UserMeResponse(UserResponse):
     """
 
     currency: Currency
+    account_name: str

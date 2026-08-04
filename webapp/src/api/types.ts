@@ -43,9 +43,11 @@ export interface UserResponse {
 }
 
 /** `models.user.UserMeResponse` — `GET /users/me` only, adds the caller's
- * account currency (D211). Every other `users` route returns `UserResponse`. */
+ * account currency (D211) and name (U0.2c). Every other `users` route
+ * returns `UserResponse`. */
 export interface UserMeResponse extends UserResponse {
   currency: Currency;
+  account_name: string;
 }
 
 export interface CategoryResponse {
