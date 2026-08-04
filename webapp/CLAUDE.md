@@ -14,9 +14,17 @@ of a five-turn conversation. **Zero database access, zero business logic** — t
 same contract `bot/` lives under. The bot is not retired; it stays the fastest
 path for a one-line expense and the only surface that receives notifications.
 
-Design source of truth: `docs/design/mini-app-ux.md` (screens, states, tokens,
-copy rules). Do not invent a screen or a state that isn't in that document —
-add it there first.
+Design source of truth, in two halves:
+- **`docs/ui/`** — every value you type into CSS. `design-system.md` (tokens,
+  spacing scale, type, geometry, motion), `screens/`, `components/`. Never
+  invent a colour, size or radius that isn't there — extend the design system
+  first, in the same change.
+- **`docs/design/mini-app-ux.md`** — the why: principles, screen inventory,
+  states, flows, copy rules. Do not invent a screen or a state that isn't in
+  that document — add it there first.
+
+New UI starts with the `ui-spec` skill (screenshots → spec files), then
+task-methodology decomposes the spec.
 
 ## Structure
 - `index.html`, `vite.config.ts` — entry + build.
@@ -34,7 +42,8 @@ add it there first.
   MainButton, BackButton, haptics, theme params, `initData`.
 - `src/lib/money.ts` — **the** minor-unit parse/format pair.
 - `src/lib/dates.ts` — rendering in `family_tz`.
-- `src/styles/tokens.css` — the token table from the UX brief, nothing else.
+- `src/styles/tokens.css` — the token table from `docs/ui/design-system.md`,
+  nothing else.
 - `src/styles/app.css` — layout/geometry/type for every screen's markup
   (cards, rows, tiles, skeletons...). Colour always comes from a
   `tokens.css` custom property, never a literal here.

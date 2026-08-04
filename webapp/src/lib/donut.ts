@@ -1,7 +1,8 @@
 /** Donut segment geometry — pure, no DOM. Produces the `stroke-dasharray`/
  * `stroke-dashoffset` inputs for one SVG circle per segment. Categories
- * beyond `maxSlots` are folded into a trailing "Other" segment (design doc
- * §6: "never generate a seventh hue") rather than dropped, so the shares
+ * beyond `maxSlots` are folded into a trailing "Other" segment
+ * (docs/ui/design-system.md: "never generate a seventh hue") rather than
+ * dropped, so the shares
  * still sum to the whole circle.
  */
 

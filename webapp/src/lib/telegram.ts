@@ -168,7 +168,7 @@ export interface ThemeTokens {
   separator: string;
 }
 
-// Fixed brand colours from docs/design/mini-app-ux.md §6 — Telegram's
+// Fixed brand colours from docs/ui/design-system.md — Telegram's
 // colorScheme only selects which fixed set applies, its own theme colours are
 // never used directly.
 const LIGHT_TOKENS: ThemeTokens = {

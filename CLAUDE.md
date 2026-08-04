@@ -42,6 +42,9 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
 - `docs/STATUS.md` — manual implementation checklist (updated by the human only)
 - `docs/plans/` — active work plans; the model DOES update unit checkboxes,
   Decision log and STATE there (see task-methodology skill)
+- `docs/ui/` — **source of truth for appearance and interaction**:
+  `design-system.md` (tokens), `screens/`, `components/`, `refs/` (committed
+  reference screenshots). Written by the `ui-spec` skill, corrected by the human
 
 ## Non-negotiable rules
 - No direct DB access outside `repositories/`. Routes and bot handlers must not import asyncpg.
@@ -58,6 +61,11 @@ Personal/family expense tracker. Telegram bot UI in front of a FastAPI backend. 
   `INTERNAL_TOKEN` (and every other secret) must NEVER reach browser-shipped
   code; `scripts/verify.sh` greps the webapp build output and fails on a hit.
 - Notifications are best-effort: send failures are logged and must never fail the expense operation that triggered them.
+- UI values are **taken from `docs/ui/design-system.md`, never invented**. A hex
+  literal, a font size or a radius that is not in that file does not go into
+  CSS — extend the design system first. Any change to visual behaviour updates
+  its spec under `docs/ui/` in the **same change** as the code, and `ui-spec`
+  runs before task-methodology on frontend work (screenshots are not a spec).
 
 ## Environment (.env)
 `DATABASE_URL`, `BOT_TOKEN`, `BACKEND_BASE_URL`, `INTERNAL_TOKEN`, `FAMILY_TZ`.

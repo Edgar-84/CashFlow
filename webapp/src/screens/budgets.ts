@@ -1,7 +1,8 @@
 /** Screen 04 — Budgets (docs/design/mini-app-ux.md §4). Every bar carries a
  * tick at the notify threshold; the bar is the category's own colour, never
  * repainted by status; state is spelled out in words with an icon (status
- * red is reserved for `is_exceeded`, per §6's colour rule). Categories with
+ * red is reserved for `is_exceeded`, per docs/ui/design-system.md's colour
+ * rule). Categories with
  * no budget sit at the bottom as an invitation.
  *
  * Layers, same split as every other screen:
