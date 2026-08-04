@@ -51,7 +51,7 @@ class ExpensePeriodRepositoryProtocol(Protocol):
     without a new repo method (plan Decision log D35)."""
 
     async def get_by_period(
-        self, account_id: UUID, start: datetime, end: datetime
+        self, account_id: UUID, start: datetime, end: datetime, *, tz: str = "UTC"
     ) -> list[ExpenseResponse]: ...
 
 
@@ -110,7 +110,9 @@ class StatisticsService:
             )
         else:
             period_start, period_end = _window_for_months_back(months_back, now, self._family_tz)
-        expenses = await self._expense_repo.get_by_period(account_id, period_start, period_end)
+        expenses = await self._expense_repo.get_by_period(
+            account_id, period_start, period_end, tz=self._family_tz
+        )
         if user_id is not None:
             expenses = [e for e in expenses if e.user_id == user_id]
         return expenses, period_start, period_end

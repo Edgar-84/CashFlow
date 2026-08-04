@@ -91,12 +91,16 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_update_tag_ids_replaces_existing_tags` | `update(tag_ids=[...])` replaces (not merges) the tag set |
 | `test_delete_expense_cascades_expense_tags` | Deleting an expense removes its `expense_tags` rows (`ON DELETE CASCADE`) |
 | `test_get_by_category_filters_by_account_and_category` | `get_by_category()` scopes to one account + category |
-| `test_get_by_period_respects_month_boundaries_across_timezones` | `get_by_period()` bounds are instant-based (`>=`/`<`), correct regardless of the caller's UTC offset (D20) |
+| `test_get_by_period_respects_month_boundaries` | `get_by_period()`'s `[start, end)` window is half-open on `spent_at`: the window's last day is included, the day it ends on is not (U0.2a, D314 — supersedes the old created_at-instant-based version of this test, D20) |
 | `test_sum_by_category_month_known_sums` | `sum_by_category_month()` sums match hand-computed totals; result values are `int`, not `Decimal` |
 | `test_get_by_period_scopes_by_account` | `get_by_period()` excludes another account's expenses |
 | `test_list_orders_newest_first` | `list()` returns rows newest-`created_at`-first regardless of insertion order (U2.5 AC) |
 | `test_get_by_period_orders_newest_first` | `get_by_period()` returns rows newest-`created_at`-first (U2.5 AC) |
 | `test_sum_by_category_month_scopes_by_account` | `sum_by_category_month()` excludes another account's expenses |
+| `test_get_by_period_filters_by_spent_at_not_created_at` | `get_by_period()` filters by `spent_at`, not `created_at` — a backdated expense is filed by the day it happened (U0.2a, D314) |
+| `test_sum_by_category_month_filters_by_spent_at_not_created_at` | `sum_by_category_month()` filters by `spent_at`, not `created_at` (U0.2a, D314) |
+| `test_get_by_period_filters_by_local_spent_at_not_utc_calendar_date` | `get_by_period(tz="Europe/Belgrade")` compares `spent_at` against the LOCAL calendar date implied by `start`/`end`, not their UTC one — a boundary expense on the last day of the month (local) is correctly included/excluded (U0.2a, D323, review-found bug) |
+| `test_sum_by_category_month_filters_by_local_spent_at_not_utc_calendar_date` | Same D323 fix for `sum_by_category_month(tz=...)` |
 | `test_create_with_duplicate_tag_ids_rolls_back_whole_expense` | A PK violation on duplicate `tag_ids` rolls back the whole `create()` — no partial expense left behind (D21) |
 | `test_get_populates_user_name` | `create()`/`get()` populate `user_name` via the `users.name` LEFT JOIN (D102) |
 | `test_list_populates_user_name` | `list()` populates `user_name` |
@@ -118,6 +122,8 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_check_limit_ignores_expenses_outside_period` | Expenses outside `[start, end)` are excluded from the fill percentage |
 | `test_check_limit_scopes_by_account` | `check_limit()` excludes another account's expenses and plans |
 | `test_zero_amount_plan_rejected_by_db_check` | DB `CHECK (amount > 0)` on `budget_plans` rejects a direct zero/negative insert with `asyncpg.CheckViolationError` — supersedes the old `check_limit()`-tolerates-zero test now that such a row can't exist (U1.6, closes D112's flagged gap) |
+| `test_check_limit_counts_by_spent_at_not_created_at` | `check_limit()` counts expenses by `spent_at`, not `created_at` — a backdated expense moves the budget of the month it was spent in (U0.2a, D314) |
+| `test_check_limit_counts_by_local_spent_at_not_utc_calendar_date` | `check_limit(tz="Europe/Belgrade")` compares `spent_at` against the LOCAL calendar date, not the UTC one — a boundary expense on the last local day of the month counts toward the right month's budget (U0.2a, D323, review-found bug) |
 
 ### `test_permission_repo.py` → [`repositories/permission_repo.py`](../repositories/permission_repo.py)
 | Test | Checks |

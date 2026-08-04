@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 import asyncpg
@@ -87,13 +87,21 @@ async def make_expense(
     amount: int = 1000,
     comment: str | None = None,
     created_at: datetime | None = None,
+    spent_at: date | None = None,
 ) -> ExpenseResponse:
+    # spent_at defaults from created_at's calendar date (not the DB column's
+    # own `current_date` default) so every existing caller that only sets
+    # created_at keeps landing in the period it already appears in — same
+    # reasoning as U0.3's spent_at backfill (D314).
+    if spent_at is None:
+        spent_at = created_at.date() if created_at is not None else date.today()
     row = await conn.fetchrow(
         """
-        INSERT INTO expenses (amount, comment, category_id, user_id, account_id, created_at)
-        VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()))
+        INSERT INTO expenses
+            (amount, comment, category_id, user_id, account_id, created_at, spent_at)
+        VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7)
         RETURNING id, amount, comment, category_id, user_id, account_id,
-                  created_at, updated_at
+                  created_at, updated_at, spent_at
         """,
         amount,
         comment,
@@ -101,6 +109,7 @@ async def make_expense(
         user_id,
         account_id,
         created_at,
+        spent_at,
     )
     assert row is not None
     return ExpenseResponse.model_validate(dict(row))

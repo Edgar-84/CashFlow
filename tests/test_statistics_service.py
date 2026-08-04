@@ -14,12 +14,12 @@ from services.statistics_service import StatisticsService
 class FakeExpensePeriodRepo:
     def __init__(self, expenses: list[ExpenseResponse] | None = None) -> None:
         self._expenses = list(expenses or [])
-        self.calls: list[tuple[UUID, datetime, datetime]] = []
+        self.calls: list[tuple[UUID, datetime, datetime, str]] = []
 
     async def get_by_period(
-        self, account_id: UUID, start: datetime, end: datetime
+        self, account_id: UUID, start: datetime, end: datetime, *, tz: str = "UTC"
     ) -> list[ExpenseResponse]:
-        self.calls.append((account_id, start, end))
+        self.calls.append((account_id, start, end, tz))
         return [
             e for e in self._expenses if e.account_id == account_id and start <= e.created_at < end
         ]
@@ -120,7 +120,7 @@ async def test_by_period_scopes_by_account() -> None:
     result = await service.by_period(account_id, now=now)
 
     assert result.total == 1000
-    called_account_id, _, _ = repo.calls[0]
+    called_account_id, _, _, _ = repo.calls[0]
     assert called_account_id == account_id
 
 
@@ -174,13 +174,17 @@ async def test_by_period_default_uses_family_tz_not_utc() -> None:
     now = datetime(2026, 7, 31, 22, 0, tzinfo=UTC)  # already Aug 1 00:00 in Belgrade
     early_august = datetime(2026, 7, 31, 23, 0, tzinfo=UTC)
     expense = make_expense(account_id=account_id, amount=1000, created_at=early_august)
-    service = StatisticsService(FakeExpensePeriodRepo([expense]), family_tz="Europe/Belgrade")
+    repo = FakeExpensePeriodRepo([expense])
+    service = StatisticsService(repo, family_tz="Europe/Belgrade")
 
     result = await service.by_period(account_id, now=now)
 
     assert result.start == datetime(2026, 7, 31, 22, 0, tzinfo=UTC)
     assert result.end == datetime(2026, 8, 31, 22, 0, tzinfo=UTC)
     assert result.total == 1000
+    # D323: the repo must receive the caller's family_tz, not silently fall
+    # back to its own "UTC" default — that's exactly the bug this closes.
+    assert repo.calls[0][3] == "Europe/Belgrade"
 
 
 async def test_by_period_months_back_0_is_current_month() -> None:

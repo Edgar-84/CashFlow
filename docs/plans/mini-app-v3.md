@@ -362,7 +362,7 @@ criteria; a value not in those files does not go into CSS.
       Files: `api/statistics.py`, `services/statistics_service.py`,
       `tests/test_statistics_api.py`, `tests/test_statistics_service.py`.
       Model: sonnet.
-- [ ] **U0.2a Period filtering moves to `spent_at`** (D314) — the three SQL
+- [x] **U0.2a Period filtering moves to `spent_at`** (D314) — the three SQL
       sites named in Contracts. No API surface change; this unit is purely
       "which column does a period mean".
       AC: an expense with `spent_at` in July and `created_at` in August appears
@@ -966,6 +966,59 @@ every unit below.
   silently resolve to the current month instead of failing loud. `api/
   statistics.py::_validate_period` rejects it before the service ever calls
   `resolve_period`.
+- D322 (2026-08-04): **U0.2a's test-file split corrects the plan's Files
+  list.** `check_limit`'s only integration coverage lives in
+  `tests/test_budget_plan_repo.py` (real SQL) — `tests/test_budget_service.py`
+  is a fully-mocked unit suite (`FakeExpenseSumRepo`) that never calls
+  `check_limit` at all; the caller that does is `ExpenseService`, tested
+  against a `FakeBudgetPlanRepo` in `tests/test_expense_service.py`, also
+  mocked. The new `spent_at`-vs-`created_at` backdating test for
+  `check_limit` was added to `test_budget_plan_repo.py` instead, where it can
+  actually exercise the changed SQL. `tests/factories.py::make_expense` also
+  gained a `spent_at` param (not in the plan's Files list either): it
+  defaults from `created_at`'s calendar date so every pre-existing caller
+  that only sets `created_at` keeps landing in the period it already
+  appeared in, without editing those callers. One pre-existing test,
+  `test_get_by_period_respects_month_boundaries_across_timezones`, asserted
+  `get_by_period`'s old TIMESTAMPTZ-instant comparison behavior on
+  `created_at` (same absolute instant, different tzinfo offsets) — that
+  property doesn't exist for a bare `DATE` column, so it was rewritten as
+  `test_get_by_period_respects_month_boundaries`, testing the same
+  half-open-window boundary on explicit `spent_at` dates instead.
+- D323 (2026-08-04, review-found BLOCKER, fixed same unit): **U0.2a's first
+  pass compared `spent_at` (`DATE`) directly against the UTC-instant
+  `datetime` bounds `resolve_period`/`month_bounds` already produced —
+  correct for `TIMESTAMPTZ` (D314's premise), silently wrong for `DATE`.**
+  asyncpg/Postgres resolve `spent_at >= $2` by inferring `$2` as `date` (to
+  match the column) and take the raw `year/month/day` off the Python
+  `datetime` with **no timezone conversion** — but `start`/`end` are local
+  midnight *in `family_tz`* expressed as a UTC instant, so for any
+  `family_tz` ahead of UTC (Europe/Belgrade — this project's own realistic
+  default and `tests/test_period.py`'s primary non-UTC fixture — included)
+  the UTC calendar date of that instant is one day earlier than the local
+  one. Empirically reproduced by the `reviewer` subagent against real
+  Postgres: a July-31-Belgrade expense wrongly appeared in August's
+  statistics and wrongly moved 50% of August's budget fill. Fixed by giving
+  `get_by_period`, `sum_by_category_month` and `check_limit` an explicit
+  `tz: str = "UTC"` keyword param, converting in SQL with
+  `(start AT TIME ZONE $tz)::date` instead of comparing the raw instant —
+  see `repositories/CLAUDE.md`'s new "Timezone exception" note (repo-level
+  tz-agnosticism holds for `TIMESTAMPTZ`, not `DATE`). `statistics_service.
+  _expenses` — the one call site that already passes non-UTC bounds today
+  (`self._family_tz`) — was updated to pass `tz=self._family_tz`; its
+  Protocol and `tests/test_statistics_service.py`'s Fake were widened to
+  match. `sum_by_category_month`/`check_limit` keep the `tz="UTC"` default
+  unchanged at their call sites (`budget_service.get_progress`,
+  `expense_service`'s notification check) because those already only ever
+  pass UTC-aligned bounds (`month_bounds()` with no `tz` — a separate,
+  pre-existing gap, not introduced or fixed here); flagged in Gotchas below
+  so the next unit to plumb `family_tz` into budgets/notifications doesn't
+  reintroduce this exact bug. Proven with three new
+  `@pytest.mark.integration` tests (one per SQL site) using
+  `tz="Europe/Belgrade"` with a real boundary expense on the last local day
+  of the month, run against a real throwaway Postgres
+  (`scripts/integration_docker.sh`) since this class of bug is invisible to
+  mocked unit tests and to `verify.sh` alone.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1030,12 +1083,47 @@ every unit below.
   `tests/test_statistics_service.py` (period/offset ↔ explicit start/end and
   ↔ months_back equivalence, per AC) and `tests/test_statistics_api.py`
   (every named conflict combo → 422); `tests/README.md` updated.
-- Next: **U0.2a** — period filtering moves to `spent_at`. Start with
-  `/clear`, then `/unit U0.2a docs/plans/mini-app-v3.md`.
+- Done: **U0.2a** — `expense_repo.get_by_period`, `expense_repo.
+  sum_by_category_month` and `budget_plan_repo.check_limit` all filter on
+  `expenses.spent_at` instead of `expenses.created_at` (D314); no route/API
+  change. Each also gained an explicit `tz: str = "UTC"` keyword param
+  (D323 — a `reviewer`-found BLOCKER: naively comparing the `DATE` column
+  against the UTC-instant bounds misfiled boundary expenses for any
+  `family_tz` ahead of UTC; fixed with `(start AT TIME ZONE $tz)::date` in
+  SQL). `statistics_service._expenses` now passes `tz=self._family_tz` to
+  `get_by_period` (its Protocol + `tests/test_statistics_service.py`'s Fake
+  widened to match) — the one live call site that already used non-UTC
+  bounds; `sum_by_category_month`/`check_limit`'s callers
+  (`budget_service`/`expense_service`) are untouched and still default to
+  `tz="UTC"`, matching their current (separately pre-existing) UTC-only
+  `month_bounds()` usage — see the new Gotcha below.
+  `tests/factories.py::make_expense` gained a `spent_at` param defaulting
+  from `created_at`'s calendar date, so every pre-existing caller keeps
+  behaving exactly as before with zero edits. Verified against a real
+  throwaway Postgres (`scripts/integration_docker.sh`) since the
+  correctness hinges on `DATE`/`TIMESTAMPTZ`/timezone SQL semantics, not
+  just mocked repos — full 75-test integration suite green. New/changed
+  tests: `test_get_by_period_filters_by_spent_at_not_created_at`,
+  `test_sum_by_category_month_filters_by_spent_at_not_created_at`,
+  `test_check_limit_counts_by_spent_at_not_created_at` (new, the last one in
+  `test_budget_plan_repo.py` not `test_budget_service.py` — see D322),
+  `test_get_by_period_respects_month_boundaries` (rewritten, see D322), and
+  three D323 non-UTC boundary tests (`..._filters_by_local_spent_at_not_utc_
+  calendar_date` / `test_check_limit_counts_by_local_spent_at_not_utc_
+  calendar_date`) using `tz="Europe/Belgrade"`. `tests/README.md` and
+  `repositories/CLAUDE.md` updated. Reviewer: 2 rounds — round 1 found the
+  D323 BLOCKER (fixed, re-verified against real Postgres); round 2 (APPROVE)
+  raised one WARN — nothing proved `StatisticsService` itself passes
+  `tz=self._family_tz` through to the repo, since the new D323 integration
+  tests exercise the repos directly — closed by having
+  `FakeExpensePeriodRepo.calls` record `tz` and asserting it in
+  `test_by_period_default_uses_family_tz_not_utc`. verify.sh green.
+- Next: **U0.2b** — `spent_at` on the expense write path. Start with
+  `/clear`, then `/unit U0.2b docs/plans/mini-app-v3.md`.
 - **Execution order in M0**: U0.1a (done) → U0.3 (done) → U0.2 (done) →
-  **U0.2a** → U0.2b → U0.2c → U0.4… The migration ran ahead of the statistics
-  work so the period queries are written against `spent_at` once rather than
-  written against `created_at` and rewritten a unit later.
+  U0.2a (done) → **U0.2b** → U0.2c → U0.4… The migration ran ahead of the
+  statistics work so the period queries are written against `spent_at` once
+  rather than written against `created_at` and rewritten a unit later.
 - Gotchas:
   - **Take the CP0 Supabase snapshot before `alembic upgrade head` ever runs
     against production** for this migration — still not done as of U0.3
@@ -1054,6 +1142,14 @@ every unit below.
     deliberate: a backdated expense counts toward the budget of the month it
     was spent in. Leaving `check_limit` on `created_at` would make budgets
     disagree with the statistics on the same screen.
+  - **Any future unit that plumbs `family_tz` into `budget_service.
+    get_progress` or `expense_service`'s budget-notification check must also
+    pass `tz=family_tz` to `sum_by_category_month`/`check_limit`** — both
+    currently default to `tz="UTC"` because their only callers still compute
+    bounds via `month_bounds()` with no `tz` (D323). That's a pre-existing
+    gap this unit didn't introduce and isn't fixing, but the moment it's
+    closed elsewhere, forgetting the `tz=` kwarg here reintroduces D323's
+    exact bug — silently, since every existing test uses UTC-aligned bounds.
   - `months_back=2` (3 months) has **no** `{period, offset}` equivalent. Do not
     "simplify" the alias away — see D316.
   - M3 is ordered after M2 because screen 02's "More" and "+ Add tag" navigate

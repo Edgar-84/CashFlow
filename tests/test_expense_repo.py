@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -168,64 +168,139 @@ async def test_get_by_category_filters_by_account_and_category(
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
-async def test_get_by_period_respects_month_boundaries_across_timezones(
+async def test_get_by_period_respects_month_boundaries(
     db_conn: asyncpg.Connection,
 ) -> None:
+    """get_by_period()'s [start, end) window is half-open on spent_at (D314):
+    the last day of the window is included, the day the window ends on is
+    not. spent_at is a bare DATE with no timezone of its own — unlike the
+    old created_at-based version of this test, there is no tzinfo
+    representation to vary here."""
     account_id = await make_account(db_conn)
     category_id = await make_category(db_conn, account_id=account_id)
     user = await make_user(db_conn, account_id=account_id)
 
-    # July 2026 boundaries expressed in UTC.
     july_start = datetime(2026, 7, 1, tzinfo=UTC)
     august_start = datetime(2026, 8, 1, tzinfo=UTC)
 
-    in_july_utc = await make_expense(
+    first_day_of_july = await make_expense(
         db_conn,
         account_id=account_id,
         user_id=user.id,
         category_id=category_id,
         amount=100,
-        created_at=july_start,
+        spent_at=date(2026, 7, 1),
     )
-    # Same absolute instant as july_start but expressed in a UTC-3 offset the
-    # afternoon before, at a local calendar date of 2026-06-30 — proves
-    # TIMESTAMPTZ comparison is instant-based, not dependent on the caller's
-    # tzinfo representation.
-    just_before_july = july_start - timedelta(microseconds=1)
-    before_july_offset = await make_expense(
+    last_day_before_july = await make_expense(
         db_conn,
         account_id=account_id,
         user_id=user.id,
         category_id=category_id,
         amount=200,
-        created_at=just_before_july.astimezone(timezone(timedelta(hours=-3))),
+        spent_at=date(2026, 6, 30),
     )
-    last_instant_of_july = await make_expense(
+    last_day_of_july = await make_expense(
         db_conn,
         account_id=account_id,
         user_id=user.id,
         category_id=category_id,
         amount=300,
-        created_at=(august_start - timedelta(microseconds=1)).astimezone(
-            timezone(timedelta(hours=5))
-        ),
+        spent_at=date(2026, 7, 31),
     )
-    in_august = await make_expense(
+    first_day_of_august = await make_expense(
         db_conn,
         account_id=account_id,
         user_id=user.id,
         category_id=category_id,
         amount=400,
-        created_at=august_start,
+        spent_at=date(2026, 8, 1),
     )
 
     repo = ExpenseRepository(db_conn)
     results = await repo.get_by_period(account_id, july_start, august_start)
     result_ids = {e.id for e in results}
 
-    assert result_ids == {in_july_utc.id, last_instant_of_july.id}
-    assert before_july_offset.id not in result_ids
-    assert in_august.id not in result_ids
+    assert result_ids == {first_day_of_july.id, last_day_of_july.id}
+    assert last_day_before_july.id not in result_ids
+    assert first_day_of_august.id not in result_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_get_by_period_filters_by_local_spent_at_not_utc_calendar_date(
+    db_conn: asyncpg.Connection,
+) -> None:
+    """D323: start/end are UTC instants representing local midnight in `tz`
+    (Europe/Belgrade is UTC+2 in August). spent_at must be compared against
+    that LOCAL calendar date — naively truncating the UTC instant to its own
+    calendar date shifts the whole window back a day for any tz ahead of
+    UTC, silently misfiling both boundary expenses below."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+
+    # August 2026 bounds in Europe/Belgrade (UTC+2, CEST), expressed in UTC.
+    august_start = datetime(2026, 7, 31, 22, 0, tzinfo=UTC)
+    september_start = datetime(2026, 8, 31, 22, 0, tzinfo=UTC)
+
+    last_day_of_july = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=100,
+        spent_at=date(2026, 7, 31),
+    )
+    last_day_of_august = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=200,
+        spent_at=date(2026, 8, 31),
+    )
+
+    repo = ExpenseRepository(db_conn)
+    results = await repo.get_by_period(
+        account_id, august_start, september_start, tz="Europe/Belgrade"
+    )
+    result_ids = {e.id for e in results}
+
+    assert result_ids == {last_day_of_august.id}
+    assert last_day_of_july.id not in result_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_get_by_period_filters_by_spent_at_not_created_at(
+    db_conn: asyncpg.Connection,
+) -> None:
+    """D314: period filtering moved from created_at to spent_at — a backdated
+    expense is filed by the day it happened, not the day it was typed."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+
+    july_start = datetime(2026, 7, 1, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    september_start = datetime(2026, 9, 1, tzinfo=UTC)
+
+    backdated = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=500,
+        created_at=datetime(2026, 8, 15, tzinfo=UTC),
+        spent_at=date(2026, 7, 20),
+    )
+
+    repo = ExpenseRepository(db_conn)
+    july_results = await repo.get_by_period(account_id, july_start, august_start)
+    august_results = await repo.get_by_period(account_id, august_start, september_start)
+
+    assert {e.id for e in july_results} == {backdated.id}
+    assert august_results == []
 
 
 @pytest.mark.integration
@@ -355,6 +430,79 @@ async def test_sum_by_category_month_scopes_by_account(db_conn: asyncpg.Connecti
 
     repo = ExpenseRepository(db_conn)
     sums = await repo.sum_by_category_month(account_id, july_start, august_start)
+
+    assert sums == {category_id: 500}
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_sum_by_category_month_filters_by_spent_at_not_created_at(
+    db_conn: asyncpg.Connection,
+) -> None:
+    """D314: same rule as get_by_period — a backdated expense's amount is
+    summed into the month it was spent in, not the month it was typed in."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+
+    july_start = datetime(2026, 7, 1, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=1500,
+        created_at=datetime(2026, 8, 5, tzinfo=UTC),
+        spent_at=date(2026, 7, 10),
+    )
+
+    repo = ExpenseRepository(db_conn)
+    july_sums = await repo.sum_by_category_month(account_id, july_start, august_start)
+    august_sums = await repo.sum_by_category_month(
+        account_id, august_start, datetime(2026, 9, 1, tzinfo=UTC)
+    )
+
+    assert july_sums == {category_id: 1500}
+    assert august_sums == {}
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_sum_by_category_month_filters_by_local_spent_at_not_utc_calendar_date(
+    db_conn: asyncpg.Connection,
+) -> None:
+    """Same D323 rule as get_by_period's equivalent test — a non-UTC `tz`
+    boundary must compare against the local calendar date, not the UTC one."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+
+    august_start = datetime(2026, 7, 31, 22, 0, tzinfo=UTC)
+    september_start = datetime(2026, 8, 31, 22, 0, tzinfo=UTC)
+
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=500,
+        spent_at=date(2026, 8, 31),
+    )
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        amount=999,
+        spent_at=date(2026, 7, 31),
+    )
+
+    repo = ExpenseRepository(db_conn)
+    sums = await repo.sum_by_category_month(
+        account_id, august_start, september_start, tz="Europe/Belgrade"
+    )
 
     assert sums == {category_id: 500}
 
