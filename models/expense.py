@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -34,6 +34,10 @@ class ExpenseResponse(ExpenseBase):
     account_id: UUID
     created_at: datetime
     updated_at: datetime  # DB-trigger-maintained (set_updated_at) — never set by app code
+    # the day the expense happened, distinct from created_at (D314). Not yet
+    # on ExpenseCreate/Update — writing it is U0.2b; default here only eases
+    # constructing fixtures that predate the column.
+    spent_at: date = Field(default_factory=date.today)
     tags: list[TagResponse] = []
     # populated by a repo LEFT JOIN on users.name; None for old fixtures or a
     # hard-deleted user (plan Decision log D102)

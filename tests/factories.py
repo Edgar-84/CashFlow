@@ -25,12 +25,21 @@ async def make_account(
 
 
 async def make_category(
-    conn: asyncpg.Connection, *, account_id: UUID, name: str = "General"
+    conn: asyncpg.Connection,
+    *,
+    account_id: UUID,
+    name: str = "General",
+    created_at: datetime | None = None,
 ) -> UUID:
     row = await conn.fetchrow(
-        "INSERT INTO categories (name, account_id) VALUES ($1, $2) RETURNING id",
+        """
+        INSERT INTO categories (name, account_id, created_at)
+        VALUES ($1, $2, COALESCE($3, now()))
+        RETURNING id
+        """,
         name,
         account_id,
+        created_at,
     )
     assert row is not None
     return row["id"]

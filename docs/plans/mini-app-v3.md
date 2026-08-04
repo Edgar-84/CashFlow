@@ -330,7 +330,7 @@ criteria; a value not in those files does not go into CSS.
       (its tests are edited, not deleted).
       Files: `models/enums.py`, `services/period.py`, `tests/test_period.py`.
       Model: sonnet.
-- [ ] **U0.3 Schema: archive flags, colour slot, `spent_at`** ⚠ **STOP-AND-ASK
+- [x] **U0.3 Schema: archive flags, colour slot, `spent_at`** ⚠ **STOP-AND-ASK
       GATE** (`migrations/versions/` + `docs/SCHEMA.sql`) — one revision adding
       all **four** columns with both backfills; models updated to match.
       AC: `alembic upgrade head` then `downgrade -1` is clean on a fresh DB
@@ -931,6 +931,32 @@ every unit below.
   else. Rejected: FAB only with MainButton hidden (cleaner, one primary, but
   gives up the native button the user wanted kept); MainButton only (no
   redundancy, but not the requested design).
+- D319 (2026-08-04): **U0.3 adds the four columns and the read-side model
+  fields only** — `CategoryResponse`/`TagResponse` gain `is_active`,
+  `CategoryResponse` gains `color_slot`, both gain `expense_count`, and
+  `ExpenseResponse` gains `spent_at`. The **write-side** stays out:
+  `CategoryCreate`/`Update.color_slot` is U0.6's contract, and
+  `ExpenseCreate`/`Update.spent_at` is U0.2b's — both units' file lists
+  already named `models/category.py`/`models/expense.py`, which only makes
+  sense if U0.3 hadn't already put those fields on `Create`/`Update`. New
+  response fields default to values matching the DB column defaults
+  (`is_active=True`, `color_slot=None`, `expense_count=None`,
+  `spent_at` via `default_factory=date.today`) purely so pre-existing test
+  fixtures that construct these models positionally keep compiling —
+  repositories return real rows via `SELECT *`/`RETURNING *`, so no
+  repository change was needed for the fields to populate for real.
+- D320 (2026-08-04): the AC's "`alembic upgrade head` then `downgrade -1`"
+  check is **not** a new pytest test — it's already covered generically for
+  every migration by `.github/workflows/ci.yml`'s "Apply migrations" +
+  "Verify downgrade/upgrade round-trip" steps, which only run in CI (D18:
+  `alembic` needs `greenlet`, missing on this macOS ARM dev machine —
+  confirmed again while implementing this unit). What
+  `tests/test_schema_backfill.py` covers instead, as `@pytest.mark.integration`,
+  is the backfill *formula*: the same SQL the migration runs (color-slot
+  ranking, `spent_at`'s `AT TIME ZONE`), executed directly against fixture
+  rows with controlled `created_at` values, proven against a real throwaway
+  Postgres via `scripts/integration_docker.sh`. This is the pattern future
+  migration units with a backfill should follow.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -963,20 +989,44 @@ every unit below.
   DST/inclusive-end-date/naive-`now` test from U0.1 kept, edited onto the new
   signature). verify.sh green. No new decisions — implemented exactly to
   D313's contract.
-- Next: **U0.3** — schema migration (archive flags, colour slot, `spent_at`).
-  ⚠ STOP-AND-ASK GATE before touching `migrations/versions/`; take the CP0
-  Supabase snapshot first. Start with `/clear`, then
-  `/unit U0.3 docs/plans/mini-app-v3.md`.
-- **Execution order in M0**: U0.1a (done) → **U0.3 (migration)** → U0.2 →
-  U0.2a → U0.2b → U0.2c → U0.4… The migration moved ahead of the statistics
+- Done: **U0.3** — one migration
+  (`migrations/versions/2026_08_04_1829-a1d5976f1ce0_add_category_tag_archive_flags_color_.py`)
+  adding `categories.is_active`/`color_slot`, `tags.is_active`,
+  `expenses.spent_at`, with both backfills (color-slot ranking capped at 6;
+  `spent_at` via `(created_at AT TIME ZONE family_tz)::date`, `family_tz`
+  read from `config.get_settings()` at migration time). `docs/SCHEMA.sql`
+  updated to match. Models: `CategoryResponse`/`TagResponse` gain
+  `is_active`/`expense_count` (+`color_slot` on Category, `ge=1, le=12`
+  validated), `ExpenseResponse` gains `spent_at` — read-side only, see D319.
+  Backfill formula correctness proven by 5 new `@pytest.mark.integration`
+  tests in `tests/test_schema_backfill.py`, run against a real throwaway
+  Postgres via `scripts/integration_docker.sh` (real `alembic upgrade` still
+  can't run locally, D18/D320). Reviewer: [pending — see report].
+  verify.sh green.
+  ⚠ **Not yet applied to production Supabase.** Before running
+  `alembic upgrade head` there: take the CP0 snapshot first (STATE gotcha
+  below still applies to the *deploy* step, even though the unit itself is
+  done).
+- Next: **U0.2** — statistics adopts `period` + `offset`. Start with
+  `/clear`, then `/unit U0.2 docs/plans/mini-app-v3.md`.
+- **Execution order in M0**: U0.1a (done) → U0.3 (done) → **U0.2** →
+  U0.2a → U0.2b → U0.2c → U0.4… The migration ran ahead of the statistics
   work so the period queries are written against `spent_at` once rather than
   written against `created_at` and rewritten a unit later.
 - Gotchas:
-  - **U0.3 stops and asks** before touching `migrations/versions/`. Take the
-    CP0 snapshot first. It now adds **four** columns, not three.
+  - **Take the CP0 Supabase snapshot before `alembic upgrade head` ever runs
+    against production** for this migration — still not done as of U0.3
+    landing; it happens at deploy time, not at unit-implementation time.
   - `spent_at`'s backfill must go through `family_tz`
     (`(created_at AT TIME ZONE family_tz)::date`). A plain `created_at::date`
-    moves late-night expenses into the wrong month — D120 again.
+    moves late-night expenses into the wrong month — D120 again. Implemented
+    in U0.3; see D320 for how it's tested without real `alembic` locally.
+  - U0.2b must add `spent_at` to `ExpenseCreate`/`ExpenseUpdate` (with the
+    service defaulting it to today in `family_tz`) — U0.3 deliberately left
+    the write side alone (D319).
+  - U0.6 must add `color_slot` to `CategoryCreate`/`CategoryUpdate` with the
+    `0`/`7`+ range check already proven on `CategoryResponse` in U0.3 — same
+    reason (D319).
   - U0.2a moves `budget_plan_repo.check_limit` to `spent_at` too. That is
     deliberate: a backdated expense counts toward the budget of the month it
     was spent in. Leaving `check_limit` on `created_at` would make budgets

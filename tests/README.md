@@ -11,9 +11,10 @@ check defaults/validation. No DB, no network.
 | Test | Checks | Target |
 |---|---|---|
 | `test_user_models` | `UserCreate` defaults `role` to `MEMBER`; `UserUpdate` fields optional; `UserResponse` round-trips `account_id` | [`models/user.py`](../models/user.py) |
-| `test_category_models` | Create/Update/Response basic field round-trip | [`models/category.py`](../models/category.py) |
-| `test_tag_models` | Create/Update/Response basic field round-trip | [`models/tag.py`](../models/tag.py) |
-| `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags`; `user_name` defaults `None` and round-trips when supplied; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6) | [`models/expense.py`](../models/expense.py) |
+| `test_category_models` | Create/Update/Response basic field round-trip; `CategoryResponse.is_active` defaults `True`, `color_slot`/`expense_count` default `None`, and all three round-trip when set (U0.3) | [`models/category.py`](../models/category.py) |
+| `test_category_response_rejects_out_of_range_color_slot` | Parametrized `color_slot` of `0`/`13` fails Pydantic validation, not the DB (U0.3 AC) | [`models/category.py`](../models/category.py) |
+| `test_tag_models` | Create/Update/Response basic field round-trip; `TagResponse.is_active` defaults `True`, `expense_count` defaults `None` (U0.3) | [`models/tag.py`](../models/tag.py) |
+| `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags`; `user_name` defaults `None` and round-trips when supplied; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6); `spent_at` round-trips on `Response` (U0.3, not yet on `Create`/`Update` — that's U0.2b) | [`models/expense.py`](../models/expense.py) |
 | `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=80`); `notify_threshold` rejects >100; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6 added `Update`); `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
 | `test_permission_models` | `PermissionCreate.own_only` defaults `True`; `PermissionUpdate` fields optional | [`models/permission.py`](../models/permission.py) |
 | `test_account_response_and_user_me_response` | `AccountResponse` carries `currency`; `UserMeResponse` (D211) extends `UserResponse` with it | [`models/account.py`](../models/account.py), [`models/user.py`](../models/user.py) |
@@ -130,6 +131,21 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_get_by_user_and_resource_scopes_by_user` | Excludes another user's permission row for the same resource |
 | `test_list_by_account_returns_only_that_accounts_rows` | `list_by_account()` JOINs on `users` and excludes another account's rows (U1.5) |
 | `test_list_by_account_returns_empty_when_no_rows` | Returns `[]` for an account with no override rows |
+
+## Migration backfill tests (`test_schema_backfill.py`) → [`migrations/versions/2026_08_04_1829-a1d5976f1ce0_*.py`](../migrations/versions/2026_08_04_1829-a1d5976f1ce0_add_category_tag_archive_flags_color_.py)
+`@pytest.mark.integration`, real Postgres via `db_conn`. Real `alembic upgrade`/
+`downgrade` can't run locally (D18) — the generic apply-then-round-trip check
+for every migration runs in CI instead. These tests run the same backfill SQL
+the migration runs, directly against controlled fixture data, to prove the
+formulas themselves are correct (U0.3 AC).
+
+| Test | Checks |
+|---|---|
+| `test_color_slot_backfill_caps_at_six_by_created_at_order` | 8 categories in one account backfill to slots `1..6` by `created_at ASC`, `None` for the 7th/8th |
+| `test_color_slot_backfill_never_assigns_slots_seven_to_twelve` | No backfilled row ever gets a slot above 6 — those are reserved for a user to choose (D308) |
+| `test_category_defaults_to_active_without_backfill` | A category inserted with no explicit `is_active` gets `true` from the column default alone |
+| `test_spent_at_backfill_uses_family_tz_not_naive_utc_date` | A row created at 2026-07-20 00:30 Europe/Belgrade (2026-07-19 22:30 UTC) backfills `spent_at` to the local date (Jul 20), not the UTC date (Jul 19) — the D120 class of bug |
+| `test_expense_defaults_spent_at_to_current_date_without_backfill` | An expense inserted with no explicit `spent_at` gets today's date from the column default alone |
 
 ## API dependency tests (`test_deps.py`) → [`api/deps.py`](../api/deps.py)
 Hermetic — repositories replaced with in-memory fakes via
