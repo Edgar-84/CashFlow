@@ -560,7 +560,7 @@ touched** (D316) — it keeps its `months_back` chips.
       Files: `webapp/src/components/date-range-picker.ts`,
       `webapp/tests/date-range-picker.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U1.9 "Period" tab wired into Home** — the custom range, end to end.
+- [x] **U1.9 "Period" tab wired into Home** — the custom range, end to end.
       AC: Apply issues exactly one fetch with `period=custom` and the two
       dates; dismissing without applying leaves the previous period intact and
       refetches nothing; the label reads "9 – 17 Jul", not a pair of ISO
@@ -1264,6 +1264,37 @@ every unit below.
   `mount()` in this codebase already carries (no keyboard handling in
   `period-selector.ts` either). Revisit if U1.9's real-device pass surfaces
   it as a problem.
+- D335 (2026-08-05, U1.9): **`home.ts`'s own `mount()` opens and owns the
+  date-range picker directly, instead of forwarding the tap to the host via
+  `HomeHandlers.onOpenPicker`** (which is removed; the stale U1.4-era comment
+  on it — "U1.8 wires the picker" — anticipated a different unit doing this
+  wiring, but the shape is the same one `mount()` already uses for
+  `period-selector.ts` itself: Home mounts its sub-components, `main.ts` only
+  supplies business-logic callbacks). `HomeHandlers` gains
+  `onApplyCustomRange(range)` instead — called only from the picker's Apply,
+  after `mount()` has already torn the picker down, mirroring
+  `onUnitChange`/`onOffsetChange`'s existing "host sets `homePeriod`, calls
+  `refreshHome` once" shape exactly, so "exactly one fetch on Apply" and "no
+  fetch on Cancel" hold by construction rather than needing new guards. The
+  picker mounts as a plain child of `root` (not a separate DOM root/portal) —
+  `.drp-root` is `position: fixed` so nesting doesn't affect its layout, and
+  it means a later `mount()` call for any screen (a screen navigation via
+  MainButton while the picker happens to be open, e.g.) tears it down for
+  free by simply overwriting `root.innerHTML`, with no explicit lifecycle to
+  get wrong. BackButton is wired to close the picker while it's open and
+  restored to `null` on close — Home's BackButton is already always `null`
+  (root screen), so this is a restore to Home's normal state, not a
+  saved/restored previous handler. The picker's `onChange` re-invokes the
+  same local `renderPicker` closure with the updated value, i.e. re-runs
+  `mount()` on every tap — confirmed against U1.8's own STATE note as the
+  intended driving pattern ("the host is expected to pass back a value this
+  same component applied"). Added a pure `pickerValueForPeriod(period)`
+  (custom → `{start, end}`, else `{}`) so the one meaningful non-DOM seam is
+  still unit-tested; `maxDate` is `now` (already device-local, D327) turned
+  into a plain calendar-date string via a `toDateString` local to `home.ts`,
+  mirroring — not sharing — `lib/period.ts`'s and
+  `date-range-picker.ts`'s own private copies (both modules' own stated
+  convention).
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1783,8 +1814,34 @@ every unit below.
   bound (unlike the year-jump path's `YEAR_LIST_YEARS_BACK`), acceptable
   since the host is expected to pass back a value this same component
   applied, not an arbitrary one.
-- Next: **U1.9** — "Period" tab wired into Home, the custom range end to end.
-  Start with `/clear`, then `/unit U1.9 docs/plans/mini-app-v3.md`.
+- Done: **U1.9** — "Period" tab wired into Home, the custom range end to end
+  (M1 now complete). `home.ts`'s `mount()` opens/owns the picker itself
+  (`onOpenPicker` on `HomeHandlers` removed, `onApplyCustomRange(range)`
+  added — see D335 for the full shape and why it lives in `home.ts` rather
+  than `main.ts`). `main.ts`'s `onApplyCustomRange` sets
+  `homePeriod = { unit: "custom", offset: 0, start, end }` and calls
+  `refreshHome` once, the same one-liner shape `onUnitChange`/
+  `onOffsetChange` already had — so "range survives a retry" needed no new
+  code (it's the same module-level `homePeriod` closure every other tab
+  already persists through). "Label reads '9 – 17 Jul'" and "arrows hidden
+  for a custom range" needed no new code either — both already fall out of
+  `lib/period.ts::describe` and `period-selector.ts`'s existing
+  `unit !== "custom"` check once `homePeriod.unit` is actually `"custom"`.
+  4 tests added to `home.test.ts` (348 total webapp tests up from 344):
+  `pickerValueForPeriod` (seeds from an existing custom range vs. opens empty
+  for every other unit), the composed label/no-arrows render, and the
+  empty-state copy for a custom period. `mount()`'s own picker DOM wiring
+  (open/close, BackButton, re-render on `onChange`) is this file's usual
+  untested-glue gap — same class as `period-selector.ts`'s own `mount` and
+  every other screen's. Not verified: an actual browser or Telegram client —
+  no `claude-in-chrome`-equivalent tool was available this session, same gap
+  U1.8 noted; typecheck/lint/build (incl. the secret-grep) all pass.
+  Reviewer round 1: APPROVE, no findings besides a WARN on this STATE note's
+  own test count (4 tests claimed as 5, 348 total claimed as 349) — fixed
+  same round, no code changes needed.
+- Next: **U2.0** — Colour comes from the server (`lib/category-colors.ts`
+  prefers `color_slot`), the first M2 (Categories & Tags) unit. Start with
+  `/clear`, then `/unit U2.0 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

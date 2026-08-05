@@ -14,6 +14,7 @@ import {
   createMemoryCache,
   HOME_TILES,
   loadHome,
+  pickerValueForPeriod,
   renderHome,
   segmentTapTarget,
   type HomeApi,
@@ -366,6 +367,20 @@ describe("segmentTapTarget", () => {
   });
 });
 
+describe("pickerValueForPeriod", () => {
+  it("seeds the picker with the previously applied custom range", () => {
+    expect(pickerValueForPeriod({ unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" })).toEqual({
+      start: "2026-07-09",
+      end: "2026-07-17",
+    });
+  });
+
+  it("opens empty for any non-custom period, even one with a leftover offset", () => {
+    expect(pickerValueForPeriod(THIS_MONTH)).toEqual({});
+    expect(pickerValueForPeriod({ unit: "day", offset: -3 })).toEqual({});
+  });
+});
+
 function fakeWebApp(overrides: Partial<TelegramWebApp> = {}): TelegramWebApp {
   return {
     initData: "user=fake&hash=abc",
@@ -661,5 +676,29 @@ describe("renderHome", () => {
     const html = renderHome({ status: "ready", ...readyData }, NOW);
     expect(html).toContain('data-testid="period-tab-month"');
     expect(html).toContain("August");
+  });
+
+  it("renders a custom range's label as a human span, not a pair of ISO strings, with the arrows hidden", () => {
+    const customData = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [progress()],
+      period: { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" },
+    });
+    const html = renderHome({ status: "ready", ...customData }, NOW);
+    expect(html).toContain("9 – 17 Jul");
+    expect(html).not.toContain("2026-07-09");
+    expect(html).not.toContain('data-testid="period-arrow-prev"');
+    expect(html).not.toContain('data-testid="period-arrow-next"');
+  });
+
+  it("names the applied custom range in the empty-state copy", () => {
+    const html = renderHome(
+      { status: "empty", tiles: HOME_TILES, period: { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" } },
+      NOW,
+    );
+    expect(html).toContain("Nothing from 9 – 17 Jul");
   });
 });
