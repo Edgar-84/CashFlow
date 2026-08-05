@@ -17,9 +17,9 @@
  *    again directly — no handler call, no API call (AC: "grouping toggle
  *    re-renders without refetching the period").
  *
- * The donut always reflects the category breakdown (same D206 colour slots
- * as Home) regardless of grouping — there is no `categories.color`-style slot
- * contract for tags, so a "by tag" donut has no fixed palette to draw from.
+ * The donut always reflects the category breakdown (same server-authoritative
+ * `color_slot` colours as Home, D301/U2.0) regardless of grouping — tags have
+ * no colour column, so a "by tag" donut has no fixed palette to draw from.
  * Only the ranked-bar list below switches between `categoryBars`/`tagBars`.
  *
  * Bar width is relative to the leader (the top row), not to the period
@@ -118,7 +118,7 @@ export function buildStatisticsData(input: {
   grouping: Grouping;
 }): StatisticsData {
   const orderedCategories = [...input.categories].sort((a, b) => a.created_at.localeCompare(b.created_at));
-  const colorBySlot = new Map(assignCategoryColors(orderedCategories).map((c) => [c.id, c.slot]));
+  const colorBySlot = new Map(assignCategoryColors(input.categories).map((c) => [c.id, c.slot]));
   const catTotalById = new Map(input.categoryTotals.map((t) => [t.category_id, t.total]));
   const catNameById = new Map(input.categories.map((c) => [c.id, c.name]));
   const tagNameById = new Map(input.tags.map((t) => [t.id, t.name]));

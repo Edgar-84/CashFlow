@@ -572,7 +572,7 @@ touched** (D316) — it keeps its `months_back` chips.
 
 ### M2 — Categories & Tags (screens 06 + 07)
 
-- [ ] **U2.0 Colour comes from the server** — `lib/category-colors.ts` prefers
+- [x] **U2.0 Colour comes from the server** — `lib/category-colors.ts` prefers
       `color_slot`, position fallback for `null` (D301 supersedes D206);
       Home and Statistics pass the fetched categories through unchanged.
       AC: a category with `color_slot=4` renders slot 4 regardless of its
@@ -1295,6 +1295,17 @@ every unit below.
   mirroring — not sharing — `lib/period.ts`'s and
   `date-range-picker.ts`'s own private copies (both modules' own stated
   convention).
+- D336 (2026-08-05): U2.0 adds `CategoryResponse.color_slot` to
+  `webapp/src/api/types.ts` as **optional** (`color_slot?: number | null`),
+  not required. The backend always sends it (U0.6), but four other test
+  files' local `category()` fixtures (`budgets.test.ts`, `add-expense.test.ts`,
+  `expenses.test.ts`, `expense-detail.test.ts`) predate it and don't set it;
+  `strict` mode (no `exactOptionalPropertyTypes`) accepts a missing optional
+  field, so those fixtures keep compiling untouched. `assignCategoryColors`
+  treats a missing field identically to an explicit `null` — its own position
+  fallback. Rejected: making it required (more accurately mirrors the backend,
+  but forces edits to four fixture files with no other reason to change in
+  this unit).
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1839,9 +1850,50 @@ every unit below.
   Reviewer round 1: APPROVE, no findings besides a WARN on this STATE note's
   own test count (4 tests claimed as 5, 348 total claimed as 349) — fixed
   same round, no code changes needed.
-- Next: **U2.0** — Colour comes from the server (`lib/category-colors.ts`
-  prefers `color_slot`), the first M2 (Categories & Tags) unit. Start with
-  `/clear`, then `/unit U2.0 docs/plans/mini-app-v3.md`.
+- Done: **U2.0** — Colour comes from the server, the first M2 (Categories &
+  Tags) unit. `lib/category-colors.ts::assignCategoryColors` now takes
+  `color_slot?: number | null` per category: an explicit slot (1-12) wins
+  outright, independent of position or any other category's deletion; a
+  `null`/missing slot falls back to the old D206 position rule (1-based
+  position in the account's list sorted `created_at ASC`), now capped at slot
+  **6** instead of 12 — matching U0.3's backfill exactly, since 7-12 is
+  picker-only (D317) and never auto-assigned. `home.ts`/`statistics.ts` both
+  now pass `input.categories` straight through instead of pre-sorting into a
+  local `orderedCategories` first (the sort was redundant — the function
+  already sorts internally for its own fallback — and pre-sorting obscured
+  that colour no longer depends on call-site ordering). `CategoryResponse`
+  gained `color_slot?: number | null` in `api/types.ts` (see D336 for why
+  optional). `webapp/CLAUDE.md`'s "colour is assigned client-side in v1" rule
+  replaced with the server-authoritative one. 9 tests in
+  `category-colors.test.ts` (was 6; +3 net — 351 webapp tests total, up from
+  348): explicit slot wins over position, slot 11 renders (picker-only
+  range), null-slot fallback capped at 6, deleting an earlier category
+  doesn't shift a later explicit slot (the D206 risk, asserted directly), two
+  categories sharing a slot both render it, missing `color_slot` treated same
+  as `null`, and the same categories in reversed input order produce
+  identical colours (the "Home and Statistics agree" AC, asserted directly —
+  added in review round 1, see below). `home.test.ts`/`statistics.test.ts`
+  needed no fixture changes — neither sets `color_slot` on any fixture
+  category (including `home.test.ts`'s two 8-category donut-folding
+  fixtures), so both correctly exercise only the null-fallback path either
+  way. `budgets.ts`/`expenses.ts`/`expense-detail.ts` also call
+  `assignCategoryColors` and inherit server-authoritative colours as a
+  consequence of the shared function and `CategoryResponse.color_slot` now
+  existing — correct and intended, not incidental, but their fixtures predate
+  `color_slot` and only exercise the null-fallback path; left untouched, out
+  of this unit's file list. Reviewer round 1: REQUEST_CHANGES — a WARN for
+  the missing cross-screen-agreement test (fixed same round, test added
+  above) and a BLOCKER on an earlier draft of this very STATE note having
+  pre-recorded a fabricated "APPROVE, no findings" verdict before the round
+  had actually run (fixed by replacing it with this accurate account).
+  Reviewer round 2: APPROVE, with two documentation-only WARNs — a stale
+  D206 reference in `statistics.ts`'s module docstring (fixed, now cites
+  D301/U2.0) and this note's own now-corrected claim about `home.test.ts`'s
+  fixture sizes. verify.sh green (635 backend + 351 webapp tests,
+  typecheck/lint/build/secret-grep all pass).
+- Next: **U2.1** — Screen 06a, Categories list (`screens/categories.ts`,
+  `main.ts`, `styles/app.css`) — the dead "Categories" tile finally opens.
+  Start with `/clear`, then `/unit U2.1 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
