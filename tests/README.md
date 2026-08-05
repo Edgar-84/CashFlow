@@ -256,8 +256,9 @@ Hermetic — `CategoryRepositoryProtocol` replaced with an in-memory `FakeCatego
 | `test_create_without_color_slot_ignores_other_accounts_slots` | Free-slot search is scoped to the caller's own account |
 | `test_create_without_color_slot_frees_archived_categorys_slot` | An archived category's slot is free for reuse — only active rows count as "used" |
 | `test_create_with_explicit_color_slot_keeps_it_even_if_taken` | An explicit `color_slot` bypasses the free-slot search entirely; duplicates are allowed by design |
-| `test_category_create_rejects_out_of_range_color_slot` | `CategoryCreate(color_slot=0\|7\|-1)` fails Pydantic validation (422 at the API layer) |
+| `test_category_create_rejects_out_of_range_color_slot` | `CategoryCreate(color_slot=0\|13\|-1)` fails Pydantic validation (422 at the API layer) |
 | `test_category_update_rejects_out_of_range_color_slot` | Same range check on `CategoryUpdate` |
+| `test_category_create_accepts_picker_only_slot_7_to_12` | `CategoryCreate(color_slot=7)` is valid — 7-12 are picker-only (D317, U2.2), never auto-assigned, but a legal explicit write |
 | `test_update_changes_fields` | `update()` applies a partial `CategoryUpdate` |
 | `test_update_explicit_null_is_ignored_not_nulled` | An explicit `{"name": null}` is ignored, not sent to the repo as `SET name = NULL` (same D30 precedent as users) |
 | `test_update_only_name_leaves_color_slot_untouched` | Updating only `name` leaves an existing `color_slot` unchanged (U0.6) |

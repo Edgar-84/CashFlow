@@ -67,6 +67,17 @@ export interface CategoryResponse {
   expense_count?: number | null;
 }
 
+export interface CategoryCreate {
+  name: string;
+  /** 1-12 (D317); omitted lets the server auto-assign from its 1-6 pool. */
+  color_slot?: number | null;
+}
+
+export interface CategoryUpdate {
+  name?: string;
+  color_slot?: number | null;
+}
+
 export interface TagResponse {
   id: Uuid;
   name: string;

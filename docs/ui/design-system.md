@@ -60,20 +60,25 @@ rule, surviving only as the fallback).
 wide rather than six. Slots 1–6 are the shipped set and must not move; 7–12 are
 new.
 
-| Slot | Light | Dark | Source |
-|---|---|---|---|
-| `--category-slot-1` | `#2a78d6` | `#3987e5` | [ref] |
-| `--category-slot-2` | `#eb6834` | `#d95926` | [ref] |
-| `--category-slot-3` | `#1baf7a` | `#199e70` | [ref] |
-| `--category-slot-4` | `#eda100` | `#c98500` | [ref] |
-| `--category-slot-5` | `#e87ba4` | `#d55181` | [ref] |
-| `--category-slot-6` | `#008300` | `#008300` | [ref] |
-| `--category-slot-7` | `#7a5cd0` | `#8f74e0` | [inferred] |
-| `--category-slot-8` | `#b5379a` | `#c74fae` | [inferred] |
-| `--category-slot-9` | `#1f9bb5` | `#29aac4` | [inferred] |
-| `--category-slot-10` | `#8a5a3c` | `#a06d4d` | [inferred] |
-| `--category-slot-11` | `#7d8b1f` | `#93a12b` | [inferred] |
-| `--category-slot-12` | `#3b4bb0` | `#5b58c4` | [inferred] |
+| Slot | Name | Light | Dark | Source |
+|---|---|---|---|---|
+| `--category-slot-1` | Blue | `#2a78d6` | `#3987e5` | [ref] |
+| `--category-slot-2` | Orange | `#eb6834` | `#d95926` | [ref] |
+| `--category-slot-3` | Aqua | `#1baf7a` | `#199e70` | [ref] |
+| `--category-slot-4` | Yellow | `#eda100` | `#c98500` | [ref] |
+| `--category-slot-5` | Pink | `#e87ba4` | `#d55181` | [ref] |
+| `--category-slot-6` | Green | `#008300` | `#008300` | [ref] |
+| `--category-slot-7` | Teal | `#0072a1` | `#0087ac` | [validated] |
+| `--category-slot-8` | Violet | `#894ed6` | `#8f54dc` | [validated] |
+| `--category-slot-9` | Olive | `#716400` | `#827200` | [validated] |
+| `--category-slot-10` | Cyan | `#00a59f` | `#00a59f` | [validated] |
+| `--category-slot-11` | Moss | `#739800` | `#6b8f00` | [validated] |
+| `--category-slot-12` | Magenta | `#ab37ab` | `#b542b5` | [validated] |
+
+Name is what the colour picker (screen 06b) shows and speaks for each swatch
+— a plain English colour word, not a brand name. `[inferred]` (2026-08-05,
+confirmed by the user for U2.2 prep) for slots 1–6 (never named before this)
+and 7–12 alike.
 
 Rules that survive the palette growing:
 
@@ -89,10 +94,19 @@ Rules that survive the palette growing:
   about readability of the chart and is unrelated to the twelve-slot palette.
 - Never generate a hue. Twelve is the closed set.
 
-`[?]` — slots 7–12 were chosen by eye for hue separation and have **not** been
-run through the dataviz skill's contrast/colourblind validator, and their
-`#8a5a3c` / `#7d8b1f` pair is the weakest. Validate before screen 06 ships a
-picker that lets a user choose them.
+**Validated (2026-08-05, U2.2 prep).** Slots 7–12 were re-picked and run through
+`dataviz`'s `validate_palette.js` against the app's real card surfaces
+(`#FFFFFF` light / `#1C2123` dark): all 12 slots pass lightness band, chroma
+floor, adjacent-pair CVD separation (≥8 target) and the normal-vision floor
+(≥15) in both modes; light-mode slots 3–5 keep their pre-existing sub-3:1
+contrast relief (mitigated by the mandatory colour+name pairing below), slots
+7–12 all clear 3:1. The original by-eye slots 7–12 failed validation (a
+chroma-floor fail and a normal-vision-floor fail in light, plus a lightness-
+band, chroma-floor and CVD fail in dark) and were replaced outright, not
+tuned. Known limitation: the check is *adjacent-slot-order* only, matching how
+1–6 were validated — it does not cover every non-adjacent pair (e.g. slots 9
+and 11 are both olive-family, distinguished mainly by lightness), which is
+why colour is never the only identity channel (see below).
 
 ## Spacing
 
@@ -237,9 +251,9 @@ must sit inside the same `@media (prefers-reduced-motion: no-preference)` guard.
 - ~~[?] **Iconography**~~ — **answered (2026-08-04, HUMAN)**: no icon set, no
   category icons; identity is a colour circle plus a name, and the user picks
   the colour. See Iconography above.
-- [?] **Category slots 7–12 unvalidated.** Chosen by eye for hue separation, not
-  run through the dataviz validator. Blocking for screen 06's colour picker,
-  not for screens 01/02 (which only render slots that already exist).
+- ~~[?] **Category slots 7–12 unvalidated.**~~ — **answered (2026-08-05, U2.2
+  prep)**: re-picked and run through the dataviz validator against the app's
+  real surfaces; all 12 slots pass in both modes. See Category palette above.
 - [?] **Accent vs slot 4.** `--accent` `#F0B429` and `--category-slot-4`
   `#eda100` are close. If the Add button reads as a data colour where it
   overlaps a yellow donut slice, move slot 4 — never the accent. Only judgeable

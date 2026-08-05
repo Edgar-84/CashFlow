@@ -9,16 +9,16 @@ class CategoryBase(BaseModel):
 
 
 class CategoryCreate(CategoryBase):
-    # omitted (None) means "the service picks the next free slot" (U0.6);
-    # write-side range is 1-6 (the auto-assign pool), narrower than
-    # CategoryResponse's 1-12 (D317 widened 7-12 for a future user-picker,
-    # not for this unit's auto-assign).
-    color_slot: int | None = Field(default=None, ge=1, le=6)
+    # omitted (None) means "the service picks the next free slot" from the
+    # auto-assign pool (1-6, services/category_service.py::_next_free_color_slot,
+    # unchanged by this range); an explicit value can be any of the 1-12
+    # picker slots (D317, U2.2's screen 06b picker sends 7-12 too).
+    color_slot: int | None = Field(default=None, ge=1, le=12)
 
 
 class CategoryUpdate(BaseModel):
     name: str | None = None
-    color_slot: int | None = Field(default=None, ge=1, le=6)
+    color_slot: int | None = Field(default=None, ge=1, le=12)
 
 
 class CategoryResponse(CategoryBase):

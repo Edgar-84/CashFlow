@@ -597,7 +597,7 @@ touched** (D316) — it keeps its `months_back` chips.
       nothing is archived; an archived category is never offered anywhere a
       category is *chosen*. Files: `screens/categories.ts`,
       `tests/categories.test.ts`, `main.ts`, `styles/app.css`. Model: sonnet.
-- [ ] **U2.2 Screen 06b — Create, rename, recolour** — one form surface,
+- [x] **U2.2 Screen 06b — Create, rename, recolour** — one form surface,
       MainButton = Save enabled only when dirty (design §4). The colour picker
       is the **twelve** palette swatches (D317), each with its name, current one
       marked by a check, not by colour alone; a slot already used by another
@@ -1323,6 +1323,26 @@ every unit below.
   single-use rule to allow a second yellow element (reopens a decision the
   human had already closed and confirmed, for a cosmetic preference with a
   same-cost grey alternative already in the codebase).
+- D338 (2026-08-05, U2.2 prep): **category slots 7–12 were re-picked, not
+  tuned**, to clear the `dataviz` skill's `validate_palette.js` against the
+  app's real card surfaces (`#FFFFFF` light / `#1C2123` dark). The original
+  by-eye hexes failed outright: light had a chroma-floor fail (`#8a5a3c` reads
+  gray) and a normal-vision-floor fail (`#b5379a`↔`#7a5cd0` at 14.4, below the
+  15 hard gate); dark failed lightness band, chroma floor, CVD separation and
+  the normal-vision floor. New values (`tokens.css`, `design-system.md`):
+  slot 7 `#0072a1`/`#0087ac`, slot 8 `#894ed6`/`#8f54dc`, slot 9
+  `#716400`/`#827200`, slot 10 `#00a59f`/`#00a59f`, slot 11
+  `#739800`/`#6b8f00`, slot 12 `#ab37ab`/`#b542b5` — all 12 slots now pass
+  lightness band, chroma floor, adjacent-pair CVD (≥8) and the normal-vision
+  floor (≥15) in both modes; slots 7–12 all clear 3:1 contrast (only the
+  pre-existing light-mode slots 3–5 still need the relief already documented).
+  Accepted limitation: validated on the *adjacent* slot-order pairlist only
+  (matching how 1–6 were validated), same as the reference dataviz palette's
+  own all-pairs cap — slots 9 and 11 both land in the olive family and are
+  told apart mainly by lightness, which is why colour is never the sole
+  identity channel (dot + name, always). Full all-pairs floor clearance
+  across all 12 slots was tried and found infeasible (matches the skill's own
+  documented finding that even 8 hues can't clear all-pairs).
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1959,14 +1979,34 @@ every unit below.
   `mount`); and the new a11y behaviour had no test coverage (added above).
   verify.sh green (635 backend + 379 webapp tests, typecheck/lint/build/
   secret-grep all pass).
-- Next: **U2.2** — Screen 06b, Create/rename/recolour
-  (`screens/categories.ts`, `tests/categories.test.ts`, `api/client.ts` if
-  needed, `styles/app.css`). Needs its own `ui-spec` pass first — U2.1's spec
-  file only stubs the row/add-cell destinations, it does not design the form
-  or the 12-swatch colour picker. **Blocked on the design-system `[?]`**:
-  slots 7–12 haven't been run through the dataviz contrast/colourblind
-  validator — validate before this unit ships a picker that offers them.
-  Start with `/clear`, then `/unit U2.2 docs/plans/mini-app-v3.md`.
+- Done: **U2.2** — Screen 06b, Create/rename/recolour. Two prerequisites had
+  to be cleared before implementation, both now done: (1) slots 7–12 failed
+  the dataviz validator outright and were re-picked, not tuned (D338); (2)
+  `docs/ui/screens/06b-category-form.md` written from scratch (no
+  screenshot existed) via a fresh `ui-spec` pass, with the human confirming
+  four open questions (colour-family names, colour-pick-optional, no
+  in-page heading, duplicate check scope = active-only). Then implemented:
+  `models/category.py` widened `color_slot` 1–6 → 1–12 on
+  `CategoryCreate`/`CategoryUpdate` (the STATE gotcha this plan already
+  flagged); `api/client.ts`/`types.ts` gained `createCategory`/
+  `updateCategory`/`CategoryCreate`/`CategoryUpdate`; `category-colors.ts`
+  gained `categorySlotName`; `screens/categories.ts` gained the whole 06b
+  form (draft/controller/chrome/presentation/mount, parallel to 06a's own
+  layers in the same file) plus wiring 06a's active-cell and "Add category"
+  cell taps (previously stubs) to open it; `main.ts` gained
+  `showCategoryForm`, reading its draft/duplicate-check/taken-slot context
+  from `categoriesCache`'s already-loaded snapshot rather than a new fetch,
+  per the spec's explicit no-GET-on-open contract. `CategoryRow` gained a
+  `colorSlot` (raw, not the resolved/fallback `colorVar`) field for this.
+  MainButton enables on any dirty change (name or slot) regardless of name
+  validity — a blank name never disables it silently; `submit()` blocks and
+  reveals the inline error instead, matching the AC's "rejected inline,
+  never a popup". verify.sh green (636 backend + 416 webapp tests,
+  typecheck/lint/build/secret-grep all pass).
+- Next: **U2.3** — Screen 06c, Delete or hide (the D302 rule made legible).
+  Needs its own `ui-spec` pass first — no spec exists yet for the
+  confirm-popup copy/behaviour split (delete vs hide). Start with `/clear`,
+  then `/unit U2.3 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
@@ -1991,12 +2031,9 @@ every unit below.
     gap this unit didn't introduce and isn't fixing, but the moment it's
     closed elsewhere, forgetting the `tz=` kwarg here reintroduces D323's
     exact bug — silently, since every existing test uses UTC-aligned bounds.
-  - **U2.2's Files list doesn't include `models/category.py`, but it needs
-    to.** `CategoryCreate`/`CategoryUpdate.color_slot` currently validate
-    `1–6` (U0.6, D325) — U2.2's twelve-swatch picker will send `7–12` the
-    first time a user picks one of the new slots, and that 422s until
-    someone widens the range to match `CategoryResponse`'s existing `1–12`.
-    Don't discover this via a failing manual test; widen it as part of U2.2.
+  - ~~**U2.2's Files list doesn't include `models/category.py`, but it needs
+    to.**~~ — **done in U2.2**: `CategoryCreate`/`CategoryUpdate.color_slot`
+    now validate `1–12`, matching `CategoryResponse`.
   - `months_back=2` (3 months) has **no** `{period, offset}` equivalent. Do not
     "simplify" the alias away — see D316.
   - M3 is ordered after M2 because screen 02's "More" and "+ Add tag" navigate

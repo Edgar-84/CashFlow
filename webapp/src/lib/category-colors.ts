@@ -33,3 +33,26 @@ export const OTHER_COLOR_VAR = "var(--ink-secondary)";
 export function categorySlotCssVar(slot: number | null): string {
   return slot === null ? OTHER_COLOR_VAR : `var(--category-slot-${slot})`;
 }
+
+/** `design-system.md`'s Category palette `Name` column, 1-indexed (D338,
+ * confirmed 2026-08-05) — the word the screen 06b picker shows and speaks
+ * for each swatch. Not a CSS token; this array's order must track the design
+ * doc's slot order exactly. */
+const SLOT_NAMES = [
+  "Blue",
+  "Orange",
+  "Aqua",
+  "Yellow",
+  "Pink",
+  "Green",
+  "Teal",
+  "Violet",
+  "Olive",
+  "Cyan",
+  "Moss",
+  "Magenta",
+];
+
+export function categorySlotName(slot: number): string {
+  return SLOT_NAMES[slot - 1] ?? `Slot ${slot}`;
+}

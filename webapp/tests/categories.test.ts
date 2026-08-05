@@ -1,17 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Mock } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { CategoryResponse, CategoryTotal } from "../src/api/types";
 import {
   applyCategoriesChrome,
+  applyCategoryFormChrome,
   buildCategoriesData,
+  categoryDuplicateWarning,
+  categoryFormDraftFromRow,
+  categoryFormMainButtonEnabled,
+  categoryNameError,
+  createCategoryFormController,
   createMemoryCache,
+  emptyCategoryFormDraft,
   GRID_COLUMNS,
+  isCategoryFormDirty,
   loadCategories,
   nextGridFocusIndex,
   renderCategories,
   renderCategoriesView,
+  renderCategoryForm,
+  wireCategoryFormBackButton,
   type CategoriesApi,
   type CategoriesCache,
+  type CategoryFormApi,
 } from "../src/screens/categories";
 import type { TelegramWebApp } from "../src/lib/telegram";
 
@@ -46,8 +58,8 @@ describe("buildCategoriesData", () => {
       currency: "EUR",
     });
     expect(data.active).toEqual([
-      { id: "cat-groceries", name: "Groceries", colorVar: "var(--category-slot-1)", expenseCount: 12, monthTotalMinor: 34000 },
-      { id: "cat-transport", name: "Transport", colorVar: "var(--category-slot-2)", expenseCount: 5, monthTotalMinor: 8000 },
+      { id: "cat-groceries", name: "Groceries", colorVar: "var(--category-slot-1)", colorSlot: 1, expenseCount: 12, monthTotalMinor: 34000 },
+      { id: "cat-transport", name: "Transport", colorVar: "var(--category-slot-2)", colorSlot: 2, expenseCount: 5, monthTotalMinor: 8000 },
     ]);
     expect(data.archived).toEqual([]);
   });
@@ -69,7 +81,7 @@ describe("buildCategoriesData", () => {
     const data = buildCategoriesData({ categories: withArchived, monthTotals: [], currency: "EUR" });
     expect(data.active).toHaveLength(2);
     expect(data.archived).toEqual([
-      { id: "cat-old", name: "Old category", colorVar: "var(--category-slot-3)", expenseCount: 3, monthTotalMinor: 0 },
+      { id: "cat-old", name: "Old category", colorVar: "var(--category-slot-3)", colorSlot: 3, expenseCount: 3, monthTotalMinor: 0 },
     ]);
   });
 
@@ -328,6 +340,339 @@ describe("applyCategoriesChrome", () => {
     expect(webApp.BackButton.onClick).toHaveBeenCalled();
     expect(webApp.BackButton.show).toHaveBeenCalled();
     expect(webApp.MainButton.hide).toHaveBeenCalled();
+    delete (globalThis as { window?: Window }).window;
+  });
+});
+
+// -- form (screen 06b) --------------------------------------------------------
+
+function categoryRow(overrides: Partial<Parameters<typeof categoryFormDraftFromRow>[0]> = {}) {
+  return { id: "cat-groceries", name: "Groceries", colorSlot: 3, ...overrides };
+}
+
+describe("emptyCategoryFormDraft / categoryFormDraftFromRow", () => {
+  it("create mode starts with no id, empty name, no slot", () => {
+    expect(emptyCategoryFormDraft()).toEqual({ id: null, name: "", colorSlot: null });
+  });
+
+  it("edit mode seeds the draft from the row's raw id/name/colorSlot", () => {
+    expect(categoryFormDraftFromRow(categoryRow())).toEqual({
+      id: "cat-groceries",
+      name: "Groceries",
+      colorSlot: 3,
+    });
+  });
+
+  it("a null colorSlot (position-fallback only) stays null in the draft, not the resolved slot", () => {
+    expect(categoryFormDraftFromRow(categoryRow({ colorSlot: null }))).toEqual({
+      id: "cat-groceries",
+      name: "Groceries",
+      colorSlot: null,
+    });
+  });
+});
+
+describe("isCategoryFormDirty", () => {
+  const original = { id: "cat-1", name: "Groceries", colorSlot: 3 };
+
+  it("is false when nothing changed", () => {
+    expect(isCategoryFormDirty({ ...original }, original)).toBe(false);
+  });
+
+  it("ignores leading/trailing whitespace-only name changes", () => {
+    expect(isCategoryFormDirty({ ...original, name: "  Groceries  " }, original)).toBe(false);
+  });
+
+  it("is true when the trimmed name changes", () => {
+    expect(isCategoryFormDirty({ ...original, name: "Food" }, original)).toBe(true);
+  });
+
+  it("is true when the colour slot changes", () => {
+    expect(isCategoryFormDirty({ ...original, colorSlot: 7 }, original)).toBe(true);
+  });
+});
+
+describe("categoryNameError", () => {
+  it("rejects an empty or whitespace-only name", () => {
+    expect(categoryNameError("")).toBe("Give this category a name.");
+    expect(categoryNameError("   ")).toBe("Give this category a name.");
+  });
+
+  it("accepts any non-blank name", () => {
+    expect(categoryNameError("Groceries")).toBeNull();
+  });
+});
+
+describe("categoryDuplicateWarning", () => {
+  const siblings = [
+    { id: "cat-1", name: "Groceries" },
+    { id: "cat-2", name: "Transport" },
+  ];
+
+  it("warns on a case-insensitive match against another active category", () => {
+    expect(categoryDuplicateWarning("groceries", "cat-new", siblings)).toBe(
+      'Another category is already named "groceries".',
+    );
+  });
+
+  it("does not warn against its own current name (editing without renaming)", () => {
+    expect(categoryDuplicateWarning("Groceries", "cat-1", siblings)).toBeNull();
+  });
+
+  it("does not warn on a unique name", () => {
+    expect(categoryDuplicateWarning("Subscriptions", "cat-new", siblings)).toBeNull();
+  });
+
+  it("is null while the name is blank — the empty-name error takes priority instead", () => {
+    expect(categoryDuplicateWarning("   ", "cat-new", siblings)).toBeNull();
+  });
+});
+
+describe("categoryFormMainButtonEnabled", () => {
+  const original = emptyCategoryFormDraft();
+
+  it("is disabled on a clean (unmodified) draft", () => {
+    expect(categoryFormMainButtonEnabled({ ...original }, original)).toBe(false);
+  });
+
+  it("is enabled once dirty, even with a blank name — submit() is what blocks that case", () => {
+    expect(categoryFormMainButtonEnabled({ ...original, colorSlot: 5 }, original)).toBe(true);
+  });
+});
+
+function fakeCategoryFormApi(overrides: Partial<CategoryFormApi> = {}): CategoryFormApi {
+  return {
+    createCategory: vi.fn().mockResolvedValue({ id: "cat-new", name: "Groceries", account_id: "acc-1", created_at: "2026-01-01T00:00:00Z" }),
+    updateCategory: vi.fn().mockResolvedValue({ id: "cat-1", name: "Food", account_id: "acc-1", created_at: "2026-01-01T00:00:00Z" }),
+    ...overrides,
+  };
+}
+
+describe("createCategoryFormController", () => {
+  it("is blocked (reason: invalid) on a clean draft — nothing to save", async () => {
+    const api = fakeCategoryFormApi();
+    const controller = createCategoryFormController(api, emptyCategoryFormDraft());
+
+    const outcome = await controller.submit();
+
+    expect(outcome).toEqual({ status: "blocked", reason: "invalid" });
+    expect(api.createCategory).not.toHaveBeenCalled();
+  });
+
+  it("is blocked (reason: invalid) when dirty but the trimmed name is blank", async () => {
+    const api = fakeCategoryFormApi();
+    const controller = createCategoryFormController(api, emptyCategoryFormDraft());
+    controller.setColorSlot(4);
+
+    const outcome = await controller.submit();
+
+    expect(outcome).toEqual({ status: "blocked", reason: "invalid" });
+    expect(api.createCategory).not.toHaveBeenCalled();
+  });
+
+  it("creates a category with the trimmed name and chosen slot", async () => {
+    const api = fakeCategoryFormApi();
+    const controller = createCategoryFormController(api, emptyCategoryFormDraft());
+    controller.setName("  Groceries  ");
+    controller.setColorSlot(9);
+
+    const outcome = await controller.submit();
+
+    expect(outcome.status).toBe("success");
+    expect(api.createCategory).toHaveBeenCalledWith({ name: "Groceries", color_slot: 9 });
+  });
+
+  it("creates with color_slot null when no swatch was picked (colour is optional)", async () => {
+    const api = fakeCategoryFormApi();
+    const controller = createCategoryFormController(api, emptyCategoryFormDraft());
+    controller.setName("Groceries");
+
+    await controller.submit();
+
+    expect(api.createCategory).toHaveBeenCalledWith({ name: "Groceries", color_slot: null });
+  });
+
+  it("updates an existing category by id in edit mode", async () => {
+    const original = categoryFormDraftFromRow(categoryRow({ id: "cat-1", name: "Groceries", colorSlot: 3 }));
+    const api = fakeCategoryFormApi();
+    const controller = createCategoryFormController(api, original);
+    controller.setName("Food");
+
+    const outcome = await controller.submit();
+
+    expect(outcome.status).toBe("success");
+    expect(api.updateCategory).toHaveBeenCalledWith("cat-1", { name: "Food", color_slot: 3 });
+    expect(api.createCategory).not.toHaveBeenCalled();
+  });
+
+  it("a duplicate rapid submit issues exactly one write", async () => {
+    let resolveUpdate: (value: CategoryResponse) => void = () => {};
+    const updateCategory = vi.fn(
+      () =>
+        new Promise<CategoryResponse>((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+    const api = fakeCategoryFormApi({ updateCategory });
+    const original = categoryFormDraftFromRow(categoryRow());
+    const controller = createCategoryFormController(api, original);
+    controller.setName("Food");
+
+    const first = controller.submit();
+    const second = controller.submit();
+    resolveUpdate({ id: "cat-1", name: "Food", account_id: "acc-1", created_at: "2026-01-01T00:00:00Z" });
+    const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+
+    expect(updateCategory).toHaveBeenCalledOnce();
+    expect(firstOutcome.status).toBe("success");
+    expect(secondOutcome).toEqual({ status: "blocked", reason: "submitting" });
+  });
+
+  it("maps 403 to the read-only message and preserves the draft", async () => {
+    const api = fakeCategoryFormApi({ createCategory: vi.fn().mockRejectedValue(new ForbiddenError()) });
+    const controller = createCategoryFormController(api, emptyCategoryFormDraft());
+    controller.setName("Groceries");
+
+    const outcome = await controller.submit();
+
+    expect(outcome).toEqual({ status: "error", message: "You have read-only access to this account." });
+    expect(controller.getDraft()).toEqual({ id: null, name: "Groceries", colorSlot: null });
+  });
+
+  it("maps a network failure to a retryable message and preserves the draft", async () => {
+    const api = fakeCategoryFormApi({ createCategory: vi.fn().mockRejectedValue(new RetryableError()) });
+    const controller = createCategoryFormController(api, emptyCategoryFormDraft());
+    controller.setName("Groceries");
+
+    const outcome = await controller.submit();
+
+    expect(outcome.status).toBe("error");
+    expect(controller.getDraft().name).toBe("Groceries");
+  });
+});
+
+describe("renderCategoryForm", () => {
+  const baseState = {
+    draft: emptyCategoryFormDraft(),
+    activeSiblings: [{ id: "cat-1", name: "Groceries" }],
+    usedSlots: new Set<number>([1]),
+    nameInteracted: false,
+    submitError: null,
+  };
+
+  it("renders 12 swatch cells, none checked, on an empty draft", () => {
+    const html = renderCategoryForm(baseState);
+    expect((html.match(/data-testid="cat-swatch"/g) ?? []).length).toBe(12);
+    expect(html).not.toContain("aria-checked=\"true\"");
+  });
+
+  it("marks the selected slot's swatch aria-checked and gives it the checkmark", () => {
+    const html = renderCategoryForm({ ...baseState, draft: { ...baseState.draft, colorSlot: 5 } });
+    expect(html).toContain('data-slot="5" role="radio" aria-checked="true"');
+    expect(html).toContain("cat-swatch-check");
+  });
+
+  it("marks an already-used slot as 'In use' but still tappable (not disabled)", () => {
+    const html = renderCategoryForm(baseState);
+    expect(html).toContain("Blue, in use");
+    expect(html).not.toContain("disabled");
+  });
+
+  it("shows no inline message before the name field has been interacted with, even when blank", () => {
+    const html = renderCategoryForm(baseState);
+    expect(html).not.toContain("Give this category a name.");
+  });
+
+  it("shows the empty-name error once nameInteracted is true", () => {
+    const html = renderCategoryForm({ ...baseState, nameInteracted: true });
+    expect(html).toContain("Give this category a name.");
+    expect(html).toContain("cat-form-message--error");
+  });
+
+  it("shows the duplicate-name warning (not the error) once interacted, for a non-blank duplicate", () => {
+    const html = renderCategoryForm({
+      ...baseState,
+      draft: { ...baseState.draft, name: "Groceries" },
+      nameInteracted: true,
+    });
+    expect(html).toContain("Another category is already named &quot;Groceries&quot;.");
+    expect(html).toContain("cat-form-message--warning");
+    expect(html).not.toContain("Give this category a name.");
+  });
+
+  it("renders a submit error banner when passed one", () => {
+    const html = renderCategoryForm({ ...baseState, submitError: "Couldn't save this category." });
+    expect(html).toContain('data-testid="cat-form-submit-error"');
+    expect(html).toContain("Couldn't save this category.");
+  });
+
+  it("pre-fills the name input's value from the draft", () => {
+    const html = renderCategoryForm({ ...baseState, draft: { ...baseState.draft, name: "Food" } });
+    expect(html).toContain('value="Food"');
+  });
+});
+
+describe("applyCategoryFormChrome", () => {
+  it("shows 'Save' and disables MainButton on a clean draft", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const original = emptyCategoryFormDraft();
+    applyCategoryFormChrome({ ...original }, original);
+    expect(webApp.MainButton.setText).toHaveBeenCalledWith("Save");
+    expect(webApp.MainButton.disable).toHaveBeenCalled();
+    delete (globalThis as { window?: Window }).window;
+  });
+
+  it("enables MainButton once the draft is dirty", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const original = emptyCategoryFormDraft();
+    applyCategoryFormChrome({ ...original, name: "Groceries" }, original);
+    expect(webApp.MainButton.enable).toHaveBeenCalled();
+    delete (globalThis as { window?: Window }).window;
+  });
+});
+
+describe("wireCategoryFormBackButton", () => {
+  it("closes immediately with no confirm popup for a clean draft", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const original = emptyCategoryFormDraft();
+    const onClose = vi.fn();
+    wireCategoryFormBackButton(() => ({ ...original }), original, onClose);
+    const handler = (webApp.BackButton.onClick as Mock).mock.calls[0][0] as () => void;
+    handler();
+    expect(webApp.showConfirm).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+    delete (globalThis as { window?: Window }).window;
+  });
+
+  it("confirms via Telegram's popup before discarding a dirty draft", async () => {
+    const webApp = fakeWebApp({ showConfirm: vi.fn((_msg, cb) => cb(true)) });
+    installWebApp(webApp);
+    const original = emptyCategoryFormDraft();
+    const onClose = vi.fn();
+    wireCategoryFormBackButton(() => ({ ...original, name: "Groceries" }), original, onClose);
+    const handler = (webApp.BackButton.onClick as Mock).mock.calls[0][0] as () => void;
+    handler();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(webApp.showConfirm).toHaveBeenCalledWith("Discard changes to this category?", expect.any(Function));
+    expect(onClose).toHaveBeenCalled();
+    delete (globalThis as { window?: Window }).window;
+  });
+
+  it("keeps the draft when the user declines to discard", async () => {
+    const webApp = fakeWebApp({ showConfirm: vi.fn((_msg, cb) => cb(false)) });
+    installWebApp(webApp);
+    const original = emptyCategoryFormDraft();
+    const onClose = vi.fn();
+    wireCategoryFormBackButton(() => ({ ...original, name: "Groceries" }), original, onClose);
+    const handler = (webApp.BackButton.onClick as Mock).mock.calls[0][0] as () => void;
+    handler();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onClose).not.toHaveBeenCalled();
     delete (globalThis as { window?: Window }).window;
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../src/lib/category-colors";
+import { assignCategoryColors, categorySlotCssVar, categorySlotName, OTHER_COLOR_VAR } from "../src/lib/category-colors";
 
 function category(id: string, created_at: string, color_slot: number | null = null) {
   return { id, created_at, color_slot };
@@ -82,5 +82,14 @@ describe("categorySlotCssVar", () => {
 
   it("maps null to the neutral Other colour", () => {
     expect(categorySlotCssVar(null)).toBe(OTHER_COLOR_VAR);
+  });
+});
+
+describe("categorySlotName", () => {
+  it("names all twelve slots, matching design-system.md's Category palette table", () => {
+    expect(categorySlotName(1)).toBe("Blue");
+    expect(categorySlotName(6)).toBe("Green");
+    expect(categorySlotName(7)).toBe("Teal");
+    expect(categorySlotName(12)).toBe("Magenta");
   });
 });
