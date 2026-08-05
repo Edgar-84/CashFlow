@@ -16,8 +16,10 @@ import type {
   BudgetPlanResponse,
   BudgetPlanUpdate,
   BudgetProgress,
+  CategoryCreate,
   CategoryResponse,
   CategoryTotal,
+  CategoryUpdate,
   ExpenseCreate,
   ExpenseResponse,
   ExpenseUpdate,
@@ -208,7 +210,7 @@ export class ApiClient {
     return this.request<void>("DELETE", `/expenses/${id}`);
   }
 
-  // -- categories / tags (list-only in v1; management deferred, D204) -----
+  // -- categories (create/rename/recolour, U2.2; tags stay list-only, D204) -
 
   listCategories(opts: { includeUsage?: boolean; includeArchived?: boolean } = {}): Promise<CategoryResponse[]> {
     return this.request<CategoryResponse[]>("GET", "/categories", {
@@ -217,6 +219,14 @@ export class ApiClient {
         include_archived: opts.includeArchived === undefined ? undefined : String(opts.includeArchived),
       },
     });
+  }
+
+  createCategory(data: CategoryCreate): Promise<CategoryResponse> {
+    return this.request<CategoryResponse>("POST", "/categories", { json: data });
+  }
+
+  updateCategory(id: Uuid, data: CategoryUpdate): Promise<CategoryResponse> {
+    return this.request<CategoryResponse>("PATCH", `/categories/${id}`, { json: data });
   }
 
   listTags(): Promise<TagResponse[]> {

@@ -15,10 +15,14 @@ import {
 } from "./screens/budgets";
 import {
   applyCategoriesChrome,
+  categoryFormDraftFromRow,
   createMemoryCache as createCategoriesCache,
+  emptyCategoryFormDraft,
   loadCategories,
   mount as mountCategories,
+  mountCategoryForm,
   type CategoriesHandlers,
+  type CategoryFormHandlers,
 } from "./screens/categories";
 import {
   applyDetailChrome,
@@ -268,6 +272,12 @@ async function showCategories(): Promise<void> {
     onBack: () => {
       void showHome();
     },
+    onSelectCategory: (id) => {
+      void showCategoryForm(id);
+    },
+    onAddCategory: () => {
+      void showCategoryForm(null);
+    },
   };
 
   applyCategoriesChrome(handlers.onBack);
@@ -275,6 +285,57 @@ async function showCategories(): Promise<void> {
   const state = await loadCategories(client, categoriesCache);
   applyCategoriesChrome(handlers.onBack);
   mountCategories(root, state, handlers);
+}
+
+/** Mounts the 06b create/rename/recolour form (U2.2), reached from 06a's
+ * "Add category" cell (`categoryId` `null`) or an active cell (`categoryId`
+ * set). Per its spec, this screen never fetches on open — the draft and the
+ * duplicate-name/taken-slot context both come from 06a's already-loaded
+ * `categoriesCache` snapshot, not a new request. If that cache is somehow
+ * empty (the form was reached without 06a ever loading), falls back to
+ * `showCategories()` so the data exists before the form needs it. */
+async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+
+  const cached = categoriesCache.get();
+  if (!cached) {
+    void showCategories();
+    return;
+  }
+
+  const allRows = [...cached.data.active, ...cached.data.archived];
+  let draft = emptyCategoryFormDraft();
+  if (categoryId) {
+    const row = allRows.find((r) => r.id === categoryId);
+    if (!row) {
+      // The category disappeared from the cache since 06a last rendered
+      // (e.g. deleted in another tab) — safest fallback is back to the list.
+      void showCategories();
+      return;
+    }
+    draft = categoryFormDraftFromRow(row);
+  }
+
+  const activeSiblings = cached.data.active
+    .filter((r) => r.id !== categoryId)
+    .map((r) => ({ id: r.id, name: r.name }));
+  const usedSlots = new Set(
+    allRows.filter((r) => r.id !== categoryId && r.colorSlot !== null).map((r) => r.colorSlot as number),
+  );
+
+  const handlers: CategoryFormHandlers = {
+    onClose: () => {
+      void showCategories();
+    },
+    onSaved: () => {
+      void showCategories();
+    },
+  };
+
+  mountCategoryForm(root, client, draft, activeSiblings, usedSlots, handlers);
 }
 
 /** Mounts Statistics (U2.5, screen 05), reached from Home's "Statistics"

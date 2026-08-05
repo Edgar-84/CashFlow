@@ -1511,6 +1511,134 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* -- category form (U2.2, docs/ui/screens/06b-category-form.md) ------------
+   One form surface: a Name field (reusing .field-error's reserved-height
+   line for the inline error/warning below it), then a 12-swatch colour
+   picker reusing 06a's 64px swatch / 12px-16px grid geometry. */
+.cat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.cat-form-label {
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.cat-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px 6px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.cat-form-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  padding: 6px 0 0;
+}
+
+.cat-form-input:focus {
+  outline: none;
+}
+
+.cat-form-input::placeholder {
+  color: var(--ink-secondary);
+}
+
+.cat-form-message {
+  margin: -6px 4px 0;
+  min-height: 15px;
+  font-size: 12px;
+}
+
+.cat-form-message--error {
+  color: var(--status-red);
+}
+
+.cat-form-message--warning {
+  color: var(--ink-secondary);
+}
+
+.cat-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cat-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  column-gap: 12px;
+  row-gap: 16px;
+}
+
+.cat-swatch-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cat-swatch {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* Fixed-contrast badge (card surface + ink glyph) rather than a check drawn
+   directly in the swatch fill, so it reads regardless of which slot colour
+   sits underneath (docs/ui/screens/06b-category-form.md). */
+.cat-swatch-check {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 0 0 2px var(--card);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cat-swatch-name {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink);
+  text-align: center;
+}
+
+.cat-swatch-inuse {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-secondary);
+  min-height: 13px;
+}
+
+.cat-swatch-cell:focus-visible {
+  outline: none;
+}
+
+.cat-swatch-cell:focus-visible .cat-swatch {
+  outline: 2px solid var(--category-slot-1);
+  outline-offset: 2px;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */

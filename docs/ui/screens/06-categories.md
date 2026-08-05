@@ -261,10 +261,12 @@ does not have, and is not single-select/`radiogroup` — see Accessibility).
   to the same not-yet-built action.
 
 ## Open questions
-- [?] **Cell/row destinations are unspecified beyond "stub".** U2.2's
-      create/rename/recolour form and U2.3's delete-or-hide confirmation
-      need their own layout pass (this file's future `06b`/`06c` section, or
-      new files) once those units are taken up — not blocking for U2.1.
+- [?] **U2.3's delete-or-hide confirmation is unspecified beyond "stub".**
+      Needs its own layout pass (a new `06c` file) once that unit is taken
+      up — not blocking for U2.1 or U2.2.
+      ~~Cell/row destinations are unspecified beyond "stub"~~ — **U2.2's
+      create/rename/recolour form is now specced**: see
+      `06b-category-form.md`.
 - [?] **Grid order** — `created_at ASC` is `[inferred]` from
       `category-picker.md`'s precedent, not stated by the user. Confirm, or
       specify recency/alphabetical instead.

@@ -254,16 +254,23 @@ async def test_create_with_explicit_color_slot_keeps_it_even_if_taken() -> None:
     assert created.color_slot == 3
 
 
-@pytest.mark.parametrize("color_slot", [0, 7, -1])
+@pytest.mark.parametrize("color_slot", [0, 13, -1])
 def test_category_create_rejects_out_of_range_color_slot(color_slot: int) -> None:
     with pytest.raises(ValidationError):
         CategoryCreate(name="Groceries", color_slot=color_slot)
 
 
-@pytest.mark.parametrize("color_slot", [0, 7, -1])
+@pytest.mark.parametrize("color_slot", [0, 13, -1])
 def test_category_update_rejects_out_of_range_color_slot(color_slot: int) -> None:
     with pytest.raises(ValidationError):
         CategoryUpdate(color_slot=color_slot)
+
+
+def test_category_create_accepts_picker_only_slot_7_to_12() -> None:
+    # 7-12 are picker-only (D317) — never auto-assigned, but a valid explicit write.
+    created = CategoryCreate(name="Groceries", color_slot=7)
+
+    assert created.color_slot == 7
 
 
 async def test_update_changes_fields() -> None:
