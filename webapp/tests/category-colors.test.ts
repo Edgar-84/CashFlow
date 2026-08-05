@@ -1,59 +1,75 @@
 import { describe, expect, it } from "vitest";
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../src/lib/category-colors";
 
-function category(id: string, created_at: string) {
-  return { id, created_at };
+function category(id: string, created_at: string, color_slot: number | null = null) {
+  return { id, created_at, color_slot };
 }
 
 describe("assignCategoryColors", () => {
-  it("assigns fixed slots 1..6 in created_at ASC order", () => {
+  it("renders an explicit slot regardless of position", () => {
     const categories = [
-      category("c", "2026-01-03T00:00:00Z"),
-      category("a", "2026-01-01T00:00:00Z"),
-      category("b", "2026-01-02T00:00:00Z"),
+      category("a", "2026-01-01T00:00:00Z", null),
+      category("b", "2026-01-02T00:00:00Z", 4),
     ];
 
-    expect(assignCategoryColors(categories)).toEqual([
-      { id: "a", slot: 1 },
-      { id: "b", slot: 2 },
-      { id: "c", slot: 3 },
-    ]);
+    expect(assignCategoryColors(categories).find((c) => c.id === "b")).toEqual({ id: "b", slot: 4 });
   });
 
-  it("assigns slots up to 12 by default, not just 6", () => {
-    const categories = Array.from({ length: 14 }, (_, i) =>
-      category(`cat-${i}`, `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`),
+  it("renders a slot from the picker-only 7-12 range", () => {
+    const categories = [category("a", "2026-01-01T00:00:00Z", 11)];
+
+    expect(assignCategoryColors(categories)).toEqual([{ id: "a", slot: 11 }]);
+  });
+
+  it("falls back to a stable position-derived colour capped at slot 6 for a null slot", () => {
+    const categories = Array.from({ length: 8 }, (_, i) =>
+      category(`cat-${i}`, `2026-01-0${i + 1}T00:00:00Z`, null),
     );
 
     const result = assignCategoryColors(categories);
-
-    expect(result.slice(0, 12).map((c) => c.slot)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-    ]);
-    expect(result.slice(12).map((c) => c.slot)).toEqual([null, null]);
-  });
-
-  it("gives categories past an explicit slot count a null slot", () => {
-    const categories = Array.from({ length: 8 }, (_, i) =>
-      category(`cat-${i}`, `2026-01-0${i + 1}T00:00:00Z`),
-    );
-
-    const result = assignCategoryColors(categories, 6);
 
     expect(result.slice(0, 6).map((c) => c.slot)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(result.slice(6).map((c) => c.slot)).toEqual([null, null]);
   });
 
-  it("is stable across two renders with a category appended", () => {
-    const first = [category("a", "2026-01-01T00:00:00Z"), category("b", "2026-01-02T00:00:00Z")];
-    const firstResult = assignCategoryColors(first);
+  it("does not shift a later category's colour when an earlier category is deleted", () => {
+    const withEarlier = [
+      category("a", "2026-01-01T00:00:00Z", 2),
+      category("b", "2026-01-02T00:00:00Z", 5),
+    ];
+    const withoutEarlier = [category("b", "2026-01-02T00:00:00Z", 5)];
 
-    const second = [...first, category("c", "2026-01-03T00:00:00Z")];
-    const secondResult = assignCategoryColors(second);
+    expect(assignCategoryColors(withEarlier).find((c) => c.id === "b")).toEqual({ id: "b", slot: 5 });
+    expect(assignCategoryColors(withoutEarlier).find((c) => c.id === "b")).toEqual({ id: "b", slot: 5 });
+  });
 
-    expect(secondResult.find((c) => c.id === "a")).toEqual(firstResult.find((c) => c.id === "a"));
-    expect(secondResult.find((c) => c.id === "b")).toEqual(firstResult.find((c) => c.id === "b"));
-    expect(secondResult.find((c) => c.id === "c")).toEqual({ id: "c", slot: 3 });
+  it("lets two categories share a slot and both render it", () => {
+    const categories = [
+      category("a", "2026-01-01T00:00:00Z", 3),
+      category("b", "2026-01-02T00:00:00Z", 3),
+    ];
+
+    expect(assignCategoryColors(categories).map((c) => c.slot)).toEqual([3, 3]);
+  });
+
+  it("treats a missing color_slot the same as a null one", () => {
+    const categories = [{ id: "a", created_at: "2026-01-01T00:00:00Z" }];
+
+    expect(assignCategoryColors(categories)).toEqual([{ id: "a", slot: 1 }]);
+  });
+
+  it("agrees on every colour regardless of the caller's input order — Home and Statistics fetch independently and must not diverge", () => {
+    const explicitAndFallback = [
+      category("a", "2026-01-01T00:00:00Z", null),
+      category("b", "2026-01-02T00:00:00Z", 9),
+      category("c", "2026-01-03T00:00:00Z", null),
+    ];
+    const reversed = [...explicitAndFallback].reverse();
+
+    const byId = (result: ReturnType<typeof assignCategoryColors>) =>
+      new Map(result.map((c) => [c.id, c.slot]));
+
+    expect(byId(assignCategoryColors(explicitAndFallback))).toEqual(byId(assignCategoryColors(reversed)));
   });
 });
 

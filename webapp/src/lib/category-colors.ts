@@ -1,11 +1,10 @@
-/** Client-side category -> colour assignment (D206). There is no
- * `categories.color` column until screen 06 (deferred, D204), so colour is
- * derived from the category's position in the account's list sorted by
- * `created_at ASC`, in the fixed twelve-slot palette from tokens.css (D317),
- * never cycled. A category keeps its slot across renders; it only shifts if
- * an earlier category is deleted (accepted cost, documented in the plan's
- * Risks). Categories past the twelfth get `slot: null` — "Other" everywhere
- * they're shown. This is independent of `lib/donut.ts::segments()`'s
+/** Category -> colour assignment. `categories.color_slot` (D301, supersedes
+ * D206) is authoritative when set: a category keeps that slot for life,
+ * independent of any other category's position or deletion. A `null` (or
+ * missing) slot falls back to the D206 position rule — 1-based position in
+ * the account's list sorted `created_at ASC` — capped at the shipped six
+ * slots, not the full twelve-slot palette (D317's 7-12 range is picker-only,
+ * never auto-assigned). This is independent of `lib/donut.ts::segments()`'s
  * six-slice fold, which is about chart readability, not palette size.
  */
 
@@ -14,16 +13,16 @@ export interface CategoryColor {
   slot: number | null;
 }
 
-const DEFAULT_MAX_SLOTS = 12;
+const FALLBACK_MAX_SLOT = 6;
 
 export function assignCategoryColors(
-  categories: { id: string; created_at: string }[],
-  maxSlots = DEFAULT_MAX_SLOTS,
+  categories: { id: string; created_at: string; color_slot?: number | null }[],
+  fallbackMaxSlot = FALLBACK_MAX_SLOT,
 ): CategoryColor[] {
   const sorted = [...categories].sort((a, b) => a.created_at.localeCompare(b.created_at));
   return sorted.map((category, index) => ({
     id: category.id,
-    slot: index < maxSlots ? index + 1 : null,
+    slot: category.color_slot ?? (index < fallbackMaxSlot ? index + 1 : null),
   }));
 }
 

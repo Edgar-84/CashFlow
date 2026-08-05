@@ -125,9 +125,7 @@ export function buildHomeData(input: {
   const orderedCategories = [...input.categories].sort((a, b) =>
     a.created_at.localeCompare(b.created_at),
   );
-  const colorBySlot = new Map(
-    assignCategoryColors(orderedCategories).map((c) => [c.id, c.slot]),
-  );
+  const colorBySlot = new Map(assignCategoryColors(input.categories).map((c) => [c.id, c.slot]));
   const totalsById = new Map(input.categoryTotals.map((t) => [t.category_id, t.total]));
   const nameById = new Map(input.categories.map((c) => [c.id, c.name]));
 

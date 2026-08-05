@@ -102,11 +102,12 @@ until a category is chosen. On success: haptic, close to Home, donut redrawn.
   is a spending category, assigned from the fixed slot order and never cycled.
   Status red is reserved for over-budget and always ships with an icon and a
   word.
-- **Category colour is assigned client-side in v1** — there is no
-  `categories.color` column yet (deferred with screen 06). Assign by the
-  category's position in the account's list sorted by `created_at ASC`, so the
-  mapping is stable across sessions and devices. It shifts only if a category is
-  deleted; that is the accepted cost of not shipping a migration in v1.
+- **Category colour comes from the server** (D301, supersedes D206).
+  `categories.color_slot` is authoritative; `lib/category-colors.ts` reads it
+  directly and never recomputes a colour that's already set, so deleting an
+  earlier category cannot shift a later one's. The D206 position rule (list
+  sorted `created_at ASC`, capped at slot 6) survives only as the fallback for
+  a `null` slot.
 - **MainButton is the screen's primary action**, BackButton is always wired, and
   confirmations use Telegram's own popup rather than a custom modal.
 - Backend errors surface as human messages — never a raw status or stack.

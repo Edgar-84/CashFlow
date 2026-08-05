@@ -55,6 +55,10 @@ export interface CategoryResponse {
   name: string;
   account_id: Uuid;
   created_at: IsoTimestamp;
+  /** Palette slot index (1-12), `null`/omitted = not yet assigned
+   * (D301/D308) — `lib/category-colors.ts` treats both the same, falling
+   * back to its own position rule. */
+  color_slot?: number | null;
 }
 
 export interface TagResponse {
