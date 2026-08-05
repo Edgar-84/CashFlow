@@ -510,7 +510,7 @@ touched** (D316) — it keeps its `months_back` chips.
       Files: `webapp/src/components/period-selector.ts`,
       `webapp/tests/period-selector.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U1.5 Home wires the period selector** — Home owns `PeriodValue` state,
+- [x] **U1.5 Home wires the period selector** — Home owns `PeriodValue` state,
       clamps the offset, refetches, and names the period everywhere it speaks.
       AC: the default on a cold open is `month`/`offset 0` (nothing changes for
       someone who never taps); switching a unit resets the offset to 0;
@@ -1077,6 +1077,50 @@ every unit below.
   inconsistent exception and would make `renderPeriodSelector` non-deterministic
   under test. `docs/ui/components/period-selector.md`'s Inputs interface
   updated in the same change.
+- D328 (2026-08-05): **U1.5's empty-period copy reuses `lib/period.ts::describe`'s
+  label verbatim** rather than hand-rolling `docs/ui/screens/01-home.md`'s exact
+  Copy-table wording for every row. The two rows the unit's own AC names
+  ("Nothing today", "Nothing in August") match exactly; the unlisted rows
+  diverge in minor, cosmetic ways — `describe`'s day format is "Month day"
+  ("Nothing on August 2") against the screen doc's "day Month" ("Nothing on 2
+  August"), and the custom range keeps `describe`'s en dash ("Nothing from 9 –
+  17 Jul") instead of the doc's "to". Rejected: a second, hand-written
+  date-formatting function in `home.ts` duplicating `lib/period.ts`'s
+  already-tested month/day tables just to get one preposition's word order
+  right — `lib/period.ts` is U1.1's frozen file list, out of reach for this
+  unit, and the reused label keeps the period nav row and the empty copy
+  saying the exact same thing for the exact same period, which reads as more
+  consistent than it costs. Revisit only if a human flags the wording. (The
+  `week` rows — "Nothing this week"/"Nothing that week" — are the one case
+  hand-rolled outside `describe()` entirely, since `describe`'s own week
+  label has no "this/that" distinction to reuse; they match the screen doc's
+  `empty.week`/`empty.week.0` verbatim, no divergence there.)
+- D329 (2026-08-05): **`.chart-card` wraps only the period selector + the
+  donut/skeleton/empty/error content**, not the full region-2 geometry
+  (`16px 12px 20px` padding, the ranked rows, the yellow Add button) that
+  `docs/ui/screens/01-home.md`'s Layout table specs for the finished screen.
+  Those belong to U1.6 (ranked rows + bottom nav) and U1.7 (yellow Add
+  button), which still own that file's layout pass; U1.5's job is wiring, not
+  the visual rebuild. `.chart-card` reuses the existing `14px 12px` card
+  padding pairing (design-system.md's spacing table) rather than inventing
+  the screen doc's specific `16px 12px 20px` — the exact chart-card geometry
+  is deferred to whichever of U1.6/U1.7 next touches this markup, so as not
+  to add a padding value now that a later unit immediately changes again.
+- D330 (2026-08-05, reviewer-found WARN, deferred not fixed): **tapping a
+  disabled (offline) period control does not show "Offline — showing
+  {period}"** (`docs/ui/screens/01-home.md`'s `offline.period` copy;
+  `docs/ui/components/period-selector.md`'s Disabled row: "tapping shows the
+  host's offline message"). U1.4 already ships `disabled` as the native HTML
+  `disabled` attribute on every tab/arrow/label, which makes the browser
+  swallow the click before any handler in `home.ts`/`main.ts` ever sees it —
+  so this is unreachable from U1.5's file list alone. Fixing it means
+  changing how `components/period-selector.ts` expresses "disabled" (e.g.
+  `aria-disabled` + a CSS-only inert look, keeping the element clickable so
+  the host can intercept the tap), which is U1.4's frozen file, out of scope
+  for a unit whose Files line names only `screens/home.ts`, `main.ts`,
+  `app.css`, `home.test.ts`. No `offline.period` string exists anywhere yet
+  as a result. Revisit either as a small U1.4 follow-up or folded into
+  whichever later unit next touches `period-selector.ts`.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1404,8 +1448,58 @@ every unit below.
   disabled state on every element). `mount`'s callback wiring (which tap
   fires which callback) is exercised for real for the first time once U1.5
   wires this component into Home — same gap, not a new one. verify.sh green.
-- Next: **U1.5** — Home wires the period selector. Start with `/clear`, then
-  `/unit U1.5 docs/plans/mini-app-v3.md`.
+- **U1.5 done**: `screens/home.ts` — `HomeState`/`HomeData` gained a
+  `period: PeriodValue` field (present on every variant except `forbidden`,
+  left untouched — the unit's own AC list never exercises 403 with the period
+  control); `buildHomeData`/`loadHome` take a `PeriodValue`, converting via
+  `lib/period.ts::toQuery` for the two statistics calls (D326's
+  `HomeApi.statisticsByCategory`/`statisticsByPeriod` narrow from
+  `{months_back}` to `PeriodQuery`, replacing the old hardcoded
+  `CURRENT_MONTH`). Over-budget rows are computed unconditionally but returned
+  empty unless `period.unit === "month" && period.offset === 0` (D310,
+  extended) — budget progress is still fetched every load, only the strip's
+  visibility is gated, so no extra/fewer network calls per tab. New
+  `createHomeController(api, cache)` wraps `loadHome` with a request-id
+  counter; `load()` resolves `null` when a newer call has started since,
+  ordered by call not resolution, so an out-of-order response can never win
+  (AC: stale in-flight discarded, last tap wins) — this is the one piece
+  that's actually unit-tested with a deferred-promise race, same idiom as
+  `add-expense.test.ts`'s duplicate-submit test. `renderHome`/`mount` both
+  gained a `now: Date` parameter (D327's pattern, extended) and embed
+  `components/period-selector.ts::renderPeriodSelector` directly for the
+  string-pure path; `mount` re-targets the rendered `.period-selector-slot`
+  wrapper with the component's own `mount()` to attach real handlers —
+  avoids double-nesting the component's own `data-testid="period-selector"`
+  root. Empty-state copy now names the period in force ("Nothing today"/
+  "Nothing in August", replacing the old generic "No expenses yet") per
+  D328's reuse of `describe`'s label. `main.ts` owns the persisted
+  `PeriodValue` (module-level `homePeriod`, reset only at real app boot) and
+  a unified `refreshHome(root, handlers)` used by the cold open, every period
+  tap and retry — same shape as `showStatistics`'s `monthsBack` closure
+  argument, and, like that one, **not unit-tested**: `main.test.ts` only
+  checks `boot()` resolves under Node with no DOM, the same accepted gap
+  `showStatistics`'s own period-persistence-across-navigation already
+  carries. The "Period" tab / label's `onOpenPicker` is a no-op stub with a
+  `// TODO: U1.8` comment — no date-range picker exists yet. `app.css` gained
+  one class, `.chart-card` (D329: existing `14px 12px` padding pairing, not
+  the screen doc's finished-layout `16px 12px 20px` — that's U1.6/U1.7's
+  geometry to add). 29 tests in `home.test.ts` (up from 16): every existing
+  `buildHomeData`/`loadHome`/`renderHome` test threaded a `period` (and
+  `renderHome`, a `now`); new coverage for the PeriodQuery sent per call, the
+  over-budget month/offset-0 gate (both hidden-elsewhere and shown-on-month
+  cases, at both `buildHomeData` and `renderHome`), empty-copy naming the
+  period, offline freezing `state.period` at the cached value rather than the
+  failed tap's, and the stale-response race. verify.sh green (backend
+  untouched; webapp typecheck/lint/vitest/build/secret-grep all pass).
+  Process note: work was accidentally started on the already-merged U1.4
+  branch instead of a fresh `U1.5_...` one; caught before committing —
+  confirmed the two branches' trees were identical, then re-branched from
+  `origin/master` carrying the uncommitted edits across cleanly. No browser
+  smoke test this unit (human's call): the dev server has no backend behind
+  it without the full `docker compose` stack, and the 29 new/updated tests
+  plus green typecheck/lint/build were judged sufficient for this session.
+- Next: **U1.6** — Home layout: ranked rows + bottom nav. Start with
+  `/clear`, then `/unit U1.6 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
