@@ -136,6 +136,10 @@ reference screenshots at ~0.73 image-px-to-CSS-px and are approximate.
 | Date shortcut pill (02) | 88 × 44px | `~88 × 45px [ref]` |
 | Tag chip (02) | 32px tall | `~32px [ref]` |
 | Bottom nav tile (01) | 32px tall, text only | [inferred] — see screen 01 |
+| Date-range picker cell | 40 × 40px, 6-row grid | `docs/ui/components/date-range-picker.md` |
+| Date-range picker quick chip | 32px tall, 8px radius | reuses Tag chip's values |
+| Date-range picker sheet | max 85% `viewportStableHeight`, 16px padding | `docs/ui/components/date-range-picker.md` |
+| Date-range picker footer button | 44px tall | reuses Period tab row's value |
 
 The donut **does not grow to the reference's size**. The reference has no bottom
 navigation and no over-budget strip competing for the fold; this app does. Its
@@ -154,6 +158,8 @@ System UI stack throughout — whatever Telegram renders in. No webfont.
 | Hero amount | 28px | 700 | −0.035em | 1 |
 | Period tab | 14px | 400 inactive / 600 active | — | 1 |
 | Period label (`Today, August 4`) | 15px | 500 | — | 1 |
+| Sheet title (date-range picker) | 17px | 600 | — | default |
+| Sheet section heading (date-range picker month name, footer buttons) | 15px | 600 | — | default |
 | Body / title | 14px | 400–600 | — | default |
 | Row title | 13.5px | 600 | −0.01em | default |
 | Meta / secondary | 12–12.5px | 400–600 | — | default |

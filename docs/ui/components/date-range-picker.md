@@ -97,8 +97,9 @@ calendar. Two calendars in one app diverge.
 | Key | String | Notes |
 |---|---|---|
 | `title` | "Select period" | sentence case, unlike the reference |
+| `title.single` | "Select date" | `single` mode's sheet title (screen 02's calendar button) |
 | `summary.none` | "Choose a start date" | |
-| `summary.start` | "from {date}" | |
+| `summary.start` | "from {date}" | `{date}` includes the year (e.g. "from 9 Jul 2026") — no other context on screen names it yet |
 | `summary.both` | "from {start} to {end}" | e.g. "from 9 Jul to 17 Jul 2026" |
 | `quick.7` | "Last 7 days" | |
 | `quick.30` | "Last 30 days" | |
