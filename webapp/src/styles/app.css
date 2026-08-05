@@ -1101,6 +1101,261 @@ body {
   outline-offset: 2px;
 }
 
+/* -- date-range picker (U1.8) ------------------------------------------------
+   docs/ui/components/date-range-picker.md. Bottom sheet over a scrim, chrome
+   is ink only (D303) — selection is carried by fill and shape, never a
+   colour alone, so it survives greyscale. Cell/span opacities (40% dimmed
+   future, 12% in-range fill) are literal per that doc's Cell states table,
+   derived from --ink via color-mix rather than a new hex, same reasoning as
+   the disabled/active opacities already used above for period-selector. */
+.drp-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.drp-scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--ink) 40%, transparent);
+}
+
+.drp-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: 85dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border-radius: 14px 14px 0 0;
+  padding: 16px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .drp-sheet {
+    animation: drp-slide-up 0.2s ease-out;
+  }
+}
+
+@keyframes drp-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.drp-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.drp-summary {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--ink-secondary);
+}
+
+/* Not --status-red: that token is reserved for over-budget only
+   (design-system.md's Colour table). Weight is the only distinguishing
+   treatment available within "chrome is ink". */
+.drp-summary-error {
+  font-weight: 600;
+}
+
+.drp-quick-chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.drp-quick-chip {
+  height: 32px;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.drp-weekday-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-top: 12px;
+  background: var(--card);
+}
+
+.drp-weekday {
+  text-align: center;
+  font-size: 11px;
+  color: var(--ink-secondary);
+}
+
+.drp-months {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.drp-month-name {
+  display: block;
+  width: 100%;
+  margin: 24px 0 16px;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.drp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0;
+}
+
+.drp-week {
+  display: contents;
+}
+
+.drp-cell {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.drp-cell-blank {
+  cursor: default;
+}
+
+.drp-cell-today {
+  box-shadow: inset 0 0 0 1px var(--ink);
+  border-radius: 50%;
+}
+
+.drp-cell-future {
+  color: color-mix(in srgb, var(--ink-secondary) 40%, transparent);
+  cursor: default;
+}
+
+.drp-cell-start {
+  background: var(--ink);
+  color: var(--card);
+  border-radius: 50% 0 0 50%;
+}
+
+.drp-cell-end {
+  background: var(--ink);
+  color: var(--card);
+  border-radius: 0 50% 50% 0;
+}
+
+.drp-cell-single {
+  background: var(--ink);
+  color: var(--card);
+  border-radius: 50%;
+}
+
+.drp-cell-in-range {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--ink);
+}
+
+.drp-year-list {
+  display: none;
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  background: var(--card);
+  padding: 16px;
+}
+
+.drp-year-list.open {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.drp-year {
+  height: 44px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.drp-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.drp-cancel,
+.drp-apply {
+  min-height: 44px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.drp-apply:disabled {
+  color: var(--ink-secondary);
+  opacity: 0.4;
+  cursor: default;
+}
+
+.drp-cell:active,
+.drp-quick-chip:active,
+.drp-month-name:active,
+.drp-year:active,
+.drp-cancel:active,
+.drp-apply:not(:disabled):active {
+  opacity: 0.6;
+}
+
+.drp-cell:focus-visible,
+.drp-quick-chip:focus-visible,
+.drp-month-name:focus-visible,
+.drp-year:focus-visible,
+.drp-cancel:focus-visible,
+.drp-apply:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */

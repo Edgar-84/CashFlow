@@ -547,7 +547,7 @@ touched** (D316) — it keeps its `months_back` chips.
       disabled; `--accent` appears in exactly one rule in `app.css`.
       Files: `webapp/src/screens/home.ts`, `webapp/tests/home.test.ts`,
       `webapp/src/styles/app.css`. Model: sonnet.
-- [ ] **U1.8 `components/date-range-picker.ts`** (D303) — the calendar sheet.
+- [x] **U1.8 `components/date-range-picker.ts`** (D303) — the calendar sheet.
       AC: **every acceptance criterion in
       `docs/ui/components/date-range-picker.md`**, notably — opens on the
       current month with today ringed; first tap sets the start and clears any
@@ -1178,6 +1178,92 @@ every unit below.
   `stroke-width="2.5"`, 24×24 viewBox) matching the table verbatim;
   `period-selector.ts`'s own `‹`/`›` deviation is untouched (that's U1.4's
   frozen file, out of scope here).
+- D333 (2026-08-05, U1.8): **`renderDateRangePicker` renders a bounded 12-month
+  eager window** (the current month plus the 11 before it, extended further
+  back only far enough to cover an already-applied `value.start`), not every
+  month the year list can reach. The component doc's Resolved section says
+  "no virtualisation, no fixed window" for the picker's *reach*; read
+  literally as "render every reachable month eagerly" it would put years of
+  DOM (and, worse, a non-deterministic amount of it depending on how far back
+  the user goes) behind a function this unit's own contract calls "pure
+  render" — no longer a small function of its documented inputs, and no
+  longer something a test can assert on without picking an arbitrary slice.
+  `mount()` — the part of every component in this codebase already accepted
+  as DOM glue, not unit-tested — owns the actual unbounded reach: it appends
+  a batch of six further-back months when the grid scrolls within 100px of
+  its current oldest, and the year list (tapping a month heading) prepends
+  months down to the tapped year on demand. The year list itself is bounded
+  to 30 years back from `maxDate` — a number the component doc does not
+  specify (it only says the heading "opens a year list", no bound) and this
+  unit is treating as a judgment call, not a spec value: something a human
+  should confirm feels right on a real device, since a family's oldest
+  plausible backdated expense is the only real constraint and this unit has
+  no way to know it. Rejected: eagerly rendering every month from `maxDate`
+  back to the year-list floor (the DOM-size problem above); capping the
+  reach itself at some fixed number of months (explicitly what the component
+  doc's Resolved section rejects, for the same reason U1.4's period-selector
+  offset stays uncapped — an old expense must be reachable).
+  Reviewer round 1 (BLOCKER, fixed same round): the first draft bound cell-
+  and month-name-tap listeners with a one-shot `querySelectorAll(...).forEach`
+  over the DOM `mount()`'s initial `innerHTML` produced, so every month
+  `prependMonth` appended afterwards (both the scroll batch-load and the
+  year-jump) was visible but inert — nothing this decision's "mount owns the
+  unbounded reach" claim actually delivered. Fixed by delegating both taps to
+  a single listener on `monthsEl` (`event.target.closest(...)`), which covers
+  elements added after the fact for free. Reviewer round 1 (BLOCKER, fixed
+  same round): the scroll handler's proximity check
+  (`scrollTop > 100` → skip) fired the batch-load near the *top* (the current
+  month, rendered first) and skipped it near the *bottom*, where the oldest
+  rendered month — the one the AC actually needs extended — sits; inverted to
+  `scrollHeight - scrollTop - clientHeight <= 100`. Reviewer round 1 (WARN,
+  fixed same round): the reopen-with-`value.start` catch-up originally grew
+  `renderMonths`'s own window unboundedly for a multi-year-old range,
+  reproducing the exact DOM-size problem this decision exists to avoid;
+  moved out of the pure render into `mount()`, using the same `prependMonth`
+  batch-append the year-jump path already uses, immediately after the
+  initial render.
+- D334 (2026-08-05, U1.8): **range-length validity uses a new local
+  `isRangeValid(start, end, maxRangeDays)`, not `lib/period.ts`'s
+  `isValidRange`.** That helper hardcodes its own module-level
+  `MAX_RANGE_DAYS` (366) and has no parameter for a caller-supplied bound —
+  but this component's `maxRangeDays` is an explicit prop per the component
+  doc's Inputs section, not a constant. Reusing `isValidRange` directly would
+  have silently ignored whatever the host actually passed in whenever it
+  differed from 366, caught by this unit's own test asserting the reason
+  text names the caller's `maxRangeDays` rather than a literal "366". Also
+  added two rows to `design-system.md`'s Typography table (Sheet title
+  17px/600, Sheet section heading 15px/600 — the latter covers both the
+  month name and the footer buttons) and four to its Sizing table (picker
+  cell, quick chip, sheet, footer button), mirroring values the component
+  doc already specifies — root CLAUDE.md requires new literals to extend the
+  design system before landing in CSS, and these weren't there yet even
+  though the component doc that motivates them was.
+  Reviewer round 1 (WARN, fixed same round): the today-ring/start/end/single
+  cell states first used a bespoke `20px` `border-radius`, not backed by
+  `design-system.md`'s Radii table (which has `50%` for a fixed-size circular
+  element, already approved, and produces an identical result at this cell's
+  fixed 40×40px) — switched to `50%` (and `50% 0 0 50%` / `0 50% 50% 0` for
+  the pill caps) instead of adding a fifth radius value the design system
+  doesn't need. Reviewer round 1 (WARN, fixed same round): `.drp-summary-error`
+  was asserted by a test but had no CSS rule; given `--status-red` is reserved
+  for over-budget only (design-system.md's Colour table), gave it
+  `font-weight: 600` rather than a colour treatment. Reviewer round 1 (NIT,
+  fixed same round): `single` mode's "Select date" title wasn't in the
+  component doc's Copy table — added, alongside a note that `summary.start`
+  always includes the year. Reviewer round 1 (WARN, deferred): the sheet's
+  `max-height` uses the CSS `85dvh` unit rather than
+  `Telegram.WebApp.viewportStableHeight`, which no component in this codebase
+  wires up yet (the add-expense screen doc names it as the intended pattern
+  but no unit has plumbed it into `lib/telegram.ts`) — plumbing it in is
+  bigger than this unit's three-file scope and belongs with whichever unit
+  first needs it for real (a keyboard-open layout, unlike this sheet).
+  Reviewer round 1 (NIT, deferred): the component doc's Accessibility
+  section's `role="grid"`/keyboard-navigation/focus-trap requirements are
+  unimplemented — not in the doc's own checkbox Acceptance criteria list
+  (the plan's AC line's actual bar), and the same class of gap every
+  `mount()` in this codebase already carries (no keyboard handling in
+  `period-selector.ts` either). Revisit if U1.9's real-device pass surfaces
+  it as a problem.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1645,8 +1731,60 @@ every unit below.
   test, which is this file's pre-existing accepted gap for `mount` as a
   whole (see this module's own top-of-file comment), not something new this
   unit introduced.
-- Next: **U1.8** — `components/date-range-picker.ts`. Start with `/clear`,
-  then `/unit U1.8 docs/plans/mini-app-v3.md`.
+- Done: **U1.8** — `components/date-range-picker.ts`, the calendar sheet
+  (D303). Pure `renderDateRangePicker`/`renderMonthSection` + thin `mount`,
+  same shape as `period-selector.ts`; `maxDate` doubles as "today" so the
+  module calls `new Date()` nowhere (the AC's explicit wording). Both modes:
+  `range` (title, from/to summary, three quick chips, sticky Monday-start
+  weekday header, footer Cancel/Apply) and `single` (one tap applies and
+  closes, no summary/chips/footer). Cell states per the doc's table —
+  today ring, start/end/single/in-range fill and caps, dimmed inert future
+  days, blank leading/trailing days — all via `--ink`/`--card` plus
+  `color-mix` for the two opacities (12% in-range, 40% dimmed future), no new
+  hex. Tap state machine (`nextRangeSelection`: first tap sets start and
+  clears end, a tap before the start re-anchors, a tap once a full range is
+  chosen starts fresh) and `quickRange`/`isRangeValid`/`formatSummary` are
+  pure and exported for testing; `mount`'s DOM wiring (scrim/Cancel/Apply/
+  quick-chip/cell clicks, Escape, lazy back-scroll loading, the year-list
+  jump) is this module's own accepted not-unit-tested gap, same as every
+  `mount` in this codebase — `document` is `undefined` under vitest's `node`
+  environment. See D333 for how "no fixed window" is actually implemented
+  (bounded eager render + `mount`-side lazy extension) and D334 for the
+  `maxRangeDays`-aware validity helper and the `design-system.md` additions.
+  30 tests added (`date-range-picker.test.ts`, 344 total webapp tests up from
+  314): every render-level AC in the component doc's checklist, the tap
+  state machine, the three quick ranges, and the month grid's Monday-start/
+  6-row/blank-other-month/accessible-name shape. Not verified: an actual
+  browser or Telegram client — no `claude-in-chrome`-equivalent tool was
+  available this session (U1.6/U1.7's browser-screenshot step), so the CSS
+  in both themes is unverified beyond `pnpm build`'s secret-grep and typecheck
+  passing. Reviewer round 1: REQUEST_CHANGES, two BLOCKERs and three WARNs,
+  all fixed same round (see D333/D334) — the lazily-appended months' cell/
+  month-name taps were never wired (missing event delegation) and the
+  scroll-based lazy-load fired on the wrong end of the list, so the whole
+  unbounded-reach mechanism D333 describes was actually inert until this
+  round; also a bespoke `20px` radius not backed by the design system
+  (switched to the approved `50%`), a dangling untested `.drp-summary-error`
+  class (given a weight-only treatment), and a missing Copy-table row for
+  single mode's title. Two WARN/NIT deferred as legitimately out of scope:
+  `viewportStableHeight` vs. `85dvh` (no component wires the former yet) and
+  the component doc's Accessibility-section keyboard/focus-trap requirements
+  (not in its own AC checklist, same accepted gap every `mount` in this
+  codebase already carries). Round 2: APPROVE — independently re-derived the
+  DOM month order (current-first, oldest-last) rather than trusting round 1's
+  claim about it, and confirmed both BLOCKER fixes land correctly against
+  it. One WARN taken (added a regression test asserting a multi-year-old
+  `value.start` does NOT grow `renderDateRangePicker`'s output — the exact
+  shape of the round-1 WARN this unit already fixed once). Two NITs deferred:
+  `.drp-weekday-header`'s `position: sticky` is inert since the header sits
+  outside `.drp-months` (the real scroll container) rather than inside it —
+  harmless today, the "stays put" effect already comes from being a sibling,
+  not from `sticky`; and the reopen catch-up loop in `mount()` has no upper
+  bound (unlike the year-jump path's `YEAR_LIST_YEARS_BACK`), acceptable
+  since the host is expected to pass back a value this same component
+  applied, not an arbitrary one.
+- Next: **U1.9** — "Period" tab wired into Home, the custom range end to end.
+  Start with `/clear`, then `/unit U1.9 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
