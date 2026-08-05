@@ -109,6 +109,9 @@ async function showHome(): Promise<void> {
       // TODO: U1.8 wires `components/date-range-picker.ts` here. Until then
       // the "Period" tab and the label are visible but inert.
     },
+    onAddExpense: () => {
+      void showAddExpense();
+    },
   };
 
   await refreshHome(root, handlers);

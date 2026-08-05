@@ -48,13 +48,46 @@ body {
 }
 
 /* Wraps the period selector + whatever Home renders below it (donut,
-   skeleton, empty copy or error message) — screen 01's region 2, minus the
-   ranked-rows/Add-button geometry U1.6/U1.7 still own. `--card` padding
-   pairing already used elsewhere (design-system.md's spacing table); the
-   `.period-selector`'s own 12px margin-bottom (U1.4) is what separates it
-   from the content underneath. */
+   skeleton, empty copy or error message), plus the yellow Add button —
+   screen 01's region 2. Padding is the screen doc's finished-layout `16px
+   12px 20px` (D329's deferral names this unit as the owner: the Add
+   button's own 12px inset is measured from these padding edges, so the
+   bottom padding has to be final for the inset to be accurate). `position:
+   relative` makes this `.add-btn`'s containing block — the button is
+   `position: absolute`, never `fixed` (D318). */
 .chart-card {
-  padding: 14px 12px;
+  position: relative;
+  padding: 16px 12px 20px;
+}
+
+/* docs/ui/screens/01-home.md region 2d + D318/design-system.md's `--accent`
+   exception: the in-card yellow Add button, `.chart-card`'s only absolutely
+   positioned child. `right`/`bottom` are offsets from `.chart-card`'s own
+   padding edge (CSS's standard containing-block behaviour for an absolutely
+   positioned box), which is exactly "12px inset from the card's right and
+   bottom padding edges" per the screen spec's Layout table — no extra
+   arithmetic needed. Never `position: fixed`: that is what would let it
+   collide with MainButton (D318's binding constraint, and an acceptance
+   criterion, not a style note). */
+.add-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.add-btn:focus-visible {
+  outline: 2px solid var(--category-slot-1);
+  outline-offset: 2px;
 }
 
 /* -- donut ---------------------------------------------------------------- */

@@ -536,7 +536,7 @@ touched** (D316) — it keeps its `months_back` chips.
       amount.
       Files: `webapp/src/screens/home.ts`, `webapp/tests/home.test.ts`,
       `webapp/src/styles/app.css`. Model: sonnet.
-- [ ] **U1.7 Home yellow Add button** (D318) — the in-card Add affordance,
+- [x] **U1.7 Home yellow Add button** (D318) — the in-card Add affordance,
       alongside MainButton. AC: a 56px `--accent` circle with a `+` sits at the
       bottom-right **inside the chart card** and opens screen 02; **it is not
       `position: fixed`** and scrolls with the card, so it never overlaps
@@ -1154,6 +1154,30 @@ every unit below.
   available this session). Rejected: leaving the nav in normal flow (matches
   nothing in the Layout table, which marks it `fixed` and "the only fixed
   element"); docking at `bottom: 0` (the MainButton-overlap risk above).
+- D332 (2026-08-05, U1.7; revised same day after reviewer WARN): **the yellow
+  Add button's visibility mirrors `applyHomeChrome`'s existing MainButton
+  logic exactly** — rendered (and enabled) for `ready`/`empty`/`error`/
+  `offline`, absent entirely for `loading` and `forbidden`. The screen doc
+  states this explicitly only for the read-only case ("hidden... matching
+  MainButton"); `loading` isn't in its States table for this element. Reused
+  `applyHomeChrome`'s pre-existing `loading`/`forbidden`-only hide rule as the
+  one behavioural source of truth for "matching MainButton" instead of
+  inventing a second, since the button's whole justification (D318) is being
+  MainButton's twin. `.chart-card` padding finalized to the screen doc's
+  `16px 12px 20px` (D329's deferral named this unit as owner) — the button's
+  `right: 12px; bottom: 12px` reads as "12px inset from the card's own
+  padding edges" for free, since that's standard CSS behaviour for an
+  absolutely positioned box's offsets, not extra arithmetic. First pass drew
+  the `+` as a plain `aria-hidden` text glyph in a `<span>`, citing
+  `components/period-selector.ts`'s existing `‹`/`›` text-glyph precedent;
+  reviewer correctly flagged that design-system.md's Iconography table
+  mandates an inline SVG for this exact icon ("two 2.5px strokes, 24px box")
+  and that a prior unit's unflagged deviation doesn't sanction a second one —
+  root CLAUDE.md requires the spec to be extended first, not silently
+  diverged from. Fixed to a real inline SVG (two `currentColor` lines,
+  `stroke-width="2.5"`, 24×24 viewBox) matching the table verbatim;
+  `period-selector.ts`'s own `‹`/`›` deviation is untouched (that's U1.4's
+  frozen file, out of scope here).
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1587,14 +1611,42 @@ every unit below.
   (comment-only, screen 05's own behavior untouched, D316); a DOM-order test
   added asserting the over-budget strip renders before the ranked rows.
   verify.sh green.
-- Next: **U1.7** — Home yellow Add button. Start with `/clear`, then
-  `/unit U1.7 docs/plans/mini-app-v3.md`. Its Files list overlaps U1.6's
-  (`screens/home.ts`, `home.test.ts`, `app.css`) and it's the unit D329
-  earmarked for `.chart-card`'s finished-layout padding (`16px 12px 20px`)
-  — U1.6 deliberately left that alone since it doesn't structurally interact
-  with ranked rows/bottom nav, but U1.7's Add button inset (`12px` from the
-  card's own right/bottom padding edges) needs the correct bottom padding to
-  be accurate, so it's the more natural owner.
+- Done: **U1.7** — Home yellow Add button. `.chart-card` padding finalized to
+  `16px 12px 20px` (D329's deferral, this unit's job); gained `position:
+  relative` as the containing block for the new `.add-btn` — 56px `--accent`
+  circle, `position: absolute; right: 12px; bottom: 12px` (never `fixed`,
+  D318's binding constraint), a `+` drawn as design-system.md's Iconography
+  table specifies (inline SVG, two `currentColor` 2.5px strokes, 24px box —
+  see D332's revision). Rendered inside `renderReady`/`renderEmpty`/
+  `renderError` (after the donut/message, before the card closes — Focus
+  order: donut → Add button → rows), absent from
+  `renderSkeleton`/`renderReadOnly` entirely so its visibility mirrors
+  `applyHomeChrome`'s existing MainButton hide-on-`loading`/`forbidden` rule
+  with no new logic (D332). `HomeHandlers` gained `onAddExpense`, wired in
+  `mount()` with `haptics.impact("medium")` (the one `impact` call on this
+  screen, every other tap is `selection`) and in `main.ts` to the same
+  `showAddExpense` MainButton already calls. 5 tests added to
+  `home.test.ts` (40 total, up from 35): presence/absence per state, the
+  56px/`--accent`/`aria-label="Add expense"`/SVG-glyph markup, and DOM order
+  relative to the donut and ranked rows. Browser-verified: same throwaway
+  static-HTML-harness pattern as U1.6 (real `renderHome()` output + real
+  `tokens.css`/`app.css`, deleted before commit), screenshotted via
+  `claude-in-chrome` in both themes —
+  yellow circle sits bottom-right inside the card, doesn't collide with the
+  ranked rows below it. Not verified: an actual Telegram client (no
+  MainButton chrome in any available harness, same gap as U1.6's D331).
+  Reviewer round 1: REQUEST_CHANGES, two WARNs, both fixed same round — (1)
+  the `+` text-glyph vs. design-system.md's mandated SVG (see D332's
+  revision above); (2) this STATE note's first draft overstated the test
+  count (claimed 8/48, actually 5/40) — corrected. One NIT fixed same round:
+  a dead `not.toContain(...disabled)` assertion on the Add button, which has
+  no disabled variant to assert against — removed rather than kept as a
+  no-op. One NIT deferred: `mount()`'s new click listener has no direct
+  test, which is this file's pre-existing accepted gap for `mount` as a
+  whole (see this module's own top-of-file comment), not something new this
+  unit introduced.
+- Next: **U1.8** — `components/date-range-picker.ts`. Start with `/clear`,
+  then `/unit U1.8 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

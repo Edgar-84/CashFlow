@@ -36,6 +36,11 @@ import type {
   Uuid,
 } from "../api/types";
 
+// docs/ui/screens/01-home.md's Copy table: `mb.add` and `add.aria` are both
+// this string — MainButton's label and the yellow Add button's accessible
+// name must never drift apart, since both fire the same handler (D318).
+const ADD_EXPENSE_LABEL = "Add expense";
+
 // U1.6/design-system.md: stroke thickened 26 -> 30px, radius trimmed to keep
 // the outer edge (radius + strokeWidth/2) unchanged at 89 of the 200-unit
 // viewBox — the ring gets thicker inward, the donut's outer diameter doesn't.
@@ -309,7 +314,7 @@ export function applyHomeChrome(state: HomeState, onAddExpense?: () => void): vo
     mainButton.hide();
     return;
   }
-  mainButton.show("Add expense");
+  mainButton.show(ADD_EXPENSE_LABEL);
   mainButton.setEnabled(true);
   if (onAddExpense) {
     mainButton.onClick(onAddExpense);
@@ -324,6 +329,20 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// docs/ui/screens/01-home.md region 2d + D318: the in-card yellow Add
+// button, `--accent`'s one declared use in the app. Absent from the
+// loading skeleton and the read-only (403) markup entirely — those two
+// states are exactly where `applyHomeChrome` also hides MainButton, so the
+// two Add affordances stay in lockstep without extra wiring here. The `+`
+// is design-system.md's Iconography table entry for this icon verbatim:
+// inline SVG, 24px box, two 2.5px `currentColor` strokes (not text) —
+// `currentColor` resolves to `.add-btn`'s own `color: var(--accent-ink)`.
+// `aria-hidden` + `focusable="false"` since the button's own `aria-label`
+// already carries the accessible name.
+function renderAddButton(): string {
+  return `<button type="button" class="add-btn" data-testid="add-button" aria-label="${escapeHtml(ADD_EXPENSE_LABEL)}"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg></button>`;
 }
 
 function renderTiles(tiles: readonly HomeTile[], opts: { readOnly: boolean } = { readOnly: false }): string {
@@ -371,6 +390,7 @@ function renderError(message: string, period: PeriodValue, now: Date): string {
       ${renderPeriodControl(period, now, false)}
       <p>${escapeHtml(message)}</p>
       <button type="button" data-action="retry">Try again</button>
+      ${renderAddButton()}
     </div>
   </div>`;
 }
@@ -409,6 +429,7 @@ function renderEmpty(tiles: readonly HomeTile[], period: PeriodValue, now: Date)
     <div class="card chart-card">
       ${renderPeriodControl(period, now, false)}
       <p>${escapeHtml(describeEmptyPeriod(period, now))}</p>
+      ${renderAddButton()}
     </div>
     ${renderTiles(tiles)}
   </div>`;
@@ -487,6 +508,7 @@ function renderReady(data: HomeData, lastSyncedAt: string | undefined, now: Date
     <div class="card chart-card">
       ${renderPeriodControl(data.period, now, disabled)}
       ${renderDonut(data)}
+      ${renderAddButton()}
     </div>
     ${renderOverBudgetStrip(data.overBudget, data.currency)}
     ${renderRankedRows(data.rows)}
@@ -524,6 +546,7 @@ export interface HomeHandlers {
   onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
   onOffsetChange: (offset: number) => void; // host clamps at 0
   onOpenPicker: () => void; // "Period" tab / label tap — U1.8 wires the picker
+  onAddExpense: () => void; // yellow Add button — same target as MainButton (D318)
 }
 
 export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandlers, now: Date): void {
@@ -533,6 +556,14 @@ export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandler
   root.innerHTML = renderHome(state, now);
 
   root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
+
+  // docs/ui/screens/01-home.md's Telegram section: "impact('medium') on the
+  // yellow Add button — the heaviest action on the screen", distinct from
+  // every other tap here, which is `selection`.
+  root.querySelector('[data-testid="add-button"]')?.addEventListener("click", () => {
+    haptics.impact("medium");
+    handlers.onAddExpense();
+  });
 
   root.querySelectorAll<HTMLElement>("[data-tile]").forEach((el) => {
     el.addEventListener("click", () => {

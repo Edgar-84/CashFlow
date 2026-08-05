@@ -485,6 +485,11 @@ describe("renderHome", () => {
     expect(html).not.toContain("period-selector disabled");
   });
 
+  it("hides the yellow Add button while loading, matching MainButton (applyHomeChrome hides it too)", () => {
+    const html = renderHome({ status: "loading", period: THIS_MONTH }, NOW);
+    expect(html).not.toContain('data-testid="add-button"');
+  });
+
   it("names the period in force when empty, never a generic 'no data'", () => {
     const today = renderHome({ status: "empty", tiles: HOME_TILES, period: { unit: "day", offset: 0 } }, NOW);
     expect(today).toContain("Nothing today");
@@ -492,6 +497,11 @@ describe("renderHome", () => {
     const thisMonth = renderHome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH }, NOW);
     expect(thisMonth).toContain("Nothing in August");
     expect(thisMonth).toContain('data-tile="expenses"');
+  });
+
+  it("keeps the yellow Add button present on an empty period (both Add affordances stay enabled — there is no disabled variant of this button)", () => {
+    const html = renderHome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH }, NOW);
+    expect(html).toContain('data-testid="add-button"');
   });
 
   it("renders a retry affordance and the period control on error", () => {
@@ -504,10 +514,42 @@ describe("renderHome", () => {
     expect(html).toContain('data-testid="period-selector"');
   });
 
-  it("renders read-only with no broken Add-expense button on 403", () => {
+  it("renders read-only with no broken Add-expense button on 403, and hides both the yellow Add button and MainButton's markup", () => {
     const html = renderHome({ status: "forbidden", tiles: HOME_TILES }, NOW);
     expect(html).toContain('data-tile="add-expense" disabled');
     expect(html).not.toContain('data-action="retry"');
+    expect(html).not.toContain('data-testid="add-button"');
+  });
+
+  it("renders the yellow Add button as a 56px --accent circle, absolute (never fixed) within the chart card, with the copy table's accessible name and design-system.md's SVG + glyph", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    expect(html).toContain('data-testid="add-button"');
+    expect(html).toContain('aria-label="Add expense"');
+    // design-system.md's Iconography table: the `+` is a 24px-box, 2.5px-stroke
+    // inline SVG (matching Calendar/Warning/etc.), not a text glyph.
+    expect(html).toContain('<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"');
+    expect(html).toContain('stroke-width="2.5"');
+    // The button's class carries all of its geometry (app.css's `.add-btn`
+    // rule: `position: absolute`, 56px, `--accent`) — asserted here only by
+    // presence of the class, not by re-deriving app.css's rule in the test.
+    expect(html).toContain('class="add-btn"');
+  });
+
+  it("places the yellow Add button after the donut and before the ranked rows (Focus order: donut -> Add button -> rows)", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    const cardOpenIndex = html.indexOf('class="card chart-card"');
+    const donutIndex = html.indexOf('data-testid="donut"');
+    const addButtonIndex = html.indexOf('data-testid="add-button"');
+    const rowsIndex = html.indexOf('data-testid="ranked-rows"');
+    expect(cardOpenIndex).toBeGreaterThan(-1);
+    expect(donutIndex).toBeGreaterThan(cardOpenIndex);
+    expect(addButtonIndex).toBeGreaterThan(donutIndex);
+    expect(addButtonIndex).toBeLessThan(rowsIndex);
+  });
+
+  it("keeps the yellow Add button present and enabled while offline, same as MainButton", () => {
+    const html = renderHome({ status: "offline", lastSyncedAt: "2026-08-02T09:00:00.000Z", ...readyData }, NOW);
+    expect(html).toContain('data-testid="add-button"');
   });
 
   it("renders the last-synced marker when offline, alongside the last known data, control frozen/disabled", () => {
