@@ -105,9 +105,9 @@ async function showHome(): Promise<void> {
       homePeriod = { ...homePeriod, offset: clampOffset(offset) };
       void refreshHome(root, handlers);
     },
-    onOpenPicker: () => {
-      // TODO: U1.8 wires `components/date-range-picker.ts` here. Until then
-      // the "Period" tab and the label are visible but inert.
+    onApplyCustomRange: (range) => {
+      homePeriod = { unit: "custom", offset: 0, start: range.start, end: range.end };
+      void refreshHome(root, handlers);
     },
     onAddExpense: () => {
       void showAddExpense();

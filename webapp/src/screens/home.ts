@@ -18,12 +18,17 @@ import { segments as donutSegments } from "../lib/donut";
 import { formatAmount } from "../lib/money";
 import {
   describe as describePeriod,
+  MAX_RANGE_DAYS,
   toQuery,
   type PeriodQuery,
   type PeriodUnit,
   type PeriodValue,
 } from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
+import {
+  mount as mountDateRangePicker,
+  type DateRangePickerValue,
+} from "../components/date-range-picker";
 import { mount as mountPeriodSelector, renderPeriodSelector } from "../components/period-selector";
 import { ForbiddenError } from "../api/client";
 import type {
@@ -302,6 +307,15 @@ export function segmentTapTarget(
   return segment ? { categoryId: segment.categoryId, label: segment.label } : null;
 }
 
+/** The date-range picker's initial draft when opened from Home — the
+ * previously applied custom range if one is in force ("Reopened" in the
+ * component doc's States table), otherwise empty ("Choose a start date").
+ * Pure so `mount`'s DOM-only picker wiring stays the file's one untested
+ * seam, same as every other screen. */
+export function pickerValueForPeriod(period: PeriodValue): DateRangePickerValue {
+  return period.unit === "custom" ? { start: period.start, end: period.end } : {};
+}
+
 /** Telegram chrome for Home: MainButton = Add expense (hidden while loading
  * or for a read-only/forbidden viewer — root CLAUDE.md's PermissionChecker
  * denies the write, so the button must not promise one); BackButton hidden,
@@ -545,8 +559,62 @@ export interface HomeHandlers {
   onSegmentTap: (target: { categoryId: Uuid | null; label: string }) => void;
   onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
   onOffsetChange: (offset: number) => void; // host clamps at 0
-  onOpenPicker: () => void; // "Period" tab / label tap — U1.8 wires the picker
+  onApplyCustomRange: (range: { start: string; end: string }) => void; // date-range picker's Apply — host sets the period and refetches; Cancel/BackButton close the picker without calling this
   onAddExpense: () => void; // yellow Add button — same target as MainButton (D318)
+}
+
+// Mirrors lib/period.ts's private toDateString — that module's own header
+// comment already establishes the convention (each pure module owns its own
+// rather than sharing), which components/date-range-picker.ts also follows.
+// Only needed here for the picker's `maxDate`: `now` (already device-local,
+// D327) turned into a plain calendar-date string.
+function toDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// The picker overlays Home as a plain child of `root`, not a separate DOM
+// root — `.drp-root` is `position: fixed`, so nesting doesn't affect its
+// layout, and it means any later `mount()` call that replaces
+// `root.innerHTML` (a screen navigation via MainButton while the picker is
+// open, e.g.) tears the picker down for free, with no explicit lifecycle to
+// get wrong.
+function openPicker(
+  root: HTMLElement,
+  period: PeriodValue,
+  now: Date,
+  onApply: (range: { start: string; end: string }) => void,
+): void {
+  const pickerRoot = document.createElement("div");
+  root.appendChild(pickerRoot);
+
+  // BackButton closes the picker, not the screen (this unit's AC) — Home's
+  // BackButton is otherwise always null (applyHomeChrome, root screen), so
+  // restoring to null on close is exactly Home's normal state, not a
+  // saved-and-restored previous handler.
+  const close = (): void => {
+    pickerRoot.remove();
+    setBackButtonHandler(null);
+  };
+  setBackButtonHandler(close);
+
+  const renderPicker = (value: DateRangePickerValue): void => {
+    mountDateRangePicker(pickerRoot, {
+      mode: "range",
+      value,
+      maxDate: toDateString(now),
+      maxRangeDays: MAX_RANGE_DAYS,
+      onChange: renderPicker,
+      onApply: (range) => {
+        close();
+        onApply(range);
+      },
+      onCancel: close,
+    });
+  };
+  renderPicker(pickerValueForPeriod(period));
 }
 
 export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandlers, now: Date): void {
@@ -617,7 +685,7 @@ export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandler
         disabled: state.status === "offline",
         onUnitChange: handlers.onUnitChange,
         onOffsetChange: handlers.onOffsetChange,
-        onOpenPicker: handlers.onOpenPicker,
+        onOpenPicker: () => openPicker(root, state.period, now, handlers.onApplyCustomRange),
       });
     }
   }
