@@ -238,10 +238,17 @@ must sit inside the same `@media (prefers-reduced-motion: no-preference)` guard.
   `#eda100` are close. If the Add button reads as a data colour where it
   overlaps a yellow donut slice, move slot 4 — never the accent. Only judgeable
   on a real device.
-- [?] **Safe-area insets.** `app.css` clears `MainButton` with a flat `96px`
-  bottom padding and never references `env(safe-area-inset-bottom)`. On iOS with
-  a home indicator this is unverified. Now blocking rather than cosmetic:
-  screen 01's bottom nav row is a fixed bottom element sitting under
-  MainButton's clearance.
+- [?] **Safe-area insets — partially resolved for screen 01 (U1.6, D331).**
+  The bottom nav row is `position: fixed; bottom: 96px` (docked above the
+  flat `96px` MainButton reserve, not inside it) with its own
+  `padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px))`; `#app`'s
+  own bottom padding also now references `env(safe-area-inset-bottom, 0px)`.
+  Verified only against a headless-Chrome mobile-viewport emulation this
+  session, where `env()` resolves to `0px` — **still unverified on an actual
+  iOS device with a non-zero inset**, and still unverified against a real
+  Telegram client's actual MainButton (whether `96px` is the right reserve at
+  all is an inherited assumption, not something this unit could confirm).
+  Any other fixed-position element added later should follow the same
+  pattern rather than reopening this from scratch.
 - [?] **Focus states.** Required by webapp/CLAUDE.md but not defined here — no
   focus ring token exists. Needs a colour and width that work on both themes.

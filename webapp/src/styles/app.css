@@ -20,7 +20,12 @@ body {
 #app {
   max-width: 480px;
   margin: 0 auto;
-  padding: 14px 12px 96px;
+  /* Bottom clearance stacks two independent reservations: 96px for
+     Telegram's native MainButton (pre-existing), plus 112px for the U1.6
+     fixed bottom nav — its own 88px (8 top pad + 2*32px rows + 8px row gap +
+     8px bottom pad) plus the 24px "gap above region 5"
+     (docs/ui/screens/01-home.md) — plus the device's own safe-area inset. */
+  padding: 14px 12px calc(96px + 112px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Every top-level state wrapper (home.ts's renderSkeleton/renderReady/...)
@@ -98,44 +103,46 @@ body {
   background: var(--separator);
 }
 
-/* -- legend rows ------------------------------------------------------- */
+/* -- ranked category rows (U1.6, docs/ui/screens/01-home.md region 4) ----
+   Every non-zero category, ranked descending, **one card each** — not one
+   shared card with internal separators. `.dot` (9px) stays the small
+   indicator used by budgets/expenses/statistics/expense-detail; ranked rows
+   get their own 36px `.swatch` (design-system.md's Sizing table). */
+
+.ranked-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
 .row {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 13px;
-  border-bottom: 1px solid var(--separator);
-  min-height: 42px;
+  cursor: pointer;
 }
 
-.row:last-child {
-  border-bottom: 0;
-}
-
-.dot {
-  width: 9px;
-  height: 9px;
+.swatch {
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   flex: none;
 }
 
+/* `.nm` grows to fill the row so a long name ellipses on one line without
+   `.pct`/`.val` (both fixed-width, flex: none) ever shrinking. */
 .row .nm {
-  font-size: 13.5px;
+  flex: 1;
   min-width: 0;
+  font-size: 13.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.row .val {
-  margin-left: auto;
-  font-size: 13.5px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 .row .pct {
+  flex: none;
   font-size: 11px;
   color: var(--ink-secondary);
   width: 34px;
@@ -143,13 +150,31 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Same 42px row height as .row, times three, so the skeleton doesn't
-   reflow once the real legend (up to three rows) replaces it. */
-.legend-skeleton {
-  height: 126px;
-  border-radius: 14px;
+.row .val {
+  flex: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--category-slot-1);
+  outline-offset: -2px; /* inset, not `.tile`'s +2px — rows are full-width
+    cards 12px apart; an outward ring would crowd the next row */
+}
+
+/* Three cards at the real row height (36px swatch + 10px*2 padding = 56px),
+   12px gap — matches `.ranked-rows` exactly so real rows replace this with
+   no reflow. */
+.ranked-rows-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ranked-rows-skeleton .card {
+  height: 56px;
   background: var(--card);
-  box-shadow: inset 0 0 0 1px var(--separator);
 }
 
 /* -- over-budget strip ---------------------------------------------------- */
@@ -169,31 +194,47 @@ body {
   font-weight: 600;
 }
 
-/* -- tiles ---------------------------------------------------------------- */
+/* -- bottom nav (U1.6, docs/ui/screens/01-home.md region 5) --------------
+   The only fixed element on the screen: six text-only tiles, two rows of
+   three, pinned above `env(safe-area-inset-bottom)`. `#app`'s bottom
+   padding is sized to keep scrolled content (the ranked rows) clear of it.
+   `bottom: 96px` (D331), not `0` — Telegram's native MainButton is chrome
+   this app doesn't control, and `#app`'s own pre-existing `96px` padding
+   (below) exists specifically because MainButton can cover page content at
+   the true viewport bottom. Docking this nav at raw `bottom: 0` would sit
+   it inside that same reserved zone, i.e. under MainButton. `96px` reuses
+   that already-established reserve instead of inventing a second one. */
 
 .tiles {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 96px;
+  margin: 0 auto;
+  max-width: 480px;
+  z-index: 10;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--app-background);
 }
 
 .tile {
   background: var(--card);
   border: 0;
-  border-radius: 14px;
-  padding: 14px 12px;
-  min-height: 56px;
+  border-radius: 8px;
+  height: 32px;
+  padding: 0 8px;
   font: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-  text-align: left;
+  font-size: 12px;
+  color: var(--ink-secondary);
+  text-align: center;
   cursor: pointer;
 }
 
 .tile:disabled {
-  color: var(--ink-secondary);
+  opacity: 0.5;
   cursor: default;
 }
 
@@ -1032,7 +1073,7 @@ body {
    only runs when the user hasn't asked to avoid motion. */
 @media (prefers-reduced-motion: no-preference) {
   .donut-skeleton,
-  .legend-skeleton,
+  .ranked-rows-skeleton .card,
   .field-skeleton,
   .chips-skeleton,
   .exp-day-skeleton,

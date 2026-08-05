@@ -20,6 +20,7 @@ import {
   type HomeState,
 } from "../src/screens/home";
 import type { PeriodValue } from "../src/lib/period";
+import { formatAmount } from "../src/lib/money";
 import type { TelegramWebApp } from "../src/lib/telegram";
 
 const THIS_MONTH: PeriodValue = { unit: "month", offset: 0 };
@@ -76,7 +77,7 @@ function progress(overrides: Partial<BudgetProgress> = {}): BudgetProgress {
 }
 
 describe("buildHomeData", () => {
-  it("builds segments in category creation order, a top-three legend by spend, and the over-budget strip", () => {
+  it("builds segments in category creation order, ranked rows by spend descending, and the over-budget strip", () => {
     const data = buildHomeData({
       categories: CATEGORIES,
       categoryTotals: CATEGORY_TOTALS,
@@ -92,12 +93,12 @@ describe("buildHomeData", () => {
       "cat-transport",
       "cat-cafe",
     ]);
-    expect(data.legend.map((r) => r.categoryId)).toEqual([
+    expect(data.rows.map((r) => r.categoryId)).toEqual([
       "cat-groceries",
       "cat-transport",
       "cat-cafe",
     ]);
-    expect(data.legend[0].sharePct).toBeCloseTo((41260 / 72470) * 100, 5);
+    expect(data.rows[0].sharePct).toBeCloseTo((41260 / 72470) * 100, 5);
     expect(data.overBudget).toEqual([
       { categoryId: "cat-cafe", label: "Café", overMinor: 2390 },
     ]);
@@ -105,7 +106,7 @@ describe("buildHomeData", () => {
     expect(data.period).toBe(THIS_MONTH);
   });
 
-  it("keeps the legend to the top three by spend, not creation order", () => {
+  it("ranks all non-zero categories by spend, not just the top three (the old legend cap is gone)", () => {
     const categories = [
       ...CATEGORIES,
       category("cat-health", "Health", "2026-01-04T00:00:00Z"),
@@ -124,14 +125,37 @@ describe("buildHomeData", () => {
       period: THIS_MONTH,
     });
 
-    expect(data.legend.map((r) => r.categoryId)).toEqual([
+    expect(data.rows.map((r) => r.categoryId)).toEqual([
       "cat-health",
       "cat-groceries",
       "cat-transport",
+      "cat-cafe",
     ]);
   });
 
-  it("folds more than six categories into a trailing Other donut slot", () => {
+  it("omits a category with a zero total from the ranked rows", () => {
+    const categories = [
+      ...CATEGORIES,
+      category("cat-unused", "Unused", "2026-01-05T00:00:00Z"),
+    ];
+    const totals: CategoryTotal[] = [
+      ...CATEGORY_TOTALS,
+      { category_id: "cat-unused", total: 0 },
+    ];
+
+    const data = buildHomeData({
+      categories,
+      categoryTotals: totals,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+    });
+
+    expect(data.rows.map((r) => r.categoryId)).not.toContain("cat-unused");
+  });
+
+  it("folds more than six categories into a trailing Other donut slot, but the ranked rows don't fold", () => {
     const categories = Array.from({ length: 8 }, (_, i) =>
       category(`cat-${i}`, `Cat ${i}`, `2026-01-0${i + 1}T00:00:00Z`),
     );
@@ -148,6 +172,7 @@ describe("buildHomeData", () => {
 
     expect(data.segments).toHaveLength(7);
     expect(data.segments[6]).toMatchObject({ categoryId: null, label: "Other" });
+    expect(data.rows).toHaveLength(8);
   });
 
   it("category to colour mapping stays stable across two renders with a category appended", () => {
@@ -389,7 +414,7 @@ describe("applyHomeChrome", () => {
       totalMinor: 0,
       currency: "EUR",
       segments: [],
-      legend: [],
+      rows: [],
       overBudget: [],
       tiles: HOME_TILES,
       period: THIS_MONTH,
@@ -493,7 +518,7 @@ describe("renderHome", () => {
     expect(html).toContain("period-selector disabled");
   });
 
-  it("omits the legend for a single category", () => {
+  it("renders exactly one ranked row for a single category (the old <=1 suppression is gone)", () => {
     const single = buildHomeData({
       categories: [CATEGORIES[0]],
       categoryTotals: [CATEGORY_TOTALS[0]],
@@ -503,13 +528,78 @@ describe("renderHome", () => {
       period: THIS_MONTH,
     });
     const html = renderHome({ status: "ready", ...single }, NOW);
-    expect(html).not.toContain('data-testid="legend"');
+    expect(html.match(/data-testid="ranked-row"/g)).toHaveLength(1);
+    expect(html).toContain("Groceries");
+  });
+
+  it("makes ranked rows keyboard-reachable and activatable, not mouse-only divs", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    expect(html).toContain('role="button" tabindex="0"');
+    expect(html).toContain('aria-label="Groceries, 57%, 412.60"');
+  });
+
+  it("renders the top-ranked row's swatch, name, share and amount in that order", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    // "Groceries" is data.rows[0] (highest spend) — its swatch/name/pct/val
+    // are each's first occurrence in document order. `>Groceries<` (the
+    // `.nm` span's text node), not a bare substring match, since the row's
+    // own `aria-label` attribute also contains "Groceries" earlier in the
+    // markup.
+    const swatchIndex = html.indexOf('class="swatch"');
+    const nameIndex = html.indexOf(">Groceries<");
+    const pctIndex = html.indexOf('class="pct"');
+    const valIndex = html.indexOf('class="val"');
+    expect(swatchIndex).toBeGreaterThan(-1);
+    expect(swatchIndex).toBeLessThan(nameIndex);
+    expect(nameIndex).toBeLessThan(pctIndex);
+    expect(pctIndex).toBeLessThan(valIndex);
+  });
+
+  it("renders a 30-character category name in full and the amount intact (CSS handles the ellipsis, JS never truncates)", () => {
+    const longName = "A".repeat(30);
+    const data = buildHomeData({
+      categories: [category("cat-long", longName, "2026-01-01T00:00:00Z")],
+      categoryTotals: [{ category_id: "cat-long", total: 5000 }],
+      periodTotal: { ...PERIOD_TOTAL, total: 5000 },
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+    });
+    const html = renderHome({ status: "ready", ...data }, NOW);
+    expect(html).toContain(longName);
+    expect(html).toContain(formatAmount(5000));
+  });
+
+  it("renders all ranked rows without folding, even past six categories", () => {
+    const categories = Array.from({ length: 8 }, (_, i) =>
+      category(`cat-${i}`, `Cat ${i}`, `2026-01-0${i + 1}T00:00:00Z`),
+    );
+    const totals: CategoryTotal[] = categories.map((c) => ({ category_id: c.id, total: 100 }));
+    const data = buildHomeData({
+      categories,
+      categoryTotals: totals,
+      periodTotal: { ...PERIOD_TOTAL, total: 800 },
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+    });
+    const html = renderHome({ status: "ready", ...data }, NOW);
+    expect(html.match(/data-testid="ranked-row"/g)).toHaveLength(8);
   });
 
   it("shows the over-budget strip when a category is exceeded on month at offset 0", () => {
     const html = renderHome({ status: "ready", ...readyData }, NOW);
     expect(html).toContain('data-testid="over-budget"');
     expect(html).toContain("Café");
+  });
+
+  it("orders the over-budget strip before the ranked rows (Layout table region 3 before region 4)", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    const stripIndex = html.indexOf('data-testid="over-budget"');
+    const rowsIndex = html.indexOf('data-testid="ranked-rows"');
+    expect(stripIndex).toBeGreaterThan(-1);
+    expect(rowsIndex).toBeGreaterThan(-1);
+    expect(stripIndex).toBeLessThan(rowsIndex);
   });
 
   it("hides the over-budget strip outside month at offset 0, even with an exceeded budget", () => {

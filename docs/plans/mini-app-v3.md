@@ -524,7 +524,7 @@ touched** (D316) — it keeps its `months_back` chips.
       `month`/`offset 0`; offline freezes the control at the cached period.
       Files: `webapp/src/screens/home.ts`, `webapp/tests/home.test.ts`,
       `webapp/src/main.ts`, `webapp/src/styles/app.css`. Model: sonnet.
-- [ ] **U1.6 Home layout: ranked rows + bottom nav** — the legend becomes the
+- [x] **U1.6 Home layout: ranked rows + bottom nav** — the legend becomes the
       full ranked list, and the six tiles move to the bottom. AC: **all**
       categories with a non-zero total render as rows sorted descending, each
       with a filled colour circle, name, share % and amount — the donut still
@@ -1121,6 +1121,39 @@ every unit below.
   `app.css`, `home.test.ts`. No `offline.period` string exists anywhere yet
   as a result. Revisit either as a small U1.4 follow-up or folded into
   whichever later unit next touches `period-selector.ts`.
+- D331 (2026-08-05, U1.6; revised same day after reviewer WARN): **resolves
+  design-system.md's blocking `[?]` on safe-area insets**, for this screen's
+  bottom nav specifically (still open elsewhere). `.tiles` is
+  `position: fixed`, the screen's only fixed element (`docs/ui/screens/
+  01-home.md`'s Layout table), with `padding-bottom: calc(8px +
+  env(safe-area-inset-bottom, 0px))` so the row's own content clears the
+  home-indicator inset. First pass docked it at `bottom: 0`; reviewer
+  correctly flagged that this ignores Telegram's native **MainButton** — this
+  app has no `viewportHeight`/`viewportStableHeight` listener anywhere, so
+  there's no evidence the WebView auto-excludes MainButton's footprint, and
+  `#app`'s own pre-existing `96px` bottom padding exists *because* MainButton
+  can cover page content at the true viewport bottom (design-system.md's `[?]`
+  says as much: "sitting under MainButton's clearance"). `bottom: 0` would
+  have placed this unit's new fixed nav inside that exact reserved zone.
+  Fixed to `bottom: 96px`, reusing that already-established reserve instead
+  of inventing a second one — the nav now docks *above* where MainButton is
+  assumed to live, not at the raw edge. `#app`'s bottom padding is unchanged
+  by this fix: `calc(96px + 112px + env(safe-area-inset-bottom, 0px))`, where
+  `112px` is the nav's own rendered height (`8` top pad + `2×32px` rows +
+  `8px` row gap + `8px` bottom pad = `88px`) plus the Layout table's `24px`
+  "gap above region 5" — the total reserved from the true viewport bottom is
+  identical whether the nav's own `88px` starts at offset `0` or offset `96`,
+  since `#app`'s clearance already accounts for both. Verified visually at a
+  real 390×844 mobile viewport (Chrome DevTools Protocol,
+  `Emulation.setDeviceMetricsOverride`) — no overlap between the last ranked
+  row and the fixed nav in either theme; **not verified**: an actual Telegram
+  client, where MainButton is real chrome (the harness has none) — the
+  `bottom: 96px` reuse is the best evidence-based call available without one,
+  not a confirmed-safe measurement. Also not verified: an iOS device with a
+  non-zero safe-area inset (`env()` evaluates to `0px` in every environment
+  available this session). Rejected: leaving the nav in normal flow (matches
+  nothing in the Layout table, which marks it `fixed` and "the only fixed
+  element"); docking at `bottom: 0` (the MainButton-overlap risk above).
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1498,8 +1531,70 @@ every unit below.
   smoke test this unit (human's call): the dev server has no backend behind
   it without the full `docker compose` stack, and the 29 new/updated tests
   plus green typecheck/lint/build were judged sufficient for this session.
-- Next: **U1.6** — Home layout: ranked rows + bottom nav. Start with
-  `/clear`, then `/unit U1.6 docs/plans/mini-app-v3.md`.
+- Done: **U1.6** — Home layout: ranked rows + bottom nav. `HomeData.legend`
+  (top-3, suppressed at ≤1) renamed to `.rows` (all non-zero categories,
+  descending, no suppression) — `buildHomeData` drops the `.slice(0, 3)`.
+  `renderLegend` → `renderRankedRows`: each row is now its own `.card`
+  (`.row`, `12px` gap between them via `.ranked-rows`, not one shared card
+  with border-separators), column order swapped to swatch → name → share% →
+  amount (was swatch → name → amount → share%) to match the reference and
+  the Layout table; the 9px `.dot` stays untouched for
+  budgets/expenses/statistics/expense-detail (still 9px there) — ranked rows
+  get their own 36px `.swatch`. `.row .nm` gained `flex: 1` (previously
+  relied only on `.val`'s `margin-left: auto`, which doesn't force `.nm` to
+  shrink) so a long name ellipses without `.pct`/`.val` (both `flex: none`)
+  ever shrinking — this is the fix the 30-char-name AC actually needed.
+  Donut: `DONUT_RADIUS` 76→74px, stroke 26→30px inline attr, outer edge
+  unchanged (`radius + strokeWidth/2` still 89 of the 200-unit viewBox) so
+  only the ring thickens, not the diameter. `.tiles` (bottom nav) restyled
+  from a 2-col card grid to `position: fixed` 3-col text row, `.tile` from a
+  56px card to a 32px text-only cell; see D331 for the fixed-position/
+  safe-area/`#app`-padding math. Also wired ranked-row taps to the same
+  `onSegmentTap` handler donut segments already use (screen doc's
+  Interactions table: "Ranked row | tap | same target as its donut
+  segment") — not explicitly named in this unit's plan AC line, but reuses
+  existing infra at near-zero cost and is what makes the rows the primary
+  interactive surface the AC's "the ranked rows are the data now" implies.
+  `renderReady`'s section order also fixed to match the Layout table
+  (over-budget strip *before* ranked rows — it had been the reverse since
+  U1.5). 35 tests in `home.test.ts` (up from 29, two added post-review — the
+  row accessibility fix below, and a DOM-order test the reviewer's second
+  pass asked for): ranking replaces the old
+  top-3/suppression tests, plus new coverage for zero-total omission,
+  no-fold past six, swatch→name→pct→val order, and a 30-char name rendering
+  intact (amount un-truncated) end to end. Browser-verified this unit (not
+  skipped): a throwaway static-HTML harness (real `renderHome()` output +
+  the real `tokens.css`/`app.css`, deleted before commit) screenshotted via
+  Chrome headless driven directly over the DevTools Protocol (no network
+  access for Playwright in this session; the CLI `--screenshot
+  --window-size` flag turned out not to honor the requested viewport width —
+  confirmed via a minimal repro — so `Emulation.setDeviceMetricsOverride`
+  was used instead) at a real 390×844 mobile viewport, both themes, and the
+  loading/single-category/populated states. Reviewer round 1: REQUEST_CHANGES,
+  two WARNs, both fixed same round — (1) the fixed bottom nav docked at
+  `bottom: 0` sat inside the zone `#app`'s pre-existing MainButton padding
+  reserves, with no way to verify against a real Telegram client this
+  session; moved to `bottom: 96px` (see D331's revision) rather than left
+  unverified-and-shipped. (2) ranked rows gained a click handler and
+  `cursor: pointer` but no keyboard/focus semantics; added
+  `role="button" tabindex="0"`, an `aria-label`, a keydown (Enter/Space)
+  handler alongside the click one, and a `.row:focus-visible` style —
+  home.test.ts asserts the markup. Reviewer round 2: APPROVE, plus three
+  NITs, all fixed (none required a third round): design-system.md's
+  safe-area `[?]` annotated as partially resolved for screen 01 rather than
+  left claiming a state D331 had already changed; `statistics.ts`'s stale
+  doc-comment referencing the now-renamed `home.ts::renderLegend` reworded
+  (comment-only, screen 05's own behavior untouched, D316); a DOM-order test
+  added asserting the over-budget strip renders before the ranked rows.
+  verify.sh green.
+- Next: **U1.7** — Home yellow Add button. Start with `/clear`, then
+  `/unit U1.7 docs/plans/mini-app-v3.md`. Its Files list overlaps U1.6's
+  (`screens/home.ts`, `home.test.ts`, `app.css`) and it's the unit D329
+  earmarked for `.chart-card`'s finished-layout padding (`16px 12px 20px`)
+  — U1.6 deliberately left that alone since it doesn't structurally interact
+  with ranked rows/bottom nav, but U1.7's Add button inset (`12px` from the
+  card's own right/bottom padding edges) needs the correct bottom padding to
+  be accurate, so it's the more natural owner.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

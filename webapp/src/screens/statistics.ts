@@ -307,10 +307,13 @@ function renderDonut(data: StatisticsData): string {
 }
 
 /** The ranked-bar list doubles as this screen's legend (file header) —
- * hidden entirely for a single row, same "no legend needed" rule
- * `home.ts::renderLegend` applies (AC: "single category renders without a
- * legend"). Zero rows (e.g. no tagged expenses this period while the
- * category total is non-zero) gets its own note rather than blank space. */
+ * hidden entirely for a single row (AC: "single category renders without a
+ * legend"), screen 05's own rule and untouched by U1.6, which replaced
+ * Home's equivalent single-row suppression with an unconditional ranked
+ * list (`home.ts::renderRankedRows`) — the two screens' legend/list rules
+ * no longer match on purpose (D316: screen 05 is out of scope for that
+ * work). Zero rows (e.g. no tagged expenses this period while the category
+ * total is non-zero) gets its own note rather than blank space. */
 function renderBars(bars: StatisticsBar[], grouping: Grouping): string {
   if (bars.length === 0) {
     const noun = grouping === "category" ? "categorised" : "tagged";

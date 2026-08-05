@@ -36,7 +36,11 @@ import type {
   Uuid,
 } from "../api/types";
 
-const DONUT_RADIUS = 76;
+// U1.6/design-system.md: stroke thickened 26 -> 30px, radius trimmed to keep
+// the outer edge (radius + strokeWidth/2) unchanged at 89 of the 200-unit
+// viewBox — the ring gets thicker inward, the donut's outer diameter doesn't.
+const DONUT_RADIUS = 74;
+const DONUT_STROKE = 30;
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 // Mirrors lib/donut.ts's own DEFAULT_MAX_SLOTS (not exported there) — passed
 // explicitly to segments() below so this module's fold-boundary math can't
@@ -66,7 +70,7 @@ export interface HomeSegment {
   offset: number;
 }
 
-export interface HomeLegendRow {
+export interface HomeRankedRow {
   categoryId: Uuid;
   label: string;
   colorVar: string;
@@ -84,7 +88,7 @@ export interface HomeData {
   totalMinor: number;
   currency: Currency;
   segments: HomeSegment[];
-  legend: HomeLegendRow[];
+  rows: HomeRankedRow[];
   overBudget: HomeOverBudgetRow[];
   tiles: readonly HomeTile[];
   period: PeriodValue;
@@ -144,10 +148,13 @@ export function buildHomeData(input: {
     };
   });
 
-  const legend: HomeLegendRow[] = [...input.categoryTotals]
+  // docs/ui/screens/01-home.md: "all categories with a non-zero total,
+  // ranked descending" — every one of them, not a top-N legend (the old
+  // <=1-row suppression is gone too; a single category still renders its
+  // one row).
+  const rows: HomeRankedRow[] = [...input.categoryTotals]
     .filter((t) => t.total > 0)
     .sort((a, b) => b.total - a.total)
-    .slice(0, 3)
     .map((t) => {
       const slot = colorBySlot.get(t.category_id) ?? null;
       return {
@@ -179,7 +186,7 @@ export function buildHomeData(input: {
     totalMinor: input.periodTotal.total,
     currency: input.currency,
     segments,
-    legend,
+    rows,
     overBudget,
     tiles: HOME_TILES,
     period: input.period,
@@ -353,7 +360,7 @@ function renderSkeleton(period: PeriodValue, now: Date): string {
       ${renderPeriodControl(period, now, false)}
       <div class="donut-skeleton"></div>
     </div>
-    <div class="legend-skeleton"></div>
+    <div class="ranked-rows-skeleton"><div class="card"></div><div class="card"></div><div class="card"></div></div>
     ${renderTiles(HOME_TILES)}
   </div>`;
 }
@@ -419,7 +426,7 @@ function renderDonut(data: HomeData): string {
     .map(
       (seg) =>
         `<circle data-category-id="${seg.categoryId ?? "other"}" cx="100" cy="100" r="${DONUT_RADIUS}" ` +
-        `stroke="${seg.colorVar}" stroke-width="26" fill="none" ` +
+        `stroke="${seg.colorVar}" stroke-width="${DONUT_STROKE}" fill="none" ` +
         `stroke-dasharray="${seg.dash} ${DONUT_CIRCUMFERENCE - seg.dash}" stroke-dashoffset="${-seg.offset}" />`,
     )
     .join("");
@@ -433,21 +440,28 @@ function renderDonut(data: HomeData): string {
   </div>`;
 }
 
-function renderLegend(legend: HomeLegendRow[]): string {
-  // Design doc §4: "single category (donut renders, no legend needed)".
-  if (legend.length <= 1) {
+// docs/ui/screens/01-home.md region 4: every non-zero category, ranked
+// descending, one card each — the old top-3/suppress-at-<=1 "legend" rule is
+// gone (Single category state: "the ranked rows are the data now, not a
+// legend"). Column order is swatch · name · share% · amount, matching the
+// reference ("Дом 58% zł2,948").
+function renderRankedRows(rows: HomeRankedRow[]): string {
+  if (rows.length === 0) {
     return "";
   }
-  const rows = legend
+  const items = rows
     .map(
       (row) =>
-        `<div class="row"><span class="dot" style="background:${row.colorVar}"></span>` +
+        `<div class="card row" data-testid="ranked-row" data-category-id="${row.categoryId}" ` +
+        `role="button" tabindex="0" aria-label="${escapeHtml(row.label)}, ${Math.round(row.sharePct)}%, ${escapeHtml(formatAmount(row.minor))}">` +
+        `<span class="swatch" style="background:${row.colorVar}"></span>` +
         `<span class="nm">${escapeHtml(row.label)}</span>` +
+        `<span class="pct">${Math.round(row.sharePct)}%</span>` +
         `<span class="val">${escapeHtml(formatAmount(row.minor))}</span>` +
-        `<span class="pct">${Math.round(row.sharePct)}%</span></div>`,
+        `</div>`,
     )
     .join("");
-  return `<div class="card" data-testid="legend">${rows}</div>`;
+  return `<div class="ranked-rows" data-testid="ranked-rows">${items}</div>`;
 }
 
 function renderOverBudgetStrip(overBudget: HomeOverBudgetRow[], currency: Currency): string {
@@ -474,8 +488,8 @@ function renderReady(data: HomeData, lastSyncedAt: string | undefined, now: Date
       ${renderPeriodControl(data.period, now, disabled)}
       ${renderDonut(data)}
     </div>
-    ${renderLegend(data.legend)}
     ${renderOverBudgetStrip(data.overBudget, data.currency)}
+    ${renderRankedRows(data.rows)}
     ${renderTiles(data.tiles)}
   </div>`;
 }
@@ -534,6 +548,30 @@ export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandler
         if (target) {
           haptics.selection();
           handlers.onSegmentTap(target);
+        }
+      });
+    });
+
+    // Ranked row tap "same target as its donut segment" (docs/ui/screens/01-home.md)
+    // — every row carries a real categoryId (the rows never fold), unlike the
+    // donut's nullable "Other" slot. `role="button"`/`tabindex="0"` (render
+    // side) need a manual Enter/Space handler — unlike a native <button>,
+    // a div doesn't activate on keydown by itself (design-system.md's
+    // Accessibility rule: visible focus + reachability on every interactive
+    // element; the Focus order in docs/ui/screens/01-home.md lists rows).
+    root.querySelectorAll<HTMLElement>('[data-testid="ranked-row"]').forEach((el, index) => {
+      const activate = () => {
+        const row = state.rows[index];
+        if (row) {
+          haptics.selection();
+          handlers.onSegmentTap({ categoryId: row.categoryId, label: row.label });
+        }
+      };
+      el.addEventListener("click", activate);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activate();
         }
       });
     });
