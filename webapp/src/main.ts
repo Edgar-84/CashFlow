@@ -14,6 +14,13 @@ import {
   type BudgetsHandlers,
 } from "./screens/budgets";
 import {
+  applyCategoriesChrome,
+  createMemoryCache as createCategoriesCache,
+  loadCategories,
+  mount as mountCategories,
+  type CategoriesHandlers,
+} from "./screens/categories";
+import {
   applyDetailChrome,
   loadDetail,
   mount as mountExpenseDetail,
@@ -52,6 +59,7 @@ const homeController = createHomeController(client, homeCache);
 const addExpenseCache = createAddExpenseCache();
 const expensesCache = createExpensesCache();
 const budgetsCache = createBudgetsCache();
+const categoriesCache = createCategoriesCache();
 const statisticsCache = createStatisticsCache();
 
 // Home's selected period. Module-level so it survives navigating to screen
@@ -90,9 +98,11 @@ async function showHome(): Promise<void> {
         void showBudgets();
       } else if (tile === "statistics") {
         void showStatistics();
+      } else if (tile === "categories") {
+        void showCategories();
       }
-      // Categories/Tags land in a later milestone (M3) — tiles stay
-      // reachable but are no-ops until then.
+      // Tags lands in a later unit (U2.4) — its tile stays reachable but is
+      // a no-op until then.
     },
     onSegmentTap: (target) => {
       void showExpenses(target.categoryId ? { categoryId: target.categoryId } : {});
@@ -240,6 +250,31 @@ async function showBudgets(): Promise<void> {
   const state = await loadBudgets(client, budgetsCache);
   applyBudgetsChrome(state, handlers.onBack);
   mountBudgets(root, state, client, handlers);
+}
+
+/** Mounts Categories (U2.1, screen 06). BackButton always returns to Home,
+ * same shape as Budgets/Expenses — this is the fix for the previously
+ * dead "Categories" tile. */
+async function showCategories(): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+
+  const handlers: CategoriesHandlers = {
+    onRetry: () => {
+      void showCategories();
+    },
+    onBack: () => {
+      void showHome();
+    },
+  };
+
+  applyCategoriesChrome(handlers.onBack);
+  mountCategories(root, { status: "loading" }, handlers);
+  const state = await loadCategories(client, categoriesCache);
+  applyCategoriesChrome(handlers.onBack);
+  mountCategories(root, state, handlers);
 }
 
 /** Mounts Statistics (U2.5, screen 05), reached from Home's "Statistics"

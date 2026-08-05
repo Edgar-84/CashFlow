@@ -210,8 +210,13 @@ export class ApiClient {
 
   // -- categories / tags (list-only in v1; management deferred, D204) -----
 
-  listCategories(): Promise<CategoryResponse[]> {
-    return this.request<CategoryResponse[]>("GET", "/categories");
+  listCategories(opts: { includeUsage?: boolean; includeArchived?: boolean } = {}): Promise<CategoryResponse[]> {
+    return this.request<CategoryResponse[]>("GET", "/categories", {
+      params: {
+        include_usage: opts.includeUsage === undefined ? undefined : String(opts.includeUsage),
+        include_archived: opts.includeArchived === undefined ? undefined : String(opts.includeArchived),
+      },
+    });
   }
 
   listTags(): Promise<TagResponse[]> {
