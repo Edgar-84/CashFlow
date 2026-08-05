@@ -585,7 +585,7 @@ touched** (D316) — it keeps its `months_back` chips.
       `tests/category-colors.test.ts`, `screens/home.ts`,
       `screens/statistics.ts`, `webapp/CLAUDE.md` (its "colour is assigned
       client-side in v1" rule is what this unit replaces). Model: sonnet.
-- [ ] **U2.1 Screen 06a — Categories list** — the dead tile finally opens.
+- [x] **U2.1 Screen 06a — Categories list** — the dead tile finally opens.
       Rows: colour dot, name, expense count, this-month total; archived
       categories in a separate collapsed section below with a plain-words
       explanation. AC: the Home "Categories" tile navigates here and
@@ -1306,6 +1306,23 @@ every unit below.
   fallback. Rejected: making it required (more accurately mirrors the backend,
   but forces edits to four fixture files with no other reason to change in
   this unit).
+- D337 (2026-08-05, HUMAN): U2.1's `docs/ui/screens/06-categories.md` was
+  rewritten mid-session from a row-list layout to a **4-column grid**
+  (matching a reference screenshot of another app's category-add grid), with
+  each cell keeping the row-list version's required mini-report as a third
+  caption line (`{count} · {amount}`) rather than dropping it. The add
+  affordance is a **grey** circle-with-`+` (reusing `category-picker.md`'s
+  "More" cell), not yellow — `--accent` stays reserved for Home's
+  Add-expense button only (`design-system.md`'s human-confirmed single-use
+  rule), which the screenshot's yellow-adjacent styling was checked against
+  before writing the spec. Archived categories stay a row list (not a second
+  grid) under a collapsed "Archived (n)" header. No MainButton on this
+  screen — the add affordance is in-grid. Rejected: dropping the count/total
+  to match the reference exactly (would have required editing the
+  already-approved U2.1 acceptance criteria); amending `--accent`'s
+  single-use rule to allow a second yellow element (reopens a decision the
+  human had already closed and confirmed, for a cosmetic preference with a
+  same-cost grey alternative already in the codebase).
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -1891,9 +1908,65 @@ every unit below.
   D301/U2.0) and this note's own now-corrected claim about `home.test.ts`'s
   fixture sizes. verify.sh green (635 backend + 351 webapp tests,
   typecheck/lint/build/secret-grep all pass).
-- Next: **U2.1** — Screen 06a, Categories list (`screens/categories.ts`,
-  `main.ts`, `styles/app.css`) — the dead "Categories" tile finally opens.
-  Start with `/clear`, then `/unit U2.1 docs/plans/mini-app-v3.md`.
+- Done: **U2.1** — Screen 06a, Categories list. `docs/ui/screens/06-categories.md`
+  was written this session (no prior spec existed for screen 06) via `ui-spec`,
+  then rewritten mid-session to a 4-column grid after a reference screenshot —
+  see D337 for the layout/colour decisions. New `screens/categories.ts`:
+  `buildCategoriesData` splits fetched categories (sorted `created_at ASC`,
+  active+archived together for `assignCategoryColors`' position fallback) into
+  `active`/`archived` `CategoryRow[]`, each with `colorVar`, all-time
+  `expenseCount` (`CategoryResponse.expense_count`) and a this-month
+  `monthTotalMinor` defaulted to `0` for a category absent from
+  `GET /statistics/by-category` (confirmed against
+  `services/statistics_service.py::by_category` — it builds its result from a
+  `defaultdict` over actual expenses, so a zero-total category is omitted, not
+  returned with `total: 0`). `loadCategories` mirrors `loadBudgets`'s
+  never-throws/cache-fallback/403→forbidden contract exactly; no top-level
+  "empty" status (mirrors `loadBudgets`) — zero active categories is a `ready`
+  sub-case so the "Add category" cell still renders. `renderCategories`/
+  `renderCategoriesView` render the grid (`category-picker.md`'s 64px
+  swatch/12·16px gap values — that component isn't built yet, so this is the
+  first code to use that shape) plus a collapsed-by-default archived section
+  (plain `.row`/`.swatch`/`.nm` list, reused from Home, at 60% opacity) whose
+  expand/collapse is `mount`'s own local closure state, not a fetch. Category
+  cells and the "Add category" cell are intentionally unwired stubs — U2.2
+  owns their destination (screen 06b). `applyCategoriesChrome` wires
+  BackButton to Home and hides MainButton (the add affordance is in-grid, not
+  MainButton). `main.ts`'s `onTileTap` now routes `"categories"` to
+  `showCategories()`, closing the reported dead-tile bug; the stale
+  "Categories/Tags land in a later milestone" comment now names only Tags.
+  Extended `api/types.ts::CategoryResponse` with optional `is_active`/
+  `expense_count` and `api/client.ts::listCategories` with an optional
+  `{includeUsage, includeArchived}` opts param (both default `undefined` so
+  every other existing caller's request is byte-for-byte unchanged — verified
+  by the untouched `client.test.ts` assertions). 28 new tests in
+  `categories.test.ts` covering `buildCategoriesData` (colour, zero-total
+  default, active/archived split, archived-counts-toward-position-fallback),
+  `loadCategories`'s four states, `renderCategories`/`renderCategoriesView`
+  (skeleton count, error/forbidden/empty text, grid+add-cell rendering,
+  aria-labels including the count/total singular-vs-plural wording,
+  `aria-expanded` on the archived toggle, no `--accent` anywhere, archived
+  section absent/collapsed/expanded, offline banner), `nextGridFocusIndex`
+  (arrow-key wrap in every direction, ragged-last-row safety, unhandled-key
+  and empty-grid no-ops) and `applyCategoriesChrome`. No `main.ts` test
+  added — its routing glue has no meaningful test under the existing
+  accepted gap (`main.test.ts` only smoke-tests `boot()`). Review round 1:
+  APPROVE with three WARNs, all fixed same round — archived rows were
+  unfocusable `<div>`s with no ARIA role (now `role="button" tabindex="0"`,
+  matching `home.ts::renderRankedRows`' established convention for this
+  same `.row` class); the spec-mandated arrow-key grid navigation was
+  unimplemented (added as a pure `nextGridFocusIndex` function, wired in
+  `mount`); and the new a11y behaviour had no test coverage (added above).
+  verify.sh green (635 backend + 379 webapp tests, typecheck/lint/build/
+  secret-grep all pass).
+- Next: **U2.2** — Screen 06b, Create/rename/recolour
+  (`screens/categories.ts`, `tests/categories.test.ts`, `api/client.ts` if
+  needed, `styles/app.css`). Needs its own `ui-spec` pass first — U2.1's spec
+  file only stubs the row/add-cell destinations, it does not design the form
+  or the 12-swatch colour picker. **Blocked on the design-system `[?]`**:
+  slots 7–12 haven't been run through the dataviz contrast/colourblind
+  validator — validate before this unit ships a picker that offers them.
+  Start with `/clear`, then `/unit U2.2 docs/plans/mini-app-v3.md`.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

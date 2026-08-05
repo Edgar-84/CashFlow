@@ -1356,6 +1356,161 @@ body {
   outline-offset: 2px;
 }
 
+/* -- categories (U2.1, docs/ui/screens/06-categories.md) --------------------
+   4-column grid, reusing category-picker.md's swatch/gap values (that
+   component isn't built yet — U3.1 — so this screen is the first to render
+   this shape). Adds a third caption line category-picker.md's cells don't
+   have: each active category doubles as a mini-report (count + this-month
+   total), which the design doc calls for and a plain icon grid has no other
+   room for. */
+.cat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  column-gap: 12px;
+  row-gap: 16px;
+}
+
+.cat-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cat-cell-swatch {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.cat-cell-name {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink);
+  text-align: center;
+  /* Reserves a fixed two-line height regardless of actual length, so
+     captions in the same grid row stay aligned even when neighbouring
+     names wrap differently (docs/ui/screens/06-categories.md's Edge cases). */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 29px;
+}
+
+.cat-cell-caption {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.cat-cell-add-swatch {
+  background: var(--separator);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-secondary);
+}
+
+.cat-cell:focus-visible {
+  outline: none;
+}
+
+.cat-cell:focus-visible .cat-cell-swatch {
+  outline: 2px solid var(--category-slot-1);
+  outline-offset: 2px;
+}
+
+.cat-cell-skeleton {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--card);
+}
+
+.categories-empty-note {
+  margin: 0 4px 4px;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.categories-error p,
+.categories-readonly p {
+  margin: 4px 4px 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.categories-error button[data-action="retry"] {
+  font: inherit;
+  font-weight: 600;
+  background: var(--ink);
+  color: var(--app-background);
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin: 8px 4px 0;
+  cursor: pointer;
+}
+
+/* Archived rows reuse Home's `.row`/`.swatch`/`.nm` (36px) — a plain list,
+   not a second grid, since archived categories are secondary/rare. */
+.cat-archived {
+  margin-top: 20px;
+}
+
+.cat-archived-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  background: transparent;
+  padding: 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.cat-archived-chevron {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--ink-secondary);
+  transform: rotate(0deg);
+}
+
+.cat-archived-chevron--open {
+  transform: rotate(180deg);
+}
+
+.cat-archived-explain {
+  margin: 0 4px 8px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.cat-archived-row {
+  opacity: 0.6;
+}
+
+.cat-archived-caption {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */
@@ -1366,7 +1521,8 @@ body {
   .chips-skeleton,
   .exp-day-skeleton,
   .budget-row-skeleton,
-  .stats-bar-skeleton {
+  .stats-bar-skeleton,
+  .cat-cell-skeleton {
     animation: skeleton-pulse 1.4s ease-in-out infinite;
   }
 }

@@ -59,6 +59,12 @@ export interface CategoryResponse {
    * (D301/D308) — `lib/category-colors.ts` treats both the same, falling
    * back to its own position rule. */
   color_slot?: number | null;
+  /** Defaults `true` server-side (`models/category.py`); omitted only for
+   * older callers that don't request this field. */
+  is_active?: boolean;
+  /** Populated only when the caller passes `include_usage=true`; `null`/
+   * omitted means "not requested", never "zero" (U2.1). */
+  expense_count?: number | null;
 }
 
 export interface TagResponse {
