@@ -16,7 +16,15 @@
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
 import { segments as donutSegments } from "../lib/donut";
 import { formatAmount } from "../lib/money";
+import {
+  describe as describePeriod,
+  toQuery,
+  type PeriodQuery,
+  type PeriodUnit,
+  type PeriodValue,
+} from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
+import { mount as mountPeriodSelector, renderPeriodSelector } from "../components/period-selector";
 import { ForbiddenError } from "../api/client";
 import type {
   BudgetPlanResponse,
@@ -79,13 +87,14 @@ export interface HomeData {
   legend: HomeLegendRow[];
   overBudget: HomeOverBudgetRow[];
   tiles: readonly HomeTile[];
+  period: PeriodValue;
 }
 
 export type HomeState =
-  | { status: "loading" }
-  | { status: "error"; message: string }
+  | { status: "loading"; period: PeriodValue }
+  | { status: "error"; message: string; period: PeriodValue }
   | { status: "forbidden"; tiles: readonly HomeTile[] }
-  | { status: "empty"; tiles: readonly HomeTile[] }
+  | { status: "empty"; tiles: readonly HomeTile[]; period: PeriodValue }
   | ({ status: "ready" } & HomeData)
   | ({ status: "offline"; lastSyncedAt: string } & HomeData);
 
@@ -97,6 +106,7 @@ export function buildHomeData(input: {
   periodTotal: PeriodTotal;
   currency: Currency;
   budgetProgress: BudgetProgress[];
+  period: PeriodValue;
 }): HomeData {
   const orderedCategories = [...input.categories].sort((a, b) =>
     a.created_at.localeCompare(b.created_at),
@@ -149,13 +159,21 @@ export function buildHomeData(input: {
       };
     });
 
-  const overBudget: HomeOverBudgetRow[] = input.budgetProgress
-    .filter((p) => p.is_exceeded)
-    .map((p) => ({
-      categoryId: p.category_id,
-      label: nameById.get(p.category_id) ?? "Unknown",
-      overMinor: p.spent - p.amount,
-    }));
+  // D310, extended by docs/ui/screens/01-home.md: the strip states a monthly
+  // fact, so it is shown only when the screen's own period is that same
+  // span — Month at offset 0. Budget progress is always month-scoped, so
+  // it's still fetched regardless of the tab in force; only its visibility
+  // is gated here.
+  const isMonthToDate = input.period.unit === "month" && input.period.offset === 0;
+  const overBudget: HomeOverBudgetRow[] = isMonthToDate
+    ? input.budgetProgress
+        .filter((p) => p.is_exceeded)
+        .map((p) => ({
+          categoryId: p.category_id,
+          label: nameById.get(p.category_id) ?? "Unknown",
+          overMinor: p.spent - p.amount,
+        }))
+    : [];
 
   return {
     totalMinor: input.periodTotal.total,
@@ -164,14 +182,15 @@ export function buildHomeData(input: {
     legend,
     overBudget,
     tiles: HOME_TILES,
+    period: input.period,
   };
 }
 
 export interface HomeApi {
   getMe(): Promise<{ currency: Currency }>;
   listCategories(): Promise<CategoryResponse[]>;
-  statisticsByCategory(opts?: { months_back?: number }): Promise<CategoryTotal[]>;
-  statisticsByPeriod(opts?: { months_back?: number }): Promise<PeriodTotal>;
+  statisticsByCategory(query: PeriodQuery): Promise<CategoryTotal[]>;
+  statisticsByPeriod(query: PeriodQuery): Promise<PeriodTotal>;
   listBudgetPlans(): Promise<BudgetPlanResponse[]>;
   getBudgetPlanProgress(id: Uuid): Promise<BudgetProgress>;
 }
@@ -196,17 +215,16 @@ export function createMemoryCache(): HomeCache {
   };
 }
 
-const CURRENT_MONTH = { months_back: 0 } as const;
-
-/** Loads and shapes Home's data. Never throws — every failure resolves to a
- * `HomeState` the caller can render directly. */
-export async function loadHome(api: HomeApi, cache: HomeCache): Promise<HomeState> {
+/** Loads and shapes Home's data for the given period. Never throws — every
+ * failure resolves to a `HomeState` the caller can render directly. */
+export async function loadHome(api: HomeApi, cache: HomeCache, period: PeriodValue): Promise<HomeState> {
   try {
+    const query = toQuery(period);
     const [me, categories, categoryTotals, periodTotal, budgetPlans] = await Promise.all([
       api.getMe(),
       api.listCategories(),
-      api.statisticsByCategory(CURRENT_MONTH),
-      api.statisticsByPeriod(CURRENT_MONTH),
+      api.statisticsByCategory(query),
+      api.statisticsByPeriod(query),
       api.listBudgetPlans(),
     ]);
     const budgetProgress = await Promise.all(
@@ -218,20 +236,45 @@ export async function loadHome(api: HomeApi, cache: HomeCache): Promise<HomeStat
       periodTotal,
       currency: me.currency,
       budgetProgress,
+      period,
     });
     cache.set({ data, syncedAt: new Date().toISOString() });
-    return periodTotal.total === 0 ? { status: "empty", tiles: data.tiles } : { status: "ready", ...data };
+    return periodTotal.total === 0
+      ? { status: "empty", tiles: data.tiles, period }
+      : { status: "ready", ...data };
   } catch (err) {
     if (err instanceof ForbiddenError) {
       return { status: "forbidden", tiles: HOME_TILES };
     }
     const cached = cache.get();
     if (cached) {
+      // Offline freezes the control at the cached period, not the one just
+      // requested — `cached.data.period` is whatever last loaded
+      // successfully (component doc's Disabled state).
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
     const message = err instanceof Error ? err.message : "Something went wrong.";
-    return { status: "error", message };
+    return { status: "error", message, period };
   }
+}
+
+export interface HomeController {
+  /** Resolves `null` when a newer `load` has started since this call — the
+   * caller must discard it rather than render (AC: a stale in-flight
+   * response is discarded, last tap wins). Ordered by call, not by
+   * resolution, so an out-of-order response can never win. */
+  load(period: PeriodValue): Promise<HomeState | null>;
+}
+
+export function createHomeController(api: HomeApi, cache: HomeCache): HomeController {
+  let requestId = 0;
+  return {
+    async load(period) {
+      const id = ++requestId;
+      const state = await loadHome(api, cache, period);
+      return id === requestId ? state : null;
+    },
+  };
 }
 
 // -- interaction -------------------------------------------------------------
@@ -286,24 +329,80 @@ function renderTiles(tiles: readonly HomeTile[], opts: { readOnly: boolean } = {
   return `<div class="tiles" data-testid="tiles">${items}</div>`;
 }
 
-function renderSkeleton(): string {
+// No-op stand-ins for the callbacks `PeriodSelectorProps` requires — the pure
+// render never invokes them, only `mount` (below) wires the real handlers.
+// `PeriodUnit`/`number`/`void` params are all assignable from a bare `() =>
+// {}` (extra caller-side args are simply unused), so one stub covers all
+// three.
+const noop = () => {};
+
+function renderPeriodControl(period: PeriodValue, now: Date, disabled: boolean): string {
+  return `<div class="period-selector-slot">${renderPeriodSelector({
+    value: period,
+    now,
+    disabled,
+    onUnitChange: noop,
+    onOffsetChange: noop,
+    onOpenPicker: noop,
+  })}</div>`;
+}
+
+function renderSkeleton(period: PeriodValue, now: Date): string {
   return `<div class="home-skeleton" data-testid="loading">
-    <div class="donut-skeleton"></div>
+    <div class="card chart-card">
+      ${renderPeriodControl(period, now, false)}
+      <div class="donut-skeleton"></div>
+    </div>
     <div class="legend-skeleton"></div>
     ${renderTiles(HOME_TILES)}
   </div>`;
 }
 
-function renderError(message: string): string {
+function renderError(message: string, period: PeriodValue, now: Date): string {
   return `<div class="home-error" data-testid="error">
-    <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <div class="card chart-card">
+      ${renderPeriodControl(period, now, false)}
+      <p>${escapeHtml(message)}</p>
+      <button type="button" data-action="retry">Try again</button>
+    </div>
   </div>`;
 }
 
-function renderEmpty(tiles: readonly HomeTile[]): string {
+// docs/ui/screens/01-home.md's Copy table — the empty state names the period
+// in force ("Nothing today"/"Nothing in August"), never a generic "no data".
+// Reuses `lib/period.ts::describe`'s already-tested label for every case that
+// isn't one of the two most-common, explicitly-worded day offsets.
+function describeEmptyPeriod(period: PeriodValue, now: Date): string {
+  if (period.unit === "day" && period.offset === 0) {
+    return "Nothing today";
+  }
+  if (period.unit === "day" && period.offset === -1) {
+    return "Nothing yesterday";
+  }
+  if (period.unit === "week" && period.offset === 0) {
+    return "Nothing this week";
+  }
+  if (period.unit === "week") {
+    return "Nothing that week";
+  }
+  const label = describePeriod(period, now);
+  switch (period.unit) {
+    case "day":
+      return `Nothing on ${label}`;
+    case "month":
+    case "year":
+      return `Nothing in ${label}`;
+    case "custom":
+      return `Nothing from ${label}`;
+  }
+}
+
+function renderEmpty(tiles: readonly HomeTile[], period: PeriodValue, now: Date): string {
   return `<div class="home-empty" data-testid="empty">
-    <p>No expenses yet — add your first.</p>
+    <div class="card chart-card">
+      ${renderPeriodControl(period, now, false)}
+      <p>${escapeHtml(describeEmptyPeriod(period, now))}</p>
+    </div>
     ${renderTiles(tiles)}
   </div>`;
 }
@@ -368,30 +467,36 @@ function renderOfflineBanner(lastSyncedAt: string | undefined): string {
   return `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(lastSyncedAt)}</div>`;
 }
 
-function renderReady(data: HomeData, lastSyncedAt: string | undefined): string {
+function renderReady(data: HomeData, lastSyncedAt: string | undefined, now: Date, disabled: boolean): string {
   return `<div class="home-ready" data-testid="ready">
     ${renderOfflineBanner(lastSyncedAt)}
-    ${renderDonut(data)}
+    <div class="card chart-card">
+      ${renderPeriodControl(data.period, now, disabled)}
+      ${renderDonut(data)}
+    </div>
     ${renderLegend(data.legend)}
     ${renderOverBudgetStrip(data.overBudget, data.currency)}
     ${renderTiles(data.tiles)}
   </div>`;
 }
 
-export function renderHome(state: HomeState): string {
+export function renderHome(state: HomeState, now: Date): string {
   switch (state.status) {
     case "loading":
-      return renderSkeleton();
+      return renderSkeleton(state.period, now);
     case "error":
-      return renderError(state.message);
+      return renderError(state.message, state.period, now);
     case "forbidden":
       return renderReadOnly(state.tiles);
     case "empty":
-      return renderEmpty(state.tiles);
+      return renderEmpty(state.tiles, state.period, now);
     case "ready":
-      return renderReady(state, undefined);
+      return renderReady(state, undefined, now, false);
     case "offline":
-      return renderReady(state, state.lastSyncedAt);
+      // Offline freezes the control at the cached period (webapp/CLAUDE.md's
+      // offline state + the component doc's Disabled variant) — `disabled`
+      // here both dims the control and short-circuits its taps.
+      return renderReady(state, state.lastSyncedAt, now, true);
   }
 }
 
@@ -402,13 +507,16 @@ export interface HomeHandlers {
   onRetry: () => void;
   onTileTap: (tile: HomeTile["id"]) => void;
   onSegmentTap: (target: { categoryId: Uuid | null; label: string }) => void;
+  onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
+  onOffsetChange: (offset: number) => void; // host clamps at 0
+  onOpenPicker: () => void; // "Period" tab / label tap — U1.8 wires the picker
 }
 
-export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandlers): void {
+export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandlers, now: Date): void {
   if (typeof document === "undefined") {
     return;
   }
-  root.innerHTML = renderHome(state);
+  root.innerHTML = renderHome(state, now);
 
   root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
 
@@ -429,5 +537,19 @@ export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandler
         }
       });
     });
+  }
+
+  if (state.status !== "forbidden") {
+    const slot = root.querySelector<HTMLElement>(".period-selector-slot");
+    if (slot) {
+      mountPeriodSelector(slot, {
+        value: state.period,
+        now,
+        disabled: state.status === "offline",
+        onUnitChange: handlers.onUnitChange,
+        onOffsetChange: handlers.onOffsetChange,
+        onOpenPicker: handlers.onOpenPicker,
+      });
+    }
   }
 }

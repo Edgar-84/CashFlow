@@ -42,6 +42,16 @@ body {
   overflow: hidden;
 }
 
+/* Wraps the period selector + whatever Home renders below it (donut,
+   skeleton, empty copy or error message) — screen 01's region 2, minus the
+   ranked-rows/Add-button geometry U1.6/U1.7 still own. `--card` padding
+   pairing already used elsewhere (design-system.md's spacing table); the
+   `.period-selector`'s own 12px margin-bottom (U1.4) is what separates it
+   from the content underneath. */
+.chart-card {
+  padding: 14px 12px;
+}
+
 /* -- donut ---------------------------------------------------------------- */
 
 .donut-wrap {
@@ -203,7 +213,6 @@ body {
 }
 
 .home-error button[data-action="retry"] {
-  align-self: flex-start;
   font: inherit;
   font-weight: 600;
   background: var(--ink);
@@ -211,7 +220,11 @@ body {
   border: 0;
   border-radius: 12px;
   padding: 10px 16px;
-  margin: 0 4px;
+  /* Sits inside `.chart-card` (U1.5) alongside the error text now, not a
+     direct child of the flex `gap:12px` container above — the 8px top
+     margin (design system's "inline gap") replaces the spacing that gap
+     used to provide between this button and the message. */
+  margin: 8px 4px 0;
   cursor: pointer;
 }
 

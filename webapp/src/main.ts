@@ -30,11 +30,12 @@ import {
 } from "./screens/expenses";
 import {
   applyHomeChrome,
+  createHomeController,
   createMemoryCache as createHomeCache,
-  loadHome,
   mount as mountHome,
   type HomeHandlers,
 } from "./screens/home";
+import { clampOffset, type PeriodValue } from "./lib/period";
 import {
   applyStatisticsChrome,
   createMemoryCache as createStatisticsCache,
@@ -45,12 +46,19 @@ import {
 } from "./screens/statistics";
 import type { Uuid } from "./api/types";
 
+const client = new ApiClient({ getInitData });
 const homeCache = createHomeCache();
+const homeController = createHomeController(client, homeCache);
 const addExpenseCache = createAddExpenseCache();
 const expensesCache = createExpensesCache();
 const budgetsCache = createBudgetsCache();
 const statisticsCache = createStatisticsCache();
-const client = new ApiClient({ getInitData });
+
+// Home's selected period. Module-level so it survives navigating to screen
+// 02 and back, and a retry (both just call `showHome`/`refreshHome` again,
+// same shape as `showStatistics`'s `monthsBack` closure argument) — it only
+// resets to the cold-open default when the app itself reboots.
+let homePeriod: PeriodValue = { unit: "month", offset: 0 };
 
 function getRoot(): HTMLElement | null {
   if (typeof document === "undefined") {
@@ -71,7 +79,7 @@ async function showHome(): Promise<void> {
 
   const handlers: HomeHandlers = {
     onRetry: () => {
-      void showHome();
+      void refreshHome(root, handlers);
     },
     onTileTap: (tile) => {
       if (tile === "add-expense") {
@@ -89,14 +97,37 @@ async function showHome(): Promise<void> {
     onSegmentTap: (target) => {
       void showExpenses(target.categoryId ? { categoryId: target.categoryId } : {});
     },
+    onUnitChange: (unit) => {
+      homePeriod = { unit, offset: 0 };
+      void refreshHome(root, handlers);
+    },
+    onOffsetChange: (offset) => {
+      homePeriod = { ...homePeriod, offset: clampOffset(offset) };
+      void refreshHome(root, handlers);
+    },
+    onOpenPicker: () => {
+      // TODO: U1.8 wires `components/date-range-picker.ts` here. Until then
+      // the "Period" tab and the label are visible but inert.
+    },
   };
 
-  applyHomeChrome({ status: "loading" }, () => void showAddExpense());
-  mountHome(root, { status: "loading" }, handlers);
+  await refreshHome(root, handlers);
+}
 
-  const state = await loadHome(client, homeCache);
+/** Fetches and (re)renders Home for `homePeriod`, reused by the cold open,
+ * every period-control tap, and retry — the one place `homeController`'s
+ * stale-response guard is honoured, so a fast double-tap never lets an
+ * earlier period's response overwrite a later one. */
+async function refreshHome(root: HTMLElement, handlers: HomeHandlers): Promise<void> {
+  applyHomeChrome({ status: "loading", period: homePeriod }, () => void showAddExpense());
+  mountHome(root, { status: "loading", period: homePeriod }, handlers, new Date());
+
+  const state = await homeController.load(homePeriod);
+  if (!state) {
+    return;
+  }
   applyHomeChrome(state, () => void showAddExpense());
-  mountHome(root, state, handlers);
+  mountHome(root, state, handlers, new Date());
 }
 
 async function showAddExpense(): Promise<void> {
