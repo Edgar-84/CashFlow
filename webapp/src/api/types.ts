@@ -91,6 +91,14 @@ export interface TagResponse {
   expense_count?: number | null;
 }
 
+export interface TagCreate {
+  name: string;
+}
+
+export interface TagUpdate {
+  name?: string;
+}
+
 export interface ExpenseResponse {
   id: Uuid;
   amount: number;

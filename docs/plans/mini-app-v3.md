@@ -635,7 +635,7 @@ touched** (D316) — it keeps its `months_back` chips.
       §4); an unused tag renders a count of 0 without looking like an error;
       all five states. Files: `screens/tags.ts`, `tests/tags.test.ts`,
       `main.ts`, `styles/app.css`. Model: sonnet.
-- [ ] **U2.5 Screen 07b — Tag create, rename, delete-or-hide** — U2.2 + U2.3
+- [x] **U2.5 Screen 07b — Tag create, rename, delete-or-hide** — U2.2 + U2.3
       condensed for tags (no colour, so one unit is enough).
       AC: create/rename round-trip; a tag used by expenses is hidden with the
       count named, and **its expenses keep the tag** (asserted through the
@@ -1375,6 +1375,27 @@ every unit below.
   on the grid (kebab/long-press) — matches the AC's "restores the row"
   wording even more literally, but introduces an interaction pattern nothing
   else in this app uses, for a unit budget that didn't call for it.
+- D340 (2026-08-06, U2.5 prep): `07b-tag-form.md` condenses `06b`+`06c` for
+  tags into **one file and one unit**, per the plan's own framing ("no
+  colour, so one unit is enough"), and drops two of 06b/06c's rules rather
+  than reinventing tag-specific equivalents: **no duplicate-name warning** —
+  `services/tag_service.py` already documents that `tags.name` carries no
+  per-account uniqueness at all (unlike categories, D19/D311), and the
+  approved U2.5 AC doesn't ask for one, so warning about a collision the
+  backend doesn't even track would be inventing a rule, not implementing one;
+  **no last-remaining-tag warning** — 06c's equivalent exists because
+  `expenses.category_id` is `NOT NULL` (deleting the last category strands
+  future expenses), but `expense_tags` is optional and multi-valued, so
+  deleting the last tag has no comparable consequence. Both are flagged
+  `[inferred]`/open in the spec's Open questions for the human to overrule.
+  The design doc's "three starters" empty-state suggestion
+  (`mini-app-ux.md` §4, deferred by `07-tags.md` to "this unit") is
+  **still not built** — the approved AC doesn't mention it, so building it
+  now would be scope the plan never signed off on; flagged as an open
+  question rather than decided unilaterally. Everything else mirrors 06b/06c
+  exactly, including reusing their `.cat-form*`/`.cat-delete-trigger`/
+  `.cat-delete-failed` CSS classes **verbatim** rather than duplicating them
+  under a `.tag-*` name, since none of them reference colour.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -2099,7 +2120,39 @@ every unit below.
   round 2 confirmed the fix and re-APPROVEd with no further findings.
   verify.sh green (636 backend + 461 webapp tests, typecheck/lint/build/
   secret-grep all pass).
-- Next: **U2.5** — Screen 07b, Tag create, rename, delete-or-hide.
+- Done: **U2.5** — Screen 07b, Tag create, rename, delete-or-hide. Started
+  with a fresh `ui-spec` pass (`docs/ui/screens/07b-tag-form.md`, new) since
+  none existed — condenses `06b-category-form.md` + `06c-category-delete.md`
+  for tags into one file (no colour picker; no duplicate-name warning; no
+  last-remaining-tag warning — see D340 for why). Implemented:
+  `api/types.ts` gained `TagCreate`/`TagUpdate` (mirroring
+  `CategoryCreate`/`CategoryUpdate` minus `color_slot`); `api/client.ts`
+  gained `createTag`/`updateTag`/`deleteTag` (mirroring the category trio);
+  `screens/tags.ts` gained the delete/hide pure helpers
+  (`tagDeleteOutcomeKind`, `tagDeleteTriggerLabel`, `tagDeleteConfirmMessage`,
+  `tagDeleteFailureMessage`, `applyTagDeleteOutcome`,
+  `revertTagDeleteOutcome`) and the full 07b form section (draft/controller/
+  chrome/presentation/mount — `TagFormDraft`, `createTagFormController`,
+  `applyTagFormChrome`, `wireTagFormBackButton`, `renderTagForm`,
+  `mountTagForm`), reusing `06b`/`06c`'s `.cat-form*`/`.cat-delete-trigger`/
+  `.cat-delete-failed` CSS classes verbatim (no new CSS); `main.ts` gained
+  `buildTagsHandlers`/`showTagForm`/`deleteTagAndUpdateCache`/
+  `renderTagsFromCache`, replacing 07a's two stub handlers, plus a
+  `"tag-form"` `activeScreen` value, same optimistic-patch-then-revert
+  pattern U2.3 established for categories. No backend changes needed —
+  `POST`/`PATCH`/`DELETE /tags` and the D302 archive rule already existed
+  end to end from U0.5, including an existing integration test
+  (`test_archiving_tag_preserves_expense_tags_rows`) that already covers the
+  plan's "its expenses keep the tag" AC at the repository level — this unit
+  added no duplicate of that. One review round (reviewer subagent): APPROVE,
+  with a WARN (this STATE note had prematurely claimed a completed review
+  before the review actually ran — fixed, this is that correction) and a NIT
+  (`deleteTagAndUpdateCache`'s `activeScreen !== "tags"` early-return lacked
+  the explanatory comment its category counterpart has — fixed). Both
+  addressed; no BLOCKERs. verify.sh green (636 backend + 507 webapp tests,
+  typecheck/lint/build/secret-grep all pass).
+- Next: **U3.1** — `components/category-picker.ts`, the 4-column grid for the
+  redesigned Add Expense screen (M3).
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
