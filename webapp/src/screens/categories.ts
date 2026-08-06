@@ -27,7 +27,7 @@
 
 import { assignCategoryColors, categorySlotCssVar, categorySlotName } from "../lib/category-colors";
 import { formatAmount } from "../lib/money";
-import { confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
+import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ApiError, ForbiddenError } from "../api/client";
 import type { CategoryResponse, CategoryTotal, Currency, Uuid } from "../api/types";
 
@@ -82,6 +82,87 @@ export function buildCategoriesData(input: {
   }
 
   return { currency: input.currency, active, archived };
+}
+
+// -- delete/hide (screen 06c, docs/ui/screens/06c-category-delete.md) -------
+// Pure copy/state helpers shared by 06a's failure banner and 06b's trigger +
+// confirm popup. The `DELETE /categories/{id}` call itself and the optimistic
+// navigation are orchestrated in main.ts, not here — the flow spans both
+// screens' state (06b's form triggers it, 06a's already-loaded list is what
+// gets patched), which a single screen's controller can't own cleanly.
+
+export type CategoryDeleteOutcomeKind = "deleted" | "archived";
+
+/** Zero expenses hard-deletes; any usage archives (D302). */
+export function categoryDeleteOutcomeKind(expenseCount: number): CategoryDeleteOutcomeKind {
+  return expenseCount > 0 ? "archived" : "deleted";
+}
+
+/** Region 5's own label previews the branch before the popup even opens
+ * (docs/ui/screens/06c-category-delete.md). */
+export function categoryDeleteTriggerLabel(expenseCount: number): string {
+  return expenseCount > 0 ? "Hide category" : "Delete category";
+}
+
+function expenseCountPhrase(expenseCount: number): string {
+  return expenseCount === 1 ? "1 expense keeps it for reports." : `${expenseCount} expenses keep it for reports.`;
+}
+
+/** The Telegram `showConfirm` message — matches `docs/design/mini-app-ux.md`
+ * §4's exact copy pattern ("Hide Groceries? 42 expenses keep it for
+ * reports" / "Delete Groceries?"), plus the last-remaining-active-category
+ * warning appended regardless of which branch applies. */
+export function categoryDeleteConfirmMessage(input: { name: string; expenseCount: number; isLastActive: boolean }): string {
+  const base =
+    input.expenseCount > 0
+      ? `Hide ${input.name}? ${expenseCountPhrase(input.expenseCount)}`
+      : `Delete ${input.name}?`;
+  const suffix = input.isLastActive
+    ? " This is your only category — new expenses will have nowhere to go."
+    : "";
+  return base + suffix;
+}
+
+/** The retryable-failure banner's message on 06a — names the category and
+ * which action failed, never a status code. The 403 case uses
+ * `error.readonly` instead (see main.ts's delete-outcome handling). */
+export function categoryDeleteFailureMessage(name: string, expenseCount: number): string {
+  return expenseCount > 0 ? `Couldn't hide ${name}.` : `Couldn't delete ${name}.`;
+}
+
+/** Optimistic forward transform for a confirmed delete/hide: moves the row
+ * out of `active` and, for an archive outcome, into `archived`. Pure — the
+ * caller (main.ts) keeps the pre-mutation `CategoriesData` around to restore
+ * on a failed `DELETE` rather than computing an inverse here. A `categoryId`
+ * not found among `active` is a no-op (defensive; should not happen since
+ * the trigger only exists for an already-loaded active row). */
+export function applyCategoryDeleteOutcome(
+  data: CategoriesData,
+  categoryId: Uuid,
+  outcome: CategoryDeleteOutcomeKind,
+): CategoriesData {
+  const row = data.active.find((r) => r.id === categoryId);
+  if (!row) {
+    return data;
+  }
+  const active = data.active.filter((r) => r.id !== categoryId);
+  return outcome === "deleted" ? { ...data, active } : { ...data, active, archived: [...data.archived, row] };
+}
+
+/** Inverse of `applyCategoryDeleteOutcome`, for a failed `DELETE` — reinserts
+ * `row` into `active` and, for a reverted archive, removes it from
+ * `archived`. Deliberately applied to whatever `data` the caller passes
+ * (main.ts passes the **current** cache, not a snapshot captured before the
+ * attempt) so it composes correctly if another delete/hide completed on a
+ * different category in the meantime — a whole-snapshot revert would
+ * silently undo that unrelated change too. */
+export function revertCategoryDeleteOutcome(
+  data: CategoriesData,
+  row: CategoryRow,
+  outcome: CategoryDeleteOutcomeKind,
+): CategoriesData {
+  const archived = outcome === "archived" ? data.archived.filter((r) => r.id !== row.id) : data.archived;
+  return { ...data, active: [...data.active, row], archived };
 }
 
 export interface CategoriesApi {
@@ -235,10 +316,27 @@ function renderArchivedSection(archived: CategoryRow[], expanded: boolean): stri
   </div>`;
 }
 
+/** A pending delete/hide failure to show above the grid (06c) — `null` when
+ * none is in flight. `retryable` is `false` for a 403 (no point retrying the
+ * same request; the message is `error.readonly` instead in that case). */
+export interface CategoryDeleteFailure {
+  categoryId: Uuid;
+  message: string;
+  retryable: boolean;
+}
+
 export interface CategoriesViewState {
   data: CategoriesData;
   lastSyncedAt?: string;
   archivedExpanded: boolean;
+  deleteFailure?: CategoryDeleteFailure | null;
+}
+
+function renderDeleteFailureBanner(failure: CategoryDeleteFailure): string {
+  return `<div class="cat-delete-failed" data-testid="cat-delete-failed" aria-live="polite">
+    <p>${escapeHtml(failure.message)}</p>
+    ${failure.retryable ? `<button type="button" data-action="retry-delete" data-category-id="${failure.categoryId}">Try again</button>` : ""}
+  </div>`;
 }
 
 // `CategoriesData.currency` is not rendered here — captions show only the
@@ -247,6 +345,7 @@ export interface CategoriesViewState {
 export function renderCategoriesView(state: CategoriesViewState): string {
   const { active, archived } = state.data;
   return `<div class="categories-ready" data-testid="ready">
+    ${state.deleteFailure ? renderDeleteFailureBanner(state.deleteFailure) : ""}
     ${state.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(state.lastSyncedAt)}</div>` : ""}
     ${active.length === 0 ? `<p class="categories-empty-note" data-testid="empty-note">No categories yet</p>` : ""}
     ${renderGrid(active)}
@@ -305,7 +404,11 @@ export function nextGridFocusIndex(cellCount: number, from: number, key: string)
   }
 }
 
-export function renderCategories(state: CategoriesState, archivedExpanded = false): string {
+export function renderCategories(
+  state: CategoriesState,
+  archivedExpanded = false,
+  deleteFailure: CategoryDeleteFailure | null = null,
+): string {
   switch (state.status) {
     case "loading":
       return renderSkeleton();
@@ -314,9 +417,9 @@ export function renderCategories(state: CategoriesState, archivedExpanded = fals
     case "forbidden":
       return renderForbidden();
     case "ready":
-      return renderCategoriesView({ data: state, archivedExpanded });
+      return renderCategoriesView({ data: state, archivedExpanded, deleteFailure });
     case "offline":
-      return renderCategoriesView({ data: state, lastSyncedAt: state.lastSyncedAt, archivedExpanded });
+      return renderCategoriesView({ data: state, lastSyncedAt: state.lastSyncedAt, archivedExpanded, deleteFailure });
   }
 }
 
@@ -330,9 +433,21 @@ export interface CategoriesHandlers {
   onSelectCategory: (id: Uuid) => void;
   /** Opens the 06b form empty (the "Add category" cell tap). */
   onAddCategory: () => void;
+  /** "Try again" on the delete-failure banner (06c) — re-issues the same
+   * `DELETE /categories/{id}`, never a fresh `GET /categories`. */
+  onRetryDelete: (categoryId: Uuid) => void;
 }
 
-export function mount(root: HTMLElement, state: CategoriesState, handlers: CategoriesHandlers): void {
+/** `deleteFailure` is a snapshot from main.ts (the outcome of a delete/hide
+ * attempted from 06b), not local UI state — unlike `archivedExpanded`, it
+ * originates from a cross-screen event, so the caller re-mounts with a new
+ * value rather than this function owning it. */
+export function mount(
+  root: HTMLElement,
+  state: CategoriesState,
+  handlers: CategoriesHandlers,
+  deleteFailure: CategoryDeleteFailure | null = null,
+): void {
   if (typeof document === "undefined") {
     return;
   }
@@ -340,7 +455,7 @@ export function mount(root: HTMLElement, state: CategoriesState, handlers: Categ
   let archivedExpanded = false;
 
   const render = (): void => {
-    root.innerHTML = renderCategories(state, archivedExpanded);
+    root.innerHTML = renderCategories(state, archivedExpanded, deleteFailure);
     wire();
   };
 
@@ -351,6 +466,11 @@ export function mount(root: HTMLElement, state: CategoriesState, handlers: Categ
       archivedExpanded = !archivedExpanded;
       render();
     });
+    const retryDeleteButton = root.querySelector<HTMLElement>('[data-action="retry-delete"]');
+    const retryDeleteId = retryDeleteButton?.getAttribute("data-category-id");
+    if (retryDeleteId) {
+      retryDeleteButton?.addEventListener("click", () => handlers.onRetryDelete(retryDeleteId));
+    }
     // Archived-row tap stays a stub — U2.3 wires the delete-or-hide
     // destination. Arrow-key navigation between grid cells is wired
     // regardless — it's a pure focus move, independent of what a tap does.
@@ -583,6 +703,10 @@ export interface CategoryFormViewState {
    * never shown immediately on open (docs/ui/screens/06b-category-form.md). */
   nameInteracted: boolean;
   submitError?: string | null;
+  /** All-time expense count, from the row this form was opened for — decides
+   * region 5's label and the confirm-popup branch (06c). Irrelevant in create
+   * mode (`draft.id === null`), where region 5 doesn't render. */
+  expenseCount: number;
 }
 
 export function renderCategoryForm(state: CategoryFormViewState): string {
@@ -606,7 +730,13 @@ export function renderCategoryForm(state: CategoryFormViewState): string {
       <div class="cat-swatch-grid" role="radiogroup" aria-label="Colour" data-testid="cat-swatch-grid">${swatches}</div>
     </div>
     ${state.submitError ? `<p class="submit-error" data-testid="cat-form-submit-error">${escapeHtml(state.submitError)}</p>` : ""}
+    ${draft.id ? renderDeleteTrigger(state.expenseCount) : ""}
   </div>`;
+}
+
+/** Region 5 (06c) — edit mode only, wired in `mountCategoryForm`. */
+function renderDeleteTrigger(expenseCount: number): string {
+  return `<button type="button" class="cat-delete-trigger" data-testid="cat-delete-trigger" data-action="delete-category">${escapeHtml(categoryDeleteTriggerLabel(expenseCount))}</button>`;
 }
 
 // -- form mount (DOM glue; not meaningfully unit-testable under Node, same
@@ -615,6 +745,12 @@ export function renderCategoryForm(state: CategoryFormViewState): string {
 export interface CategoryFormHandlers {
   onClose: () => void;
   onSaved: () => void;
+  /** Fires once the user has confirmed Telegram's delete/hide popup (06c).
+   * main.ts owns the actual `DELETE` call and the optimistic navigation back
+   * to 06a — this handler is just the signal that the confirmation happened,
+   * since the form itself never issues that request (see the "-- delete/hide
+   * --" section above). */
+  onDelete: (id: Uuid) => void;
 }
 
 export function mountCategoryForm(
@@ -624,6 +760,7 @@ export function mountCategoryForm(
   activeSiblings: { id: Uuid; name: string }[],
   usedSlots: Set<number>,
   handlers: CategoryFormHandlers,
+  expenseCount = 0,
 ): void {
   if (typeof document === "undefined") {
     return;
@@ -640,6 +777,7 @@ export function mountCategoryForm(
       usedSlots,
       nameInteracted,
       submitError,
+      expenseCount,
     });
     wire();
     applyCategoryFormChrome(controller.getDraft(), original);
@@ -687,6 +825,25 @@ export function mountCategoryForm(
       }
       e.preventDefault();
       swatches[nextIndex]?.focus();
+    });
+
+    root.querySelector('[data-action="delete-category"]')?.addEventListener("click", () => {
+      const id = original.id;
+      if (!id) {
+        return;
+      }
+      const message = categoryDeleteConfirmMessage({
+        name: original.name,
+        expenseCount,
+        isLastActive: activeSiblings.length === 0,
+      });
+      void (async () => {
+        const confirmed = await confirmAction(message);
+        if (confirmed) {
+          haptics.impact("medium");
+          handlers.onDelete(id);
+        }
+      })();
     });
   }
 

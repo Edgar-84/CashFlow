@@ -4,8 +4,13 @@ import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { CategoryResponse, CategoryTotal } from "../src/api/types";
 import {
   applyCategoriesChrome,
+  applyCategoryDeleteOutcome,
   applyCategoryFormChrome,
   buildCategoriesData,
+  categoryDeleteConfirmMessage,
+  categoryDeleteFailureMessage,
+  categoryDeleteOutcomeKind,
+  categoryDeleteTriggerLabel,
   categoryDuplicateWarning,
   categoryFormDraftFromRow,
   categoryFormMainButtonEnabled,
@@ -20,9 +25,11 @@ import {
   renderCategories,
   renderCategoriesView,
   renderCategoryForm,
+  revertCategoryDeleteOutcome,
   wireCategoryFormBackButton,
   type CategoriesApi,
   type CategoriesCache,
+  type CategoriesData,
   type CategoryFormApi,
 } from "../src/screens/categories";
 import type { TelegramWebApp } from "../src/lib/telegram";
@@ -93,6 +100,128 @@ describe("buildCategoriesData", () => {
     const data = buildCategoriesData({ categories: mixed, monthTotals: [], currency: "EUR" });
     expect(data.archived[0]).toMatchObject({ colorVar: "var(--category-slot-1)" });
     expect(data.active[0]).toMatchObject({ colorVar: "var(--category-slot-2)" });
+  });
+});
+
+// -- delete/hide (screen 06c) --------------------------------------------------
+
+describe("categoryDeleteOutcomeKind", () => {
+  it("is 'deleted' for zero expenses and 'archived' for any usage", () => {
+    expect(categoryDeleteOutcomeKind(0)).toBe("deleted");
+    expect(categoryDeleteOutcomeKind(1)).toBe("archived");
+    expect(categoryDeleteOutcomeKind(42)).toBe("archived");
+  });
+});
+
+describe("categoryDeleteTriggerLabel", () => {
+  it("reads 'Delete category' with zero expenses, 'Hide category' otherwise", () => {
+    expect(categoryDeleteTriggerLabel(0)).toBe("Delete category");
+    expect(categoryDeleteTriggerLabel(1)).toBe("Hide category");
+    expect(categoryDeleteTriggerLabel(12)).toBe("Hide category");
+  });
+});
+
+describe("categoryDeleteConfirmMessage", () => {
+  it("names a plain delete for zero expenses", () => {
+    expect(categoryDeleteConfirmMessage({ name: "Groceries", expenseCount: 0, isLastActive: false })).toBe(
+      "Delete Groceries?",
+    );
+  });
+
+  it("uses singular phrasing for exactly one expense", () => {
+    expect(categoryDeleteConfirmMessage({ name: "Groceries", expenseCount: 1, isLastActive: false })).toBe(
+      "Hide Groceries? 1 expense keeps it for reports.",
+    );
+  });
+
+  it("uses plural phrasing for more than one expense, matching mini-app-ux.md's example verbatim", () => {
+    expect(categoryDeleteConfirmMessage({ name: "Groceries", expenseCount: 42, isLastActive: false })).toBe(
+      "Hide Groceries? 42 expenses keep it for reports.",
+    );
+  });
+
+  it("appends the last-remaining-category warning regardless of branch", () => {
+    expect(categoryDeleteConfirmMessage({ name: "Groceries", expenseCount: 0, isLastActive: true })).toBe(
+      "Delete Groceries? This is your only category — new expenses will have nowhere to go.",
+    );
+    expect(categoryDeleteConfirmMessage({ name: "Groceries", expenseCount: 3, isLastActive: true })).toBe(
+      "Hide Groceries? 3 expenses keep it for reports. This is your only category — new expenses will have nowhere to go.",
+    );
+  });
+});
+
+describe("categoryDeleteFailureMessage", () => {
+  it("names the category and the branch that failed", () => {
+    expect(categoryDeleteFailureMessage("Groceries", 0)).toBe("Couldn't delete Groceries.");
+    expect(categoryDeleteFailureMessage("Groceries", 5)).toBe("Couldn't hide Groceries.");
+  });
+});
+
+describe("applyCategoryDeleteOutcome", () => {
+  const data: CategoriesData = {
+    currency: "EUR",
+    active: [
+      { id: "cat-groceries", name: "Groceries", colorVar: "var(--category-slot-1)", colorSlot: 1, expenseCount: 12, monthTotalMinor: 34000 },
+      { id: "cat-transport", name: "Transport", colorVar: "var(--category-slot-2)", colorSlot: 2, expenseCount: 0, monthTotalMinor: 0 },
+    ],
+    archived: [],
+  };
+
+  it("removes the row from active for a 'deleted' outcome, without adding it to archived", () => {
+    const next = applyCategoryDeleteOutcome(data, "cat-transport", "deleted");
+    expect(next.active.map((r) => r.id)).toEqual(["cat-groceries"]);
+    expect(next.archived).toEqual([]);
+  });
+
+  it("moves the row from active to archived for an 'archived' outcome", () => {
+    const next = applyCategoryDeleteOutcome(data, "cat-groceries", "archived");
+    expect(next.active.map((r) => r.id)).toEqual(["cat-transport"]);
+    expect(next.archived.map((r) => r.id)).toEqual(["cat-groceries"]);
+  });
+
+  it("is a no-op when the id isn't among the active rows", () => {
+    expect(applyCategoryDeleteOutcome(data, "cat-missing", "deleted")).toEqual(data);
+  });
+
+  it("never mutates the input data (pure)", () => {
+    const before = JSON.parse(JSON.stringify(data));
+    applyCategoryDeleteOutcome(data, "cat-groceries", "archived");
+    expect(data).toEqual(before);
+  });
+});
+
+describe("revertCategoryDeleteOutcome", () => {
+  const groceries = { id: "cat-groceries", name: "Groceries", colorVar: "var(--category-slot-1)", colorSlot: 1, expenseCount: 12, monthTotalMinor: 34000 };
+
+  it("reinserts a hard-deleted row back into active", () => {
+    const data: CategoriesData = { currency: "EUR", active: [], archived: [] };
+    const next = revertCategoryDeleteOutcome(data, groceries, "deleted");
+    expect(next.active).toEqual([groceries]);
+    expect(next.archived).toEqual([]);
+  });
+
+  it("moves an archived row back to active, removing it from archived", () => {
+    const data: CategoriesData = { currency: "EUR", active: [], archived: [groceries] };
+    const next = revertCategoryDeleteOutcome(data, groceries, "archived");
+    expect(next.active).toEqual([groceries]);
+    expect(next.archived).toEqual([]);
+  });
+
+  it("composes on top of an unrelated concurrent change instead of clobbering it", () => {
+    // A second category was hidden while this one's delete was still in
+    // flight — the revert must not undo that unrelated change.
+    const transport = { id: "cat-transport", name: "Transport", colorVar: "var(--category-slot-2)", colorSlot: 2, expenseCount: 0, monthTotalMinor: 0 };
+    const dataAfterUnrelatedHide: CategoriesData = { currency: "EUR", active: [], archived: [transport] };
+    const next = revertCategoryDeleteOutcome(dataAfterUnrelatedHide, groceries, "deleted");
+    expect(next.active).toEqual([groceries]);
+    expect(next.archived).toEqual([transport]);
+  });
+
+  it("never mutates the input data (pure)", () => {
+    const data: CategoriesData = { currency: "EUR", active: [], archived: [groceries] };
+    const before = JSON.parse(JSON.stringify(data));
+    revertCategoryDeleteOutcome(data, groceries, "archived");
+    expect(data).toEqual(before);
   });
 });
 
@@ -258,6 +387,37 @@ describe("renderCategories", () => {
     const html = renderCategories({ status: "offline", lastSyncedAt: "2026-08-02T09:00:00Z", ...data });
     expect(html).toContain('data-testid="offline"');
     expect(html).toContain("2026-08-02T09:00:00Z");
+  });
+
+  // -- delete-failure banner (screen 06c) --------------------------------
+
+  it("renders a retryable delete-failure banner with a Try again action", () => {
+    const data = buildCategoriesData({ categories: CATEGORIES, monthTotals: [], currency: "EUR" });
+    const html = renderCategories(
+      { status: "ready", ...data },
+      false,
+      { categoryId: "cat-groceries", message: "Couldn't delete Groceries.", retryable: true },
+    );
+    expect(html).toContain('data-testid="cat-delete-failed"');
+    expect(html).toContain("Couldn't delete Groceries.");
+    expect(html).toContain('data-action="retry-delete" data-category-id="cat-groceries"');
+  });
+
+  it("omits the Try again action for a non-retryable (403) delete failure", () => {
+    const data = buildCategoriesData({ categories: CATEGORIES, monthTotals: [], currency: "EUR" });
+    const html = renderCategories(
+      { status: "ready", ...data },
+      false,
+      { categoryId: "cat-groceries", message: "You have read-only access to this account.", retryable: false },
+    );
+    expect(html).toContain("read-only access");
+    expect(html).not.toContain('data-action="retry-delete"');
+  });
+
+  it("shows no delete-failure banner when none is passed", () => {
+    const data = buildCategoriesData({ categories: CATEGORIES, monthTotals: [], currency: "EUR" });
+    const html = renderCategories({ status: "ready", ...data });
+    expect(html).not.toContain('data-testid="cat-delete-failed"');
   });
 });
 
@@ -558,6 +718,7 @@ describe("renderCategoryForm", () => {
     usedSlots: new Set<number>([1]),
     nameInteracted: false,
     submitError: null,
+    expenseCount: 0,
   };
 
   it("renders 12 swatch cells, none checked, on an empty draft", () => {
@@ -609,6 +770,33 @@ describe("renderCategoryForm", () => {
   it("pre-fills the name input's value from the draft", () => {
     const html = renderCategoryForm({ ...baseState, draft: { ...baseState.draft, name: "Food" } });
     expect(html).toContain('value="Food"');
+  });
+
+  // -- region 5: delete/hide trigger (screen 06c) ------------------------
+
+  it("shows no delete trigger in create mode (draft.id === null)", () => {
+    const html = renderCategoryForm(baseState);
+    expect(html).not.toContain('data-testid="cat-delete-trigger"');
+  });
+
+  it("shows 'Delete category' in edit mode with zero expenses", () => {
+    const html = renderCategoryForm({
+      ...baseState,
+      draft: { id: "cat-1", name: "Groceries", colorSlot: 1 },
+      expenseCount: 0,
+    });
+    expect(html).toContain('data-testid="cat-delete-trigger"');
+    expect(html).toContain(">Delete category<");
+  });
+
+  it("shows 'Hide category' in edit mode when the category has expenses", () => {
+    const html = renderCategoryForm({
+      ...baseState,
+      draft: { id: "cat-1", name: "Groceries", colorSlot: 1 },
+      expenseCount: 12,
+    });
+    expect(html).toContain(">Hide category<");
+    expect(html).not.toContain(">Delete category<");
   });
 });
 

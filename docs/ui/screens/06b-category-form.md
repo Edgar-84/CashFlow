@@ -53,6 +53,7 @@ the scroll area — matches `02-add-expense.md`'s pattern exactly.
 | 2 | Name error / duplicate warning | one line, appears directly under the field, `4px` above it collapses to 0 height when neither is showing (no layout jump when it appears — see Edge cases) |
 | 3 | **Colour** | label "Colour" 12px `--ink-secondary`, `20px` above; 4-column grid of 12 swatches, 12px column gap, 16px row gap (`category-picker.md` values) |
 | 4 | Submit error banner | only after a failed Save; `.submit-error`-style line, `12px` above where MainButton sits |
+| 5 | **Delete action** (edit mode only, U2.3) | "Delete category" / "Hide category" text trigger, Row title role (13.5px/600), `--status-red`, spaced by the same `20px` gap as every other region in this form; opens the delete-or-hide flow — see `06c-category-delete.md` |
 
 `96px` bottom padding to clear MainButton (matches every scrollable screen
 with a MainButton, e.g. `02-add-expense.md` region 6).
@@ -259,3 +260,10 @@ already exists.
       cases; reserved-height vs shift-on-appear is a real visual choice, not
       just an implementation detail. Not blocking — either is easy to change
       after seeing it on a real device.
+
+## Addendum (U2.3, 2026-08-06)
+Region 5 (Delete action) and its full behaviour — the confirmation popup, the
+optimistic update on `06-categories.md`, and the failure/403 handling — are
+specified in `06c-category-delete.md`, not repeated here. This file's Save
+flow (regions 1–4, States, MainButton) is unchanged by that addition; the two
+actions share the form but not a code path.

@@ -100,8 +100,9 @@ until a category is chosen. On success: haptic, close to Home, donut redrawn.
   tested. Never hardcode a background.
 - **Colour belongs to data.** Chrome is ink; the only saturated colour on screen
   is a spending category, assigned from the fixed slot order and never cycled.
-  Status red is reserved for over-budget and always ships with an icon and a
-  word.
+  Status red is reserved for over-budget (always with an icon and a word) and
+  destructive text actions (e.g. screen 06's "Delete/Hide category", U2.3) —
+  nowhere else.
 - **Category colour comes from the server** (D301, supersedes D206).
   `categories.color_slot` is authoritative; `lib/category-colors.ts` reads it
   directly and never recomputes a colour that's already set, so deleting an

@@ -210,7 +210,8 @@ export class ApiClient {
     return this.request<void>("DELETE", `/expenses/${id}`);
   }
 
-  // -- categories (create/rename/recolour, U2.2; tags stay list-only, D204) -
+  // -- categories (create/rename/recolour U2.2, delete-or-hide U2.3; tags
+  //    stay list-only, D204) --------------------------------------------
 
   listCategories(opts: { includeUsage?: boolean; includeArchived?: boolean } = {}): Promise<CategoryResponse[]> {
     return this.request<CategoryResponse[]>("GET", "/categories", {
@@ -227,6 +228,10 @@ export class ApiClient {
 
   updateCategory(id: Uuid, data: CategoryUpdate): Promise<CategoryResponse> {
     return this.request<CategoryResponse>("PATCH", `/categories/${id}`, { json: data });
+  }
+
+  deleteCategory(id: Uuid): Promise<void> {
+    return this.request<void>("DELETE", `/categories/${id}`);
   }
 
   listTags(): Promise<TagResponse[]> {

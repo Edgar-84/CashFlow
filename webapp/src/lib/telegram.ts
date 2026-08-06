@@ -136,8 +136,8 @@ export function setBackButtonHandler(handler: (() => void) | null): void {
 /** Wraps Telegram's own confirm popup — never a custom modal, per
  * webapp/CLAUDE.md. Falls back to the browser's native `confirm()` outside
  * Telegram (e.g. `pnpm dev` in a plain tab), or resolves `true` when neither
- * is available, so an add-expense-style discard flow never gets stuck. */
-export function confirmDiscard(message: string): Promise<boolean> {
+ * is available, so a confirm flow never gets stuck. */
+function showTelegramConfirm(message: string): Promise<boolean> {
   const webApp = getWebApp();
   if (webApp) {
     return new Promise((resolve) => webApp.showConfirm(message, resolve));
@@ -146,6 +146,19 @@ export function confirmDiscard(message: string): Promise<boolean> {
     return Promise.resolve(window.confirm(message));
   }
   return Promise.resolve(true);
+}
+
+/** Discard-a-draft confirmation (add-expense/category-form BackButton). */
+export function confirmDiscard(message: string): Promise<boolean> {
+  return showTelegramConfirm(message);
+}
+
+/** Any other destructive-action confirmation (category/tag delete-or-hide,
+ * docs/ui/screens/06c-category-delete.md) — same primitive as
+ * `confirmDiscard`, named for its own call sites rather than reused under
+ * the "discard" name. */
+export function confirmAction(message: string): Promise<boolean> {
+  return showTelegramConfirm(message);
 }
 
 export const haptics = {

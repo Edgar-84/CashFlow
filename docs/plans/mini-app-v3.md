@@ -615,7 +615,7 @@ touched** (D316) — it keeps its `months_back` chips.
       draft; double submit issues exactly one write.
       Files: `screens/categories.ts`, `tests/categories.test.ts`,
       `api/client.ts`(if needed), `styles/app.css`. Model: sonnet.
-- [ ] **U2.3 Screen 06c — Delete or hide** — the D302 rule made legible.
+- [x] **U2.3 Screen 06c — Delete or hide** — the D302 rule made legible.
       AC: for a category with zero expenses the confirm popup says it will be
       deleted; for one with expenses it says it will be **hidden** and names
       the number of past expenses that keep it ("42 expenses keep it for
@@ -1343,6 +1343,38 @@ every unit below.
   identity channel (dot + name, always). Full all-pairs floor clearance
   across all 12 slots was tried and found infeasible (matches the skill's own
   documented finding that even 8 hues can't clear all-pairs).
+- D339 (2026-08-06, HUMAN, U2.3 prep): the delete-or-hide trigger for a
+  category lives at the **bottom of `06b-category-form.md`'s edit mode**
+  (a "Delete category"/"Hide category" text link, `--status-red`), not as a
+  new per-cell affordance on `06-categories.md`'s grid — reuses that form's
+  already-loaded `expenseCount`/`activeSiblings` and the placement
+  `mini-app-ux.md` §4 already names for screen 07's tags. The row's
+  move-to-archived/disappearance on `06-categories.md` is **optimistic**:
+  confirming the popup patches `categoriesCache` and re-renders the list
+  immediately, before the `DELETE` resolves, firing the request in the
+  background; a failure reverts the cache and re-shows the row with a banner
+  — **revised during review** (reviewer subagent, first pass) to a
+  navigation-aware, composable form: `main.ts` tracks which screen is
+  currently on (`activeScreen`, set at the top of every `showX`), so a late
+  failure only re-renders Categories if the user is still there — otherwise
+  it silently corrects the cache and leaves whatever screen they've since
+  moved to alone; and the revert itself (`revertCategoryDeleteOutcome`,
+  `screens/categories.ts`) is a targeted patch applied to the cache's
+  *current* contents at failure-time, not a snapshot from before the
+  attempt, so it can't clobber an unrelated delete/hide that completed on a
+  different category in the meantime. This is a deliberate divergence from
+  U2.2's own Save flow, which navigates
+  back and **re-fetches** — the two actions on the same form now behave
+  differently on purpose, because the plan's AC ("a failure restores the
+  row") only makes sense if the row was already visibly moved by the time a
+  failure can occur. New `docs/ui/screens/06c-category-delete.md`; addendum
+  to `06b-category-form.md` (region 5); `design-system.md`'s `--status-red`
+  Colour-table entry widened from "Over-budget only" to also cover
+  destructive text actions, matching the pre-existing (undocumented)
+  `expense-detail.ts` `.danger` precedent. Rejected: a new per-cell control
+  on the grid (kebab/long-press) — matches the AC's "restores the row"
+  wording even more literally, but introduces an interaction pattern nothing
+  else in this app uses, for a unit budget that didn't call for it.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -2003,10 +2035,46 @@ every unit below.
   reveals the inline error instead, matching the AC's "rejected inline,
   never a popup". verify.sh green (636 backend + 416 webapp tests,
   typecheck/lint/build/secret-grep all pass).
-- Next: **U2.3** — Screen 06c, Delete or hide (the D302 rule made legible).
-  Needs its own `ui-spec` pass first — no spec exists yet for the
-  confirm-popup copy/behaviour split (delete vs hide). Start with `/clear`,
-  then `/unit U2.3 docs/plans/mini-app-v3.md`.
+- Done: **U2.3** — Screen 06c, Delete or hide. Started with a fresh `ui-spec`
+  pass (`docs/ui/screens/06c-category-delete.md`, new) since none existed for
+  the confirm-popup copy/behaviour split — see D339 for the decisions that
+  pass settled (trigger placement, optimistic update, and the two
+  review-driven revisions to the optimistic path). Implemented:
+  `lib/telegram.ts` gained `confirmAction` (factored out of `confirmDiscard`'s
+  existing `showTelegramConfirm` primitive); `api/client.ts` gained
+  `deleteCategory`; `screens/categories.ts` gained the pure delete/hide
+  helpers (`categoryDeleteOutcomeKind`, `categoryDeleteTriggerLabel`,
+  `categoryDeleteConfirmMessage`, `categoryDeleteFailureMessage`,
+  `applyCategoryDeleteOutcome`, `revertCategoryDeleteOutcome`), 06b's region 5
+  trigger (edit mode only), and 06a's delete-failure banner +
+  `onRetryDelete` handler; `main.ts` gained
+  `deleteCategoryAndUpdateCache`/`renderCategoriesFromCache`/
+  `buildCategoriesHandlers`, plus an `activeScreen` tracker (set at the top
+  of every `showX`), which patch `categoriesCache` and re-render 06a with
+  **no** `GET /categories` replay, reverting *just the affected row* against
+  the cache's current contents (not a stale snapshot) and showing a
+  named-failure banner — but only if the user is still on Categories when
+  the background `DELETE` settles; otherwise the cache is corrected silently
+  and whatever screen they've moved to is left alone. 403 shows the
+  read-only message instead, with no retry.
+  Two review rounds: round 1 found a BLOCKER (a failed background delete
+  used to force-navigate the user back to Categories even after they'd moved
+  to a different screen) and two WARNs (whole-snapshot revert could clobber
+  a concurrent unrelated delete; a stale cached `expense_count` can
+  mispredict delete-vs-archive in a narrow multi-user race — documented as
+  an accepted limitation in `06c-category-delete.md`'s Edge cases rather
+  than fixed, since fixing it would require the exact full-reload the AC
+  says to avoid); both the BLOCKER and the clobbering WARN were fixed as
+  above. Round 2 (APPROVE) found two more WARNs, both fixed: a `13px`
+  trigger font-size not in `design-system.md`'s Typography table (now reuses
+  the existing **Row title** role, 13.5px/600/−0.01em, both this file and
+  `06c-category-delete.md`/`06b-category-form.md` updated to match); this
+  STATE/D339 entry itself hadn't been refreshed after round 1's fixes (this
+  paragraph is that refresh). `design-system.md`'s `--status-red` entry and
+  `webapp/CLAUDE.md`'s matching rule both widened per D339. verify.sh green
+  (636 backend + 437 webapp tests, typecheck/lint/build/secret-grep all
+  pass).
+- Next: **U2.4** — Screen 07a, Tags list (mirror of U2.1 without colour).
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
