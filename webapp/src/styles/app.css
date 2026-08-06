@@ -1514,6 +1514,112 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* -- category picker (U3.1, docs/ui/components/category-picker.md) ---------
+   4-column grid, same swatch/gap geometry `.cat-grid` already established
+   (06a's screen-level grid predates this component and cites it in its own
+   comment). `.cp-radiogroup` is `display: contents` so its `role="radiogroup"`
+   children lay out as direct grid items alongside the sibling "More" button,
+   which must stay outside the radiogroup per the component doc's
+   Accessibility section. */
+.cp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  column-gap: 12px;
+  row-gap: 16px;
+}
+
+.cp-radiogroup {
+  display: contents;
+}
+
+.cp-label {
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.cp-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cp-swatch {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.cp-name {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink);
+  text-align: center;
+  /* Fixed two-line height regardless of actual length, so neighbouring
+     cells stay aligned even when names wrap differently. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 29px;
+}
+
+/* Selection is shape + weight, never colour alone (component doc's States
+   section) — no transition on border-radius, so `prefers-reduced-motion`'s
+   "instant, no morph" requirement holds by default, not as a special case. */
+.cp-cell.selected .cp-swatch {
+  border-radius: 12px;
+}
+
+.cp-cell.selected .cp-name {
+  font-weight: 600;
+}
+
+.cp-cell:active .cp-swatch {
+  opacity: 0.7;
+}
+
+.cp-cell:disabled {
+  cursor: default;
+}
+
+.cp-disabled .cp-cell {
+  opacity: 0.5;
+}
+
+.cp-more-swatch {
+  background: var(--separator);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-secondary);
+}
+
+.cp-empty {
+  margin: 12px 4px 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+.cp-cell:focus-visible {
+  outline: none;
+}
+
+/* --ink, not the .cat-cell:focus-visible --category-slot-1 convention: a
+   fixed slot colour can land on top of a same-coloured swatch and vanish,
+   the same reasoning period-tab:focus-visible above already settled on. */
+.cp-cell:focus-visible .cp-swatch {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
 /* -- tags (07a, docs/ui/screens/07-tags.md) ---------------------------------
    Plain rows, not a grid — tags carry no color_slot, so there is no swatch
    to justify 06a's 4-column shape. Reuses `.row`/`.nm` (`.nm`'s flex:1
