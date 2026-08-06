@@ -24,8 +24,10 @@ import type {
   ExpenseResponse,
   ExpenseUpdate,
   PeriodTotal,
+  TagCreate,
   TagResponse,
   TagTotal,
+  TagUpdate,
   UserMeResponse,
   Uuid,
 } from "./types";
@@ -233,7 +235,7 @@ export class ApiClient {
     return this.request<void>("DELETE", `/categories/${id}`);
   }
 
-  // -- tags (list, screen 07a, U2.4) --------------------------------------
+  // -- tags (list U2.4; create/rename/delete-or-hide U2.5) -----------------
 
   listTags(opts: { includeUsage?: boolean; includeArchived?: boolean } = {}): Promise<TagResponse[]> {
     return this.request<TagResponse[]>("GET", "/tags", {
@@ -242,6 +244,18 @@ export class ApiClient {
         include_archived: opts.includeArchived === undefined ? undefined : String(opts.includeArchived),
       },
     });
+  }
+
+  createTag(data: TagCreate): Promise<TagResponse> {
+    return this.request<TagResponse>("POST", "/tags", { json: data });
+  }
+
+  updateTag(id: Uuid, data: TagUpdate): Promise<TagResponse> {
+    return this.request<TagResponse>("PATCH", `/tags/${id}`, { json: data });
+  }
+
+  deleteTag(id: Uuid): Promise<void> {
+    return this.request<void>("DELETE", `/tags/${id}`);
   }
 
   // -- budgets -----------------------------------------------------------

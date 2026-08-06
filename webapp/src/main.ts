@@ -36,10 +36,19 @@ import {
   type DetailHandlers,
 } from "./screens/expense-detail";
 import {
+  applyTagDeleteOutcome,
   applyTagsChrome,
   createMemoryCache as createTagsCache,
+  emptyTagFormDraft,
   loadTags,
   mount as mountTags,
+  mountTagForm,
+  revertTagDeleteOutcome,
+  tagDeleteFailureMessage,
+  tagDeleteOutcomeKind,
+  tagFormDraftFromRow,
+  type TagDeleteFailure,
+  type TagFormHandlers,
   type TagsHandlers,
 } from "./screens/tags";
 import {
@@ -102,6 +111,7 @@ type ActiveScreen =
   | "categories"
   | "category-form"
   | "tags"
+  | "tag-form"
   | "statistics";
 let activeScreen: ActiveScreen | null = null;
 
@@ -463,35 +473,156 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
 
 /** Mounts Tags (U2.4, screen 07a). BackButton always returns to Home, same
  * shape as Categories — this is the fix for the previously dead "Tags" tile.
- * Row and "Add tag" taps are stubs until U2.5 builds the create/edit
- * destination ("07b"). */
-async function showTags(): Promise<void> {
-  const root = getRoot();
-  if (!root) {
-    return;
-  }
-  activeScreen = "tags";
-
-  const handlers: TagsHandlers = {
+ * Row and "Add tag" taps navigate to 07b (U2.5). */
+function buildTagsHandlers(): TagsHandlers {
+  return {
     onRetry: () => {
       void showTags();
     },
     onBack: () => {
       void showHome();
     },
-    onSelectTag: () => {
-      // Stub until U2.5 wires the rename/delete-or-hide surface ("07b").
+    onSelectTag: (id) => {
+      void showTagForm(id);
     },
     onAddTag: () => {
-      // Stub until U2.5 wires the create form.
+      void showTagForm(null);
+    },
+    onRetryDelete: (tagId) => {
+      void deleteTagAndUpdateCache(tagId);
     },
   };
+}
 
+async function showTags(deleteFailure: TagDeleteFailure | null = null): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  activeScreen = "tags";
+
+  const handlers = buildTagsHandlers();
   applyTagsChrome(handlers.onBack);
   mountTags(root, { status: "loading" }, handlers);
   const state = await loadTags(client, tagsCache);
   applyTagsChrome(handlers.onBack);
-  mountTags(root, state, handlers);
+  mountTags(root, state, handlers, deleteFailure);
+}
+
+/** Re-renders 07a straight from `tagsCache` — no `GET /tags` replay. The
+ * optimistic-update/restore path for a delete-or-hide outcome
+ * (docs/ui/screens/07b-tag-form.md); `showTags()`'s own re-fetch is
+ * deliberately not reused here, same divergence `categories.ts`'s Save vs.
+ * delete/hide flows document. Falls back to a real load if the cache is
+ * somehow empty. */
+function renderTagsFromCache(deleteFailure: TagDeleteFailure | null = null): void {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  const cached = tagsCache.get();
+  if (!cached) {
+    void showTags(deleteFailure);
+    return;
+  }
+  activeScreen = "tags";
+  const handlers = buildTagsHandlers();
+  applyTagsChrome(handlers.onBack);
+  mountTags(root, { status: "ready", ...cached.data }, handlers, deleteFailure);
+}
+
+/** Confirmed delete/hide (07b): optimistically patches `tagsCache` and
+ * re-renders 07a immediately, then fires the `DELETE` in the background. A
+ * failure reverts *just that row*, applied to whatever the cache currently
+ * holds — not a snapshot captured before the call — so an unrelated
+ * delete/hide that completed on a different tag in the meantime is never
+ * clobbered. The revert always updates the cache, but only re-renders if the
+ * user is still on Tags when the request settles (`activeScreen`), same guard
+ * `deleteCategoryAndUpdateCache` uses. */
+async function deleteTagAndUpdateCache(tagId: Uuid): Promise<void> {
+  const cached = tagsCache.get();
+  if (!cached) {
+    void showTags();
+    return;
+  }
+  const row = [...cached.data.active, ...cached.data.archived].find((r) => r.id === tagId);
+  if (!row) {
+    void showTags();
+    return;
+  }
+
+  const outcome = tagDeleteOutcomeKind(row.expenseCount);
+  tagsCache.set({ data: applyTagDeleteOutcome(cached.data, tagId, outcome), syncedAt: cached.syncedAt });
+  renderTagsFromCache();
+
+  try {
+    await client.deleteTag(tagId);
+  } catch (err) {
+    const latest = tagsCache.get();
+    if (latest) {
+      tagsCache.set({ data: revertTagDeleteOutcome(latest.data, row, outcome), syncedAt: latest.syncedAt });
+    }
+    if (activeScreen !== "tags") {
+      // The user has moved on — the cache is already corrected above, so the
+      // next time they open Tags (a fresh `showTags()`, which re-fetches) it
+      // reflects the real state. Don't force-navigate them.
+      return;
+    }
+    const failure: TagDeleteFailure =
+      err instanceof ForbiddenError
+        ? { tagId, message: "You have read-only access to this account.", retryable: false }
+        : { tagId, message: tagDeleteFailureMessage(row.name, row.expenseCount), retryable: true };
+    renderTagsFromCache(failure);
+  }
+}
+
+/** Mounts the 07b create/rename/delete-or-hide form (U2.5), reached from
+ * 07a's "Add tag" row (`tagId` `null`) or an active row (`tagId` set). Per
+ * its spec, this screen never fetches on open — the draft and `expenseCount`
+ * both come from 07a's already-loaded `tagsCache` snapshot, not a new
+ * request. If that cache is somehow empty, falls back to `showTags()` so the
+ * data exists before the form needs it. */
+async function showTagForm(tagId: Uuid | null): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  activeScreen = "tag-form";
+
+  const cached = tagsCache.get();
+  if (!cached) {
+    void showTags();
+    return;
+  }
+
+  const allRows = [...cached.data.active, ...cached.data.archived];
+  let draft = emptyTagFormDraft();
+  let expenseCount = 0;
+  if (tagId) {
+    const row = allRows.find((r) => r.id === tagId);
+    if (!row) {
+      // The tag disappeared from the cache since 07a last rendered (e.g.
+      // deleted in another tab) — safest fallback is back to the list.
+      void showTags();
+      return;
+    }
+    draft = tagFormDraftFromRow(row);
+    expenseCount = row.expenseCount;
+  }
+
+  const handlers: TagFormHandlers = {
+    onClose: () => {
+      void showTags();
+    },
+    onSaved: () => {
+      void showTags();
+    },
+    onDelete: (id) => {
+      void deleteTagAndUpdateCache(id);
+    },
+  };
+
+  mountTagForm(root, client, draft, handlers, expenseCount);
 }
 
 /** Mounts Statistics (U2.5, screen 05), reached from Home's "Statistics"
