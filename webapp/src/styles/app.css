@@ -1639,6 +1639,42 @@ body {
   outline-offset: 2px;
 }
 
+/* -- delete-or-hide (U2.3, docs/ui/screens/06c-category-delete.md) -------- */
+
+.cat-delete-trigger {
+  /* Row title role (design-system.md Typography) — reused rather than
+     inventing a new size for this one trigger. */
+  align-self: center;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--status-red);
+  cursor: pointer;
+}
+
+.cat-delete-failed {
+  margin: 0 4px 12px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.cat-delete-failed p {
+  margin: 0;
+}
+
+.cat-delete-failed button[data-action="retry-delete"] {
+  font: inherit;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  padding: 4px 0 0;
+  color: var(--ink);
+  cursor: pointer;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */

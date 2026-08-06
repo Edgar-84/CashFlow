@@ -1,4 +1,4 @@
-import { ApiClient } from "./api/client";
+import { ApiClient, ForbiddenError } from "./api/client";
 import { applyTheme, getInitData } from "./lib/telegram";
 import {
   createMemoryCache as createAddExpenseCache,
@@ -15,13 +15,18 @@ import {
 } from "./screens/budgets";
 import {
   applyCategoriesChrome,
+  applyCategoryDeleteOutcome,
+  categoryDeleteFailureMessage,
+  categoryDeleteOutcomeKind,
   categoryFormDraftFromRow,
   createMemoryCache as createCategoriesCache,
   emptyCategoryFormDraft,
   loadCategories,
   mount as mountCategories,
   mountCategoryForm,
+  revertCategoryDeleteOutcome,
   type CategoriesHandlers,
+  type CategoryDeleteFailure,
   type CategoryFormHandlers,
 } from "./screens/categories";
 import {
@@ -72,6 +77,25 @@ const statisticsCache = createStatisticsCache();
 // resets to the cold-open default when the app itself reboots.
 let homePeriod: PeriodValue = { unit: "month", offset: 0 };
 
+/** Which screen's `showX` most recently ran. Set at the top of every `showX`
+ * function below. Its one consumer today is `deleteCategoryAndUpdateCache`
+ * (U2.3): a delete/hide's `DELETE` request runs in the background after an
+ * optimistic navigation back to Categories, and by the time it settles the
+ * user may have moved on to a different screen — this guards a failed
+ * request from yanking them back to Categories mid-draft elsewhere. Not a
+ * generic router; there is no navigation history here, only "what's on
+ * screen right now". */
+type ActiveScreen =
+  | "home"
+  | "add-expense"
+  | "expenses"
+  | "expense-detail"
+  | "budgets"
+  | "categories"
+  | "category-form"
+  | "statistics";
+let activeScreen: ActiveScreen | null = null;
+
 function getRoot(): HTMLElement | null {
   if (typeof document === "undefined") {
     return null;
@@ -88,6 +112,7 @@ async function showHome(): Promise<void> {
   if (!root) {
     return;
   }
+  activeScreen = "home";
 
   const handlers: HomeHandlers = {
     onRetry: () => {
@@ -152,6 +177,7 @@ async function showAddExpense(): Promise<void> {
   if (!root) {
     return;
   }
+  activeScreen = "add-expense";
 
   const handlers: AddExpenseHandlers = {
     onRetry: () => {
@@ -179,6 +205,7 @@ async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
   if (!root) {
     return;
   }
+  activeScreen = "expenses";
 
   const controller = createExpensesController(client, expensesCache, filter);
 
@@ -216,6 +243,7 @@ async function showExpenseDetail(id: Uuid, onBack: () => void): Promise<void> {
   if (!root) {
     return;
   }
+  activeScreen = "expense-detail";
 
   const handlers: DetailHandlers = {
     onRetry: () => {
@@ -239,6 +267,7 @@ async function showBudgets(): Promise<void> {
   if (!root) {
     return;
   }
+  activeScreen = "budgets";
 
   const handlers: BudgetsHandlers = {
     onRetry: () => {
@@ -259,13 +288,8 @@ async function showBudgets(): Promise<void> {
 /** Mounts Categories (U2.1, screen 06). BackButton always returns to Home,
  * same shape as Budgets/Expenses — this is the fix for the previously
  * dead "Categories" tile. */
-async function showCategories(): Promise<void> {
-  const root = getRoot();
-  if (!root) {
-    return;
-  }
-
-  const handlers: CategoriesHandlers = {
+function buildCategoriesHandlers(): CategoriesHandlers {
+  return {
     onRetry: () => {
       void showCategories();
     },
@@ -278,13 +302,97 @@ async function showCategories(): Promise<void> {
     onAddCategory: () => {
       void showCategoryForm(null);
     },
+    onRetryDelete: (categoryId) => {
+      void deleteCategoryAndUpdateCache(categoryId);
+    },
   };
+}
 
+async function showCategories(deleteFailure: CategoryDeleteFailure | null = null): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  activeScreen = "categories";
+
+  const handlers = buildCategoriesHandlers();
   applyCategoriesChrome(handlers.onBack);
   mountCategories(root, { status: "loading" }, handlers);
   const state = await loadCategories(client, categoriesCache);
   applyCategoriesChrome(handlers.onBack);
-  mountCategories(root, state, handlers);
+  mountCategories(root, state, handlers, deleteFailure);
+}
+
+/** Re-renders 06a straight from `categoriesCache` — no `GET /categories`
+ * replay. The optimistic-update/restore path for a delete-or-hide outcome
+ * (docs/ui/screens/06c-category-delete.md); `showCategories()`'s own re-fetch
+ * is deliberately not reused here (see that spec's Delta from
+ * `06b-category-form.md`'s Save flow). Falls back to a real load if the
+ * cache is somehow empty — shouldn't happen, since the only caller of
+ * `deleteCategoryAndUpdateCache` is reached from a form that itself requires
+ * the cache to already be populated. */
+function renderCategoriesFromCache(deleteFailure: CategoryDeleteFailure | null = null): void {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  const cached = categoriesCache.get();
+  if (!cached) {
+    void showCategories(deleteFailure);
+    return;
+  }
+  activeScreen = "categories";
+  const handlers = buildCategoriesHandlers();
+  applyCategoriesChrome(handlers.onBack);
+  mountCategories(root, { status: "ready", ...cached.data }, handlers, deleteFailure);
+}
+
+/** Confirmed delete/hide (06c): optimistically patches `categoriesCache` and
+ * re-renders 06a immediately, then fires the `DELETE` in the background. A
+ * failure reverts *just that row* (`revertCategoryDeleteOutcome`, applied to
+ * whatever the cache currently holds — not a snapshot captured before the
+ * call) so an unrelated delete/hide that completed on a different category in
+ * the meantime is never clobbered. The revert always updates the cache, but
+ * only re-renders if the user is still on Categories when the request
+ * settles (`activeScreen` — otherwise a late failure would yank them off
+ * whatever screen they've since moved to, e.g. mid-draft on Add Expense).
+ * Success needs no further action: the optimistic state was already
+ * correct. */
+async function deleteCategoryAndUpdateCache(categoryId: Uuid): Promise<void> {
+  const cached = categoriesCache.get();
+  if (!cached) {
+    void showCategories();
+    return;
+  }
+  const row = [...cached.data.active, ...cached.data.archived].find((r) => r.id === categoryId);
+  if (!row) {
+    void showCategories();
+    return;
+  }
+
+  const outcome = categoryDeleteOutcomeKind(row.expenseCount);
+  categoriesCache.set({ data: applyCategoryDeleteOutcome(cached.data, categoryId, outcome), syncedAt: cached.syncedAt });
+  renderCategoriesFromCache();
+
+  try {
+    await client.deleteCategory(categoryId);
+  } catch (err) {
+    const latest = categoriesCache.get();
+    if (latest) {
+      categoriesCache.set({ data: revertCategoryDeleteOutcome(latest.data, row, outcome), syncedAt: latest.syncedAt });
+    }
+    if (activeScreen !== "categories") {
+      // The user has moved on — the cache is already corrected above, so the
+      // next time they open Categories (a fresh `showCategories()`, which
+      // re-fetches) it reflects the real state. Don't force-navigate them.
+      return;
+    }
+    const failure: CategoryDeleteFailure =
+      err instanceof ForbiddenError
+        ? { categoryId, message: "You have read-only access to this account.", retryable: false }
+        : { categoryId, message: categoryDeleteFailureMessage(row.name, row.expenseCount), retryable: true };
+    renderCategoriesFromCache(failure);
+  }
 }
 
 /** Mounts the 06b create/rename/recolour form (U2.2), reached from 06a's
@@ -299,6 +407,7 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
   if (!root) {
     return;
   }
+  activeScreen = "category-form";
 
   const cached = categoriesCache.get();
   if (!cached) {
@@ -308,6 +417,7 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
 
   const allRows = [...cached.data.active, ...cached.data.archived];
   let draft = emptyCategoryFormDraft();
+  let expenseCount = 0;
   if (categoryId) {
     const row = allRows.find((r) => r.id === categoryId);
     if (!row) {
@@ -317,6 +427,7 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
       return;
     }
     draft = categoryFormDraftFromRow(row);
+    expenseCount = row.expenseCount;
   }
 
   const activeSiblings = cached.data.active
@@ -333,9 +444,12 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
     onSaved: () => {
       void showCategories();
     },
+    onDelete: (id) => {
+      void deleteCategoryAndUpdateCache(id);
+    },
   };
 
-  mountCategoryForm(root, client, draft, activeSiblings, usedSlots, handlers);
+  mountCategoryForm(root, client, draft, activeSiblings, usedSlots, handlers, expenseCount);
 }
 
 /** Mounts Statistics (U2.5, screen 05), reached from Home's "Statistics"
@@ -351,6 +465,7 @@ async function showStatistics(monthsBack = 0, grouping: Grouping = "category"): 
   if (!root) {
     return;
   }
+  activeScreen = "statistics";
 
   const handlers: StatisticsHandlers = {
     onRetry: () => {

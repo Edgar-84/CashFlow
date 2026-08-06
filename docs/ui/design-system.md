@@ -26,7 +26,7 @@ identity (§2.3) — and it is why every token below has both values stated.
 | `--ink` | `#0E1416` | `#F1F5F4` | Text, buttons, chrome | [ref] |
 | `--ink-secondary` | `#6C7679` | `#97A1A3` | Meta, labels | [ref] |
 | `--separator` | `#E4E8E7` | `#272D2F` | Row rules | [ref] |
-| `--status-red` | `#e34948` | `#e66767` | Over-budget only | [ref] |
+| `--status-red` | `#e34948` | `#e66767` | Over-budget, and destructive text actions (e.g. screen 06's "Delete/Hide category") | [ref] |
 | `--accent` | `#F0B429` | `#E0A42B` | **The Add button on screen 01, and nothing else** | [inferred] |
 | `--accent-ink` | `#1A1206` | `#1A1206` | The `+` glyph inside it | [inferred] |
 

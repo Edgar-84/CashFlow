@@ -261,9 +261,12 @@ does not have, and is not single-select/`radiogroup` — see Accessibility).
   to the same not-yet-built action.
 
 ## Open questions
-- [?] **U2.3's delete-or-hide confirmation is unspecified beyond "stub".**
-      Needs its own layout pass (a new `06c` file) once that unit is taken
-      up — not blocking for U2.1 or U2.2.
+- ~~[?] **U2.3's delete-or-hide confirmation is unspecified beyond "stub".**~~
+      — **answered (2026-08-06, U2.3 prep)**: see `06c-category-delete.md`.
+      The trigger lives at the bottom of `06b-category-form.md`'s edit mode,
+      not as a new affordance on this screen's grid; this screen's active-cell
+      tap stays wired to opening 06b (unchanged), and the archived-row tap
+      stays a stub (un-archiving is out of scope, D312).
       ~~Cell/row destinations are unspecified beyond "stub"~~ — **U2.2's
       create/rename/recolour form is now specced**: see
       `06b-category-form.md`.
