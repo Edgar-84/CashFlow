@@ -36,6 +36,13 @@ import {
   type DetailHandlers,
 } from "./screens/expense-detail";
 import {
+  applyTagsChrome,
+  createMemoryCache as createTagsCache,
+  loadTags,
+  mount as mountTags,
+  type TagsHandlers,
+} from "./screens/tags";
+import {
   applyExpensesChrome,
   createExpensesController,
   createMemoryCache as createExpensesCache,
@@ -69,6 +76,7 @@ const addExpenseCache = createAddExpenseCache();
 const expensesCache = createExpensesCache();
 const budgetsCache = createBudgetsCache();
 const categoriesCache = createCategoriesCache();
+const tagsCache = createTagsCache();
 const statisticsCache = createStatisticsCache();
 
 // Home's selected period. Module-level so it survives navigating to screen
@@ -93,6 +101,7 @@ type ActiveScreen =
   | "budgets"
   | "categories"
   | "category-form"
+  | "tags"
   | "statistics";
 let activeScreen: ActiveScreen | null = null;
 
@@ -129,9 +138,9 @@ async function showHome(): Promise<void> {
         void showStatistics();
       } else if (tile === "categories") {
         void showCategories();
+      } else if (tile === "tags") {
+        void showTags();
       }
-      // Tags lands in a later unit (U2.4) — its tile stays reachable but is
-      // a no-op until then.
     },
     onSegmentTap: (target) => {
       void showExpenses(target.categoryId ? { categoryId: target.categoryId } : {});
@@ -450,6 +459,39 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
   };
 
   mountCategoryForm(root, client, draft, activeSiblings, usedSlots, handlers, expenseCount);
+}
+
+/** Mounts Tags (U2.4, screen 07a). BackButton always returns to Home, same
+ * shape as Categories — this is the fix for the previously dead "Tags" tile.
+ * Row and "Add tag" taps are stubs until U2.5 builds the create/edit
+ * destination ("07b"). */
+async function showTags(): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  activeScreen = "tags";
+
+  const handlers: TagsHandlers = {
+    onRetry: () => {
+      void showTags();
+    },
+    onBack: () => {
+      void showHome();
+    },
+    onSelectTag: () => {
+      // Stub until U2.5 wires the rename/delete-or-hide surface ("07b").
+    },
+    onAddTag: () => {
+      // Stub until U2.5 wires the create form.
+    },
+  };
+
+  applyTagsChrome(handlers.onBack);
+  mountTags(root, { status: "loading" }, handlers);
+  const state = await loadTags(client, tagsCache);
+  applyTagsChrome(handlers.onBack);
+  mountTags(root, state, handlers);
 }
 
 /** Mounts Statistics (U2.5, screen 05), reached from Home's "Statistics"

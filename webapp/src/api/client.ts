@@ -210,8 +210,7 @@ export class ApiClient {
     return this.request<void>("DELETE", `/expenses/${id}`);
   }
 
-  // -- categories (create/rename/recolour U2.2, delete-or-hide U2.3; tags
-  //    stay list-only, D204) --------------------------------------------
+  // -- categories (create/rename/recolour U2.2, delete-or-hide U2.3) ------
 
   listCategories(opts: { includeUsage?: boolean; includeArchived?: boolean } = {}): Promise<CategoryResponse[]> {
     return this.request<CategoryResponse[]>("GET", "/categories", {
@@ -234,8 +233,15 @@ export class ApiClient {
     return this.request<void>("DELETE", `/categories/${id}`);
   }
 
-  listTags(): Promise<TagResponse[]> {
-    return this.request<TagResponse[]>("GET", "/tags");
+  // -- tags (list, screen 07a, U2.4) --------------------------------------
+
+  listTags(opts: { includeUsage?: boolean; includeArchived?: boolean } = {}): Promise<TagResponse[]> {
+    return this.request<TagResponse[]>("GET", "/tags", {
+      params: {
+        include_usage: opts.includeUsage === undefined ? undefined : String(opts.includeUsage),
+        include_archived: opts.includeArchived === undefined ? undefined : String(opts.includeArchived),
+      },
+    });
   }
 
   // -- budgets -----------------------------------------------------------

@@ -1441,13 +1441,16 @@ body {
 }
 
 .categories-error p,
-.categories-readonly p {
+.categories-readonly p,
+.tags-error p,
+.tags-readonly p {
   margin: 4px 4px 0;
   color: var(--ink-secondary);
   font-size: 14px;
 }
 
-.categories-error button[data-action="retry"] {
+.categories-error button[data-action="retry"],
+.tags-error button[data-action="retry"] {
   font: inherit;
   font-weight: 600;
   background: var(--ink);
@@ -1509,6 +1512,91 @@ body {
   font-size: 11px;
   color: var(--ink-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+/* -- tags (07a, docs/ui/screens/07-tags.md) ---------------------------------
+   Plain rows, not a grid — tags carry no color_slot, so there is no swatch
+   to justify 06a's 4-column shape. Reuses `.row`/`.nm` (`.nm`'s flex:1
+   already pushes the trailing caption to the right, same as `.card row` in
+   home.ts). */
+.tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tag-row-caption {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-row-add-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-secondary);
+}
+
+.tag-row-skeleton {
+  height: 40px;
+  background: var(--card);
+  border-radius: 14px;
+}
+
+.tags-empty-note {
+  margin: 0 4px 4px;
+  color: var(--ink-secondary);
+  font-size: 14px;
+}
+
+/* Archived rows reuse `.row`/`.nm` at 60% opacity — a plain list, matching
+   06a's `.cat-archived-row` convention exactly. */
+.tag-archived {
+  margin-top: 20px;
+}
+
+.tag-archived-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  background: transparent;
+  padding: 8px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.tag-archived-chevron {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--ink-secondary);
+  transform: rotate(0deg);
+}
+
+.tag-archived-chevron--open {
+  transform: rotate(180deg);
+}
+
+.tag-archived-explain {
+  margin: 0 4px 8px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.tag-archived-row {
+  opacity: 0.6;
 }
 
 /* -- category form (U2.2, docs/ui/screens/06b-category-form.md) ------------
@@ -1686,7 +1774,8 @@ body {
   .exp-day-skeleton,
   .budget-row-skeleton,
   .stats-bar-skeleton,
-  .cat-cell-skeleton {
+  .cat-cell-skeleton,
+  .tag-row-skeleton {
     animation: skeleton-pulse 1.4s ease-in-out infinite;
   }
 }

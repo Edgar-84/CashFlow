@@ -83,6 +83,12 @@ export interface TagResponse {
   name: string;
   account_id: Uuid;
   created_at: IsoTimestamp;
+  /** Defaults `true` server-side (`models/tag.py`); omitted only for older
+   * callers that don't request this field. */
+  is_active?: boolean;
+  /** Populated only when the caller passes `include_usage=true`; `null`/
+   * omitted means "not requested", never "zero" (U2.4). */
+  expense_count?: number | null;
 }
 
 export interface ExpenseResponse {

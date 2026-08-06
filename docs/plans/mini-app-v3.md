@@ -626,7 +626,7 @@ touched** (D316) — it keeps its `months_back` chips.
       button; the last remaining active category is deletable but warns that
       new expenses will have nowhere to go. Files: `screens/categories.ts`,
       `tests/categories.test.ts`. Model: sonnet.
-- [ ] **U2.4 Screen 07a — Tags list** — mirror of U2.1 without colour: name,
+- [x] **U2.4 Screen 07a — Tags list** — mirror of U2.1 without colour: name,
       expense count, this-month total, archived section. AC: the Home "Tags"
       tile opens it, BackButton returns to Home; per-tag counts come from
       `include_usage=true` (D305), not a client-side roll-up of the expense
@@ -2074,7 +2074,32 @@ every unit below.
   `webapp/CLAUDE.md`'s matching rule both widened per D339. verify.sh green
   (636 backend + 437 webapp tests, typecheck/lint/build/secret-grep all
   pass).
-- Next: **U2.4** — Screen 07a, Tags list (mirror of U2.1 without colour).
+- Done: **U2.4** — Screen 07a, Tags list. Started with a fresh `ui-spec` pass
+  (`docs/ui/screens/07-tags.md`, new) since none existed — 06a's grid shape
+  exists to hold a colour swatch, and tags carry no `color_slot`, so this
+  screen reuses Home's plain `.row`/`.nm` row shape instead of a grid (no
+  swatch, no 4-column keyboard nav). The design doc's "three starters"
+  empty-state suggestion is deliberately deferred to U2.5 (needs a real
+  `POST /tags`, and a tappable suggestion that creates nothing would be a
+  broken affordance). Implemented: `api/types.ts`'s `TagResponse` gained
+  `is_active`/`expense_count` (mirroring `CategoryResponse`); `api/client.ts`'s
+  `listTags` gained `{ includeUsage, includeArchived }` (mirroring
+  `listCategories`); `screens/tags.ts` (new) — `loadTags`/`buildTagsData`/
+  `renderTags`/`mount`, same never-throws/cache-fallback contract as
+  `loadCategories`, row and "Add tag" taps stubbed for U2.5; `main.ts` gained
+  `showTags`, wired to Home's previously dead "Tags" tile; `app.css` gained
+  the row/archived-section styles. No new backend work — `TagResponse.
+  is_active`/`expense_count` and `/statistics/by-tag`'s zero-omission
+  behaviour (confirmed by reading `services/statistics_service.py::by_tag`:
+  it builds from a `defaultdict` over actual expenses, same as `by_category`)
+  already existed from M0. Two review rounds: round 1 (APPROVE) found one WARN
+  — the stub row/"Add tag" `div[role="button"]`s were wired with `click` but
+  no Enter/Space `keydown` handler, unlike `home.ts::renderRankedRows`'s
+  established pairing for the same pattern — fixed by mirroring that handler;
+  round 2 confirmed the fix and re-APPROVEd with no further findings.
+  verify.sh green (636 backend + 461 webapp tests, typecheck/lint/build/
+  secret-grep all pass).
+- Next: **U2.5** — Screen 07b, Tag create, rename, delete-or-hide.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
