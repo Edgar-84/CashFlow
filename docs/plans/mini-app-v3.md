@@ -656,7 +656,7 @@ The existing composer is **extended, not rewritten** — the draft model, the
 double-submit guard (D118/D123) and the MainButton contract are untouched by
 every unit below.
 
-- [ ] **U3.1 `components/category-picker.ts`** — the 4-column grid replacing
+- [x] **U3.1 `components/category-picker.ts`** — the 4-column grid replacing
       the current inline chips. AC: **every acceptance criterion in
       `docs/ui/components/category-picker.md`**, notably — 64px filled circles
       with the name centred underneath and **no glyph, letter or emoji inside
@@ -1396,6 +1396,26 @@ every unit below.
   exactly, including reusing their `.cat-form*`/`.cat-delete-trigger`/
   `.cat-delete-failed` CSS classes **verbatim** rather than duplicating them
   under a `.tag-*` name, since none of them reference colour.
+- D341 (2026-08-06, U3.1): the plan line's restated AC — "no glyph, letter or
+  emoji inside any circle" — reads literally as covering the "More" cell too,
+  but `category-picker.md`'s own Anatomy #4 requires a 24px "+" inside
+  **that** swatch, and the doc's "Delta from reference" explains the no-glyph
+  rule is specifically about *category identity* (no `categories.icon`
+  column, colour is the user-chosen identity instead) — "More" is chrome, not
+  a category. Resolved by scoping the no-glyph rule to category cells only,
+  matching the existing reviewed precedent one unit was going to have to
+  reconcile with sooner or later: `screens/categories.ts`'s `cat-cell-add`
+  (06a's grid) already renders a "+" in its swatch for the exact same
+  affordance. `components/category-picker.ts`'s `nextGridFocusIndex` is a
+  deliberate duplicate of `screens/categories.ts`'s same-named export
+  (identical 4-column wrap-by-row arithmetic) rather than a shared import —
+  a component depending on a screen module would invert this codebase's
+  layering, and refactoring the shared logic into `lib/` would touch
+  `categories.ts`, outside this unit's file list. **Follow-up (reviewer NIT,
+  not yet a unit):** the two copies are independently tested so drift would
+  surface as a test diff, but nothing tracks consolidating them into a
+  shared `lib/` module once a unit legitimately touches both files — worth
+  picking up opportunistically rather than staying duplicated forever.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -2151,8 +2171,34 @@ every unit below.
   the explanatory comment its category counterpart has — fixed). Both
   addressed; no BLOCKERs. verify.sh green (636 backend + 507 webapp tests,
   typecheck/lint/build/secret-grep all pass).
-- Next: **U3.1** — `components/category-picker.ts`, the 4-column grid for the
-  redesigned Add Expense screen (M3).
+- Done: **U3.1** — `components/category-picker.ts`, the 4-column grid for
+  the redesigned Add Expense screen (M3). Pure render + thin `mount`, no
+  fetching, no state — matches `period-selector.ts`'s shape. Implemented:
+  `renderCategoryPicker` (radiogroup of `role="radio"` cells + a sibling
+  "More" `role="radio"`-free navigation button, kept outside the radiogroup
+  via a `display: contents` wrapper so both stay direct children of the same
+  4-column CSS grid); selection is shape (circle → 12px-radius rounded
+  square) + weight (400 → 600), never colour, with no CSS transition on
+  `border-radius` so `prefers-reduced-motion`'s "instant, no morph" holds by
+  default; disabled suppresses every cell (50% opacity, native `disabled`
+  attribute) and omits "More" entirely; empty `items` renders only "More"
+  above the empty copy. New CSS block in `app.css` (`.cp-*`, reusing
+  `.cat-grid`'s 64px/12px/16px geometry values). See D341 for the "More"
+  glyph exception and the deliberate `nextGridFocusIndex` duplication. Not
+  built (deliberately out of scope, per U3.2's own AC): the loading skeleton
+  and the error state — both are host-owned per the component doc's States
+  table ("component renders nothing" on error) and U3.2's AC line names the
+  skeleton as its own responsibility. Two review rounds (reviewer subagent):
+  round 1 APPROVE with two NITs (a missing comment on why
+  `.cp-cell:focus-visible .cp-swatch`'s outline colour differs from
+  `.cat-cell`'s precedent; the `nextGridFocusIndex` duplication having no
+  tracked follow-up) — both addressed with doc/comment-only edits (see
+  D341's Follow-up note); round 2 confirmed and re-APPROVEd, no new findings.
+  verify.sh green (636 backend + 523 webapp tests, typecheck/lint/build/
+  secret-grep all pass).
+- Next: **U3.2** — Amount, account and the category grid, wiring this
+  component into `screens/add-expense.ts` and replacing the old inline
+  category chips (M3).
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once
