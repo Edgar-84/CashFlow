@@ -716,7 +716,7 @@ every unit below.
 
 ### M4 — Smoke
 
-- [ ] **U4.1 e2e: period + archive through `initData` (@integration)** — one
+- [x] **U4.1 e2e: period + archive through `initData` (@integration)** — one
       signed-payload scenario over the real app: create a category with an
       explicit colour → add an expense today and one **backdated** to
       yesterday via `spent_at` → `period=day&offset=0` and
@@ -1595,6 +1595,20 @@ every unit below.
   test and `budgets.ts::saveErrorMessage`'s `err.status === 409` check are
   already the codebase's convention, so `submitErrorMessage` matches on
   `err instanceof ApiError && err.status === 409` the same way.
+- D346 (2026-08-07, U4.1): the new scenario gets its own fixture
+  (`period_archive_fixtures`), not a reuse of `smoke_fixtures` — creating and
+  archiving a category needs the `categories` resource's write access, which
+  the default matrix (api/CLAUDE.md) grants only to `admin`, while every
+  existing `smoke_fixtures` user is a `member`; a dedicated account also
+  keeps this scenario's two expenses from perturbing the fixed totals the
+  other four tests in the module assert on. The `period=week&offset=0`
+  assertion computes its expected total from `local_today.weekday()` rather
+  than hard-coding "both rows" — D315's Monday-start week means a real
+  "today"/"yesterday" pair straddles a week boundary exactly on Mondays, so
+  a fixed expectation would flake one day in seven; the AC's literal
+  "returns both" holds on the other six, and the test still exercises the
+  real `resolve_period` path either way, just against a computed rather than
+  assumed expected value.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -2461,8 +2475,26 @@ every unit below.
   codebase's existing convention, and for the pre-existing 404 message text
   it corrected in passing). See D345. verify.sh green (638 backend + 558
   webapp tests, typecheck/lint/build/secret-grep all pass).
-- Next: **U4.1** — e2e smoke: period + archive through `initData` (M4). M3 is
-  now fully done.
+- Done: **U4.1** — new `test_period_and_archive_round_trip_through_init_data`
+  in `tests/test_e2e_smoke.py`, backed by a new `period_archive_fixtures`
+  (fresh account + one `admin` user — see D346 for why it isn't
+  `smoke_fixtures`). One signed-initData scenario over the real app/DB:
+  `POST /categories` with an explicit `color_slot`; an expense today (omitted
+  `spent_at`) and one backdated to yesterday (explicit `spent_at`);
+  `GET /statistics/by-period?period=day&offset=0` and `offset=-1` each return
+  exactly one expense's total, proving `spent_at` not `created_at` files the
+  row (D314); `period=custom` spanning both and `period=week&offset=0` (total
+  computed from the actual weekday, D346) both return the combined total;
+  `DELETE /categories/{id}` 204s (archived, in use); gone from the default
+  `GET /categories`, present with `include_archived=true` and `is_active:
+  false`; both expenses still in `GET /expenses` and still summed by
+  `GET /statistics/by-category`; a new `POST /expenses` into the archived
+  category 409s. `tests/README.md` updated. Marked `@integration`, excluded
+  from `verify.sh`; run via `bash scripts/integration_docker.sh -k
+  test_e2e_smoke` (all 6 e2e smoke tests pass) and the full integration
+  suite (84 passed). verify.sh green (638 backend + 558 webapp tests,
+  typecheck/lint/build/secret-grep all pass). **M4 done — this was the plan's
+  last unit.**
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

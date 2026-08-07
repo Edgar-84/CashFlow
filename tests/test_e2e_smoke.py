@@ -1,7 +1,7 @@
-"""MVP U5.1 e2e smoke (@integration), extended by family-features-v1_1 U3.1
-and mini-app-v2 U3.1 (a same-numbered but unrelated unit in a different plan
-file — see each test's docstring for which one it belongs to): bot client /
-initData -> real API -> test DB.
+"""MVP U5.1 e2e smoke (@integration), extended by family-features-v1_1 U3.1,
+mini-app-v2 U3.1 and mini-app-v3 U4.1 (same-numbered but unrelated units in
+different plan files — see each test's docstring for which one it belongs
+to): bot client / initData -> real API -> test DB.
 
 Exercises the actual production path through bot.client.BackendClient (the
 bot's only channel to the backend, bot/CLAUDE.md) against the real FastAPI
@@ -27,14 +27,21 @@ GET /users/me -> POST /expenses -> the expense in a paginated GET /expenses
 payload -> 401. Proves the two auth paths (api/CLAUDE.md's "Choosing an auth
 dependency") resolve to the same account/user against a real DB, not just at
 the dependency-injection level test_deps.py already covers with fakes.
+
+mini-app-v3 U4.1 adds one more initData scenario: `period`+`offset`
+statistics (D313) filed by `spent_at` rather than `created_at` (D314), and
+the category archive lifecycle (D302) — create with an explicit colour,
+archive while in use, `include_archived`, and the archived-category write
+guard (409) — all against the real app/DB.
 """
 
 import json
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qsl, urlencode
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import asyncpg
 import httpx
@@ -320,3 +327,157 @@ async def test_init_data_tampered_payload_against_real_app_is_401(
             )
 
     assert response.status_code == 401
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def period_archive_fixtures(db_pool: asyncpg.Pool) -> AsyncIterator[dict[str, Any]]:
+    """mini-app-v3 U4.1: a fresh account with a single ADMIN user. Category
+    create/archive need the `categories` resource's write access, which the
+    default matrix (api/CLAUDE.md) grants only to `admin` — `member` is
+    read-only there — so this can't reuse `smoke_fixtures`'s member users. A
+    dedicated account also keeps this scenario's own expenses from changing
+    the fixed totals the other tests in this module assert on.
+    """
+    tg_id = uuid4().int % 1_000_000_000
+    account_id: UUID | None = None
+    async with db_pool.acquire() as conn:
+        try:
+            account_id = await make_account(conn, name="Period Archive Smoke Account")
+            admin = await make_user(
+                conn, account_id=account_id, tg_id=tg_id, name="Admin", role=Role.ADMIN
+            )
+            yield {"account_id": account_id, "admin": admin}
+        finally:
+            if account_id is not None:
+                await conn.execute("DELETE FROM expenses WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM users WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM categories WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM accounts WHERE id = $1", account_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_period_and_archive_round_trip_through_init_data(
+    period_archive_fixtures: dict[str, Any],
+) -> None:
+    """mini-app-v3 U4.1: one signed-initData scenario over the real app/DB —
+    create a category with an explicit colour, add an expense today and one
+    backdated to yesterday via `spent_at`, prove `period=day&offset=0/-1`
+    file each by `spent_at` and not `created_at` (D314), `period=custom` and
+    `period=week&offset=0` both span the two, then archive the category
+    while it's in use and prove the `include_archived` split (D302): gone
+    from the default list, present with the flag, its two expenses and
+    their statistics total untouched, and a new expense into it now 409s.
+    """
+    admin = period_archive_fixtures["admin"]
+    headers = {"X-Telegram-Init-Data": build_init_data(get_settings().bot_token, admin.tg_id)}
+
+    family_tz = get_settings().family_tz
+    local_today = datetime.now(UTC).astimezone(ZoneInfo(family_tz)).date()
+    local_yesterday = local_today - timedelta(days=1)
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as http_client:
+            category = await http_client.post(
+                "/categories",
+                headers=headers,
+                json={"name": "Smoke Colour Category", "color_slot": 7},
+            )
+            assert category.status_code == 201
+            category_id = category.json()["id"]
+            assert category.json()["color_slot"] == 7
+
+            today_expense = await http_client.post(
+                "/expenses",
+                headers=headers,
+                json={"amount": 1_200, "category_id": category_id},
+            )
+            assert today_expense.status_code == 201
+            assert today_expense.json()["spent_at"] == local_today.isoformat()
+
+            yesterday_expense = await http_client.post(
+                "/expenses",
+                headers=headers,
+                json={
+                    "amount": 3_400,
+                    "category_id": category_id,
+                    "spent_at": local_yesterday.isoformat(),
+                },
+            )
+            assert yesterday_expense.status_code == 201
+            assert yesterday_expense.json()["spent_at"] == local_yesterday.isoformat()
+
+            day_today = await http_client.get(
+                "/statistics/by-period", headers=headers, params={"period": "day", "offset": 0}
+            )
+            assert day_today.status_code == 200
+            assert day_today.json()["total"] == 1_200
+
+            day_yesterday = await http_client.get(
+                "/statistics/by-period", headers=headers, params={"period": "day", "offset": -1}
+            )
+            assert day_yesterday.status_code == 200
+            assert day_yesterday.json()["total"] == 3_400
+
+            custom = await http_client.get(
+                "/statistics/by-period",
+                headers=headers,
+                params={
+                    "period": "custom",
+                    "start_date": local_yesterday.isoformat(),
+                    "end_date": local_today.isoformat(),
+                },
+            )
+            assert custom.status_code == 200
+            assert custom.json()["total"] == 4_600
+
+            # Week starts Monday (D315): every day but Monday, "yesterday"
+            # falls in the same Mon-Sun window as "today"; on a Monday it
+            # falls in the previous one — computed, not assumed, so this
+            # assertion holds regardless of which day the suite runs on.
+            expected_week_total = 1_200 if local_today.weekday() == 0 else 4_600
+            week = await http_client.get(
+                "/statistics/by-period", headers=headers, params={"period": "week", "offset": 0}
+            )
+            assert week.status_code == 200
+            assert week.json()["total"] == expected_week_total
+
+            archived = await http_client.delete(f"/categories/{category_id}", headers=headers)
+            assert archived.status_code == 204
+
+            active_only = await http_client.get("/categories", headers=headers)
+            assert active_only.status_code == 200
+            assert category_id not in {c["id"] for c in active_only.json()}
+
+            with_archived = await http_client.get(
+                "/categories?include_archived=true", headers=headers
+            )
+            assert with_archived.status_code == 200
+            archived_row = next(c for c in with_archived.json() if c["id"] == category_id)
+            assert archived_row["is_active"] is False
+
+            expenses = await http_client.get("/expenses", headers=headers, params={"limit": 50})
+            assert expenses.status_code == 200
+            assert {e["amount"] for e in expenses.json()} == {1_200, 3_400}
+
+            by_category = await http_client.get(
+                "/statistics/by-category",
+                headers=headers,
+                params={
+                    "period": "custom",
+                    "start_date": local_yesterday.isoformat(),
+                    "end_date": local_today.isoformat(),
+                },
+            )
+            assert by_category.status_code == 200
+            totals = {row["category_id"]: row["total"] for row in by_category.json()}
+            assert totals[category_id] == 4_600
+
+            blocked = await http_client.post(
+                "/expenses",
+                headers=headers,
+                json={"amount": 500, "category_id": category_id},
+            )
+            assert blocked.status_code == 409
