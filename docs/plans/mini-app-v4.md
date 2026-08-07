@@ -319,7 +319,7 @@ navigate into screens that must already accept what they will be handed.
       Files: `webapp/src/screens/expenses.ts`,
       `webapp/src/screens/expense-detail.ts`, `webapp/tests/expenses.test.ts`,
       `webapp/tests/expense-detail.test.ts`. Model: sonnet.
-- [ ] **U1.3 Composer gains a `mode` contract** — pure refactor of
+- [x] **U1.3 Composer gains a `mode` contract** — pure refactor of
       `screens/add-expense.ts`: `mode: "create" | "edit"`, an optional
       `initialExpense`, and the submit action behind one function. **No
       behaviour change in create mode**, no new screen yet.
@@ -850,7 +850,47 @@ human with a phone:
   a group still keep first-seen order. Field-picker edit mode, the
   delete/undo state machine, and every other part of `expense-detail.ts` are
   untouched — that's U1.5.
-- **Next:** M1 — `U1.3` Composer gains a `mode` contract.
+- **U1.3 done.** `screens/add-expense.ts` gained `AddExpenseMode = "create" |
+  "edit"`; `AddExpenseApi.updateExpense` is new and **optional**, so every
+  existing test's `fakeApi()` compiles unchanged. `createController` gained
+  two trailing optional params, `mode = "create"` and `initialExpense =
+  null`, so every existing call site (including every test) is unaffected —
+  the no-behaviour-change AC is structural, not just tested. `submit()`
+  stays the **one** function both modes go through: in `"edit"` mode it
+  calls `api.updateExpense(initialExpense.id, …)` instead of
+  `createExpense`, and leaves the draft as-is on success (no reset — U1.4's
+  screen returns to 03b showing it, unlike create's "add another"). The new
+  `draftFromExpense(expense)` is the mode-aware draft builder the AC asks
+  for — pulls amount (through `formatAmount`, round-tripping the stored
+  minor units), category, `spent_at`, tag ids and comment straight off an
+  `ExpenseResponse`; unlike `emptyDraft`, `spentAt` is always a concrete
+  date, never `null` (`null` only means "today" in create mode — an edit
+  has no such default). `createController` also gained a trailing `today:
+  string | null = null` — reviewer-caught: the date row's own "today pill"
+  convention sets `spentAt` to `null` regardless of mode (that logic lives
+  in the untouched `mount`), so the edit PATCH resolves a `null` `spentAt`
+  to `today` first and only falls back to `initialExpense.spent_at` if
+  `today` wasn't passed; falling back to `initialExpense.spent_at` alone
+  would have silently reverted a deliberate "move this to today" edit.
+  Submitting with `mode === "edit"` and no `initialExpense` now rejects
+  before `submitting` is set or `createExpense`/`updateExpense` is called
+  (reviewer-caught: it used to fall through to the create branch and post a
+  duplicate expense instead of failing loud) — unreachable today since
+  nothing constructs an edit controller yet, but a real invariant once
+  U1.4 does.
+  Deliberately **not** built here, left for U1.4: diffing the edit PATCH
+  down to changed fields only (this unit's edit-mode payload sends the full
+  draft every time — correct per 02b's Edge cases for `tag_ids: []` and
+  `comment: null`, but not yet the "only what differs" optimization that
+  needs the "disabled until something differs" chrome U1.4 also owns);
+  wiring `mode`/`initialExpense`/`today` into `mount`/`main.ts` (no screen
+  reaches edit mode yet — `main.ts` is untouched); and distinguishing a
+  404 for the *expense* itself (02b's "Stale expense" state — "That expense
+  no longer exists.", back to 03a) from a 404 for its *category* (handled
+  here, unchanged from create mode) — both currently produce the
+  category-stale message and recovery, which is wrong for the former. U1.4
+  owns 02b's States table, so that's where this gets a real fix.
+- **Next:** M1 — `U1.4` Screen 02b — edit expense.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
