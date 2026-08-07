@@ -693,7 +693,7 @@ every unit below.
       Files: `webapp/src/screens/add-expense.ts`,
       `webapp/tests/add-expense.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U3.4 Tags and comment** — the bottom of the screen. AC: tag chips wrap
+- [x] **U3.4 Tags and comment** — the bottom of the screen. AC: tag chips wrap
       over multiple rows with **no horizontal scroll and no fold**; "+ Add tag"
       is always the last chip and navigates to screen 07; a tag created there
       returns **pre-selected** with the rest of the draft intact; multi-select
@@ -1511,6 +1511,65 @@ every unit below.
   again); `renderError`'s amount field doesn't yet keep what was typed on a
   fetch failure, per the screen doc's Error row — pre-existing, predates this
   unit, not in U3.2's own AC.
+- D344 (2026-08-07, U3.4): four deviations from the plan line's literal Files
+  list (`webapp/src/screens/add-expense.ts`, its test, `app.css`), same
+  precedent as D342/D343.
+  1. **"a tag created there returns pre-selected"** needs routing state
+     outside `add-expense.ts` — mirrors U3.2's `categoriesReturnTo`/`onMore`
+     shape exactly, but with one real difference: Categories' `onSaved`
+     always lands back on the Categories list (06a), and only a manual
+     BackButton tap (`categoriesReturnTo`) returns to Add Expense — a new
+     category is never auto-selected (D342: "the whole point of 'More' is to
+     pick a new category"). Tags needs the opposite: the *just-created* tag
+     must come back selected without the user doing anything else. Since the
+     tag doesn't exist yet when "+ Add tag" is tapped (it's created later, on
+     07b), the id can't be captured in `onAddTag`'s closure the way
+     `onMore`'s `categoryId: null` is — added a second module-level var,
+     `lastCreatedTagId`, written by `showTagForm`'s `onSaved` (only on
+     create, i.e. `tagId === null` on entry; a rename leaves it alone) and
+     read by `tagsReturnTo`'s closure at *call* time, not closure-creation
+     time. Reset at **every** entry into Tags — Home's tile tap and
+     `onAddTag` itself, not just the former — same reset rule D342 already
+     established for `categoriesReturnTo`. The `onAddTag` leg of the reset
+     was a reviewer-found BLOCKER in this unit's first review round (a
+     tag created on some earlier, unrelated Home→Tags visit would sit in
+     `lastCreatedTagId` since that visit's own BackButton runs the default
+     `tagsReturnTo`, which never consumes it — and would then wrongly
+     attach itself to a later, unconnected Add-Expense draft); fixed by
+     resetting in `onAddTag` too, before the closure is built. The actual
+     tagIds-merge step is pulled into a pure, exported
+     `main.ts::withCreatedTagPreselected`, directly tested — closing D342's
+     own deferred NIT ("`categoriesReturnTo` has no test coverage... worth a
+     test once this pattern is touched again"): the routing *decision* is
+     now testable even though the DOM glue around it still isn't.
+  2. **`screens/tags.ts::TagFormHandlers.onSaved` gains the saved
+     `TagResponse` as its one argument** (was `() => void`) — the id in
+     (1) has to come from somewhere, and `mountTagForm`'s `submit()` outcome
+     already carries it at the only call site. A rename's caller (`main.ts`)
+     simply ignores the argument.
+  3. **`lib/telegram.ts` gains `TelegramWebApp.viewportStableHeight` (made
+     `?:` optional, not required) and `getViewportStableHeight()`** — the AC
+     needs the keyboard-aware viewport height, and nothing before this unit
+     read it. Optional rather than required so every pre-existing
+     `fakeWebApp()` fixture across the other 8 test files keeps compiling
+     unchanged; `getViewportStableHeight()` falls back to
+     `window.innerHeight` when it's absent (outside Telegram, or an older
+     client), and to `0` with no `window` at all.
+  4. **`.field-label`, a new shared class in `app.css`**, for the "Tags" and
+     "Comment` labels the screen doc's regions 5/6 both call for and neither
+     had before this unit — same 12px/`--ink-secondary` "Meta / secondary"
+     values `.account-label`/`.cp-label` already use for the same role
+     elsewhere on this screen, so no new design-system row was needed
+     (CLAUDE.md: extend, don't invent).
+
+  Not built as a design-system change: the screen doc's region 5 also names
+  exact tag-chip geometry (32px tall, 8px radius) that the existing shared
+  `.chip` class (999px pill, used identically by `expense-detail.ts` and
+  `statistics.ts`) doesn't match — pre-existing since before this unit,
+  visible in every other `.chip` consumer too, and changing it here would be
+  an unreviewed visual change to two unrelated screens. Left as a flagged gap
+  rather than fixed, same "out of scope, pre-existing" boundary D343 drew for
+  `renderError`'s amount field.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -2330,7 +2389,41 @@ every unit below.
   up/down rows — the date row is a single line) and a `keydown` listener on
   `.date-pills`, directly tested. verify.sh green (638 backend + 541 webapp
   tests, typecheck/lint/build/secret-grep all pass).
-- Next: **U3.4** — Tags and comment (the bottom of the screen) (M3).
+- Done: **U3.4** — Tags and comment wired into `screens/add-expense.ts` (M3):
+  `renderTagChips` now always renders (the pre-U3.4 version returned "" with
+  zero tags), with a new "Tags" `.field-label` and "+ Add tag" as the always-
+  last chip (`data-testid="tag-add-chip"`); a "Comment" `.field-label` above
+  the textarea, which gained `maxlength="4096"` and a `placeholder="Comment"`
+  per the Copy table (no counter, matching the AC — none was ever rendered).
+  Multi-select tag toggling (`createController::toggleTag`) was already built
+  in earlier units and needed no change; added a two-tag `createExpense` test
+  to cover the AC's "two selected tags both land on the created expense"
+  explicitly. "+ Add tag" navigates to screen 07 (Tags) via a new
+  `AddExpenseHandlers.onAddTag(draft)`, and a tag created there returns
+  pre-selected via `main.ts`'s new `tagsReturnTo`/`lastCreatedTagId` routing
+  state — see D344.1-2 for why this needed a second module-level var beyond
+  `categoriesReturnTo`'s existing shape, and for the new
+  `withCreatedTagPreselected` pure export (directly tested) that closes
+  D342's own deferred "no test coverage" NIT on this routing pattern. The
+  comment field's keyboard-clearing scroll
+  (`commentScrollOffset(fieldBottom, viewportStableHeight)`, directly tested)
+  wires a `focus` listener calling `window.scrollBy` — see D344.3 for the new
+  `lib/telegram.ts::getViewportStableHeight()` primitive this needed (kept
+  optional on `TelegramWebApp` so every existing `fakeWebApp()` fixture across
+  8 other test files keeps compiling). See D344.4 for the new `.field-label`
+  CSS class and the flagged (not fixed) pre-existing `.chip` geometry gap
+  against the screen doc's exact tag-chip values. Two review rounds (reviewer
+  subagent): round 1 REQUEST_CHANGES on a BLOCKER (`lastCreatedTagId` leaked
+  across unrelated Tags visits — reset only covered Home's tile entry, not
+  `onAddTag`'s; see D344.1's amended text) plus assorted WARN/NIT (dead
+  `data-action` markup, a truthiness bug in `getViewportStableHeight`, a
+  missing label-render test) — all fixed same round; round 2 REQUEST_CHANGES
+  on one WARN (this STATE/D344 text itself had drifted from the round-1 fix,
+  still describing the old incomplete reset rule) plus two NITs (an untested
+  `viewportStableHeight: 0` edge case, a stale test count here) — all fixed;
+  round 3 APPROVE, no findings. verify.sh green (638 backend + 555 webapp
+  tests, typecheck/lint/build/secret-grep all pass).
+- Next: **U3.5** — Archived-category error paths (M3).
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

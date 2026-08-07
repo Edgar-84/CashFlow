@@ -608,7 +608,10 @@ function renderDeleteTrigger(expenseCount: number): string {
 
 export interface TagFormHandlers {
   onClose: () => void;
-  onSaved: () => void;
+  /** The created or updated tag — U3.4's add-expense "+ Add tag" flow needs
+   * the id to pre-select a just-created tag on return; a rename's caller
+   * simply ignores it. */
+  onSaved: (tag: TagResponse) => void;
   /** Fires once the user has confirmed Telegram's delete/hide popup (07b).
    * main.ts owns the actual `DELETE` call and the optimistic navigation back
    * to 07a — this handler is just the signal that the confirmation happened. */
@@ -690,7 +693,7 @@ export function mountTagForm(
       const outcome = await controller.submit();
       if (outcome.status === "success") {
         haptics.notification("success");
-        handlers.onSaved();
+        handlers.onSaved(outcome.tag);
       } else if (outcome.status === "error") {
         submitError = outcome.message;
         render();

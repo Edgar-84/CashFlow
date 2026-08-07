@@ -4,6 +4,7 @@ import {
   confirmDiscard,
   expand,
   getInitData,
+  getViewportStableHeight,
   haptics,
   isAvailable,
   mainButton,
@@ -219,5 +220,30 @@ describe("with a Telegram object present", () => {
 
     expect(isAvailable()).toBe(true);
     expect(getInitData()).toBe("user=1&hash=xyz");
+  });
+});
+
+describe("getViewportStableHeight", () => {
+  it("returns 0 with no window at all, never throws", () => {
+    expect(() => getViewportStableHeight()).not.toThrow();
+    expect(getViewportStableHeight()).toBe(0);
+  });
+
+  it("reads viewportStableHeight from Telegram — the keyboard-aware height", () => {
+    installWebApp(fakeWebApp({ viewportStableHeight: 420 }));
+
+    expect(getViewportStableHeight()).toBe(420);
+  });
+
+  it("honors a legitimate 0 rather than falling back (numeric check, not truthiness)", () => {
+    installWebApp(fakeWebApp({ viewportStableHeight: 0 }));
+
+    expect(getViewportStableHeight()).toBe(0);
+  });
+
+  it("falls back to window.innerHeight outside Telegram (no keyboard-aware signal exists there)", () => {
+    (globalThis as { window?: Window }).window = { innerHeight: 800 } as unknown as Window;
+
+    expect(getViewportStableHeight()).toBe(800);
   });
 });

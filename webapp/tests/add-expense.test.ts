@@ -5,6 +5,7 @@ import type { CategoryResponse, ExpenseResponse, TagResponse } from "../src/api/
 import {
   amountError,
   applyAddExpenseChrome,
+  commentScrollOffset,
   createController,
   createMemoryCache,
   datePillOptions,
@@ -150,6 +151,17 @@ describe("nextDatePillFocusIndex", () => {
   });
 });
 
+describe("commentScrollOffset", () => {
+  it("is zero when the field's bottom is already within the visible viewport", () => {
+    expect(commentScrollOffset(400, 600)).toBe(0);
+    expect(commentScrollOffset(600, 600)).toBe(0);
+  });
+
+  it("is the exact overhang once the field's bottom is below viewportStableHeight (the keyboard-aware height, not 100vh)", () => {
+    expect(commentScrollOffset(700, 600)).toBe(100);
+  });
+});
+
 // -- loadAddExpenseData ---------------------------------------------------
 
 function fakeApi(overrides: Partial<AddExpenseApi> = {}): AddExpenseApi {
@@ -272,6 +284,21 @@ describe("createController submit", () => {
       spent_at: undefined,
     });
     expect(controller.getDraft()).toEqual(emptyDraft());
+  });
+
+  it("carries both tags when two are selected (AC: multi-select)", async () => {
+    const api = fakeApi();
+    const controller = createController(api, CATEGORIES, "EUR");
+    controller.setAmountInput("38.40");
+    controller.setCategoryId("cat-groceries");
+    controller.toggleTag("tag-vacation");
+    controller.toggleTag("tag-work");
+
+    await controller.submit();
+
+    expect(api.createExpense).toHaveBeenCalledWith(
+      expect.objectContaining({ tag_ids: ["tag-vacation", "tag-work"] }),
+    );
   });
 
   it("omits tag_ids and comment when neither is set", async () => {
@@ -468,9 +495,36 @@ describe("renderAddExpense", () => {
     expect(html).toContain("background:var(--category-slot-2)");
   });
 
-  it("omits the tag chip row when the account has no tags", () => {
+  it("renders only the '+ Add tag' chip when the account has no tags", () => {
     const html = renderForm({ ...READY, tags: [] }, emptyDraft());
-    expect(html).not.toContain('data-testid="tag-chips"');
+    expect(html).toContain('data-testid="tag-chips"');
+    expect(html).toContain('data-testid="tag-add-chip"');
+    expect(html).not.toContain('data-tag-id');
+  });
+
+  it("puts '+ Add tag' last, after every real tag chip", () => {
+    const html = renderForm(READY, emptyDraft());
+    const tagIdIndex = html.indexOf('data-tag-id="tag-vacation"');
+    const addChipIndex = html.indexOf('data-testid="tag-add-chip"');
+    expect(tagIdIndex).toBeGreaterThan(-1);
+    expect(addChipIndex).toBeGreaterThan(tagIdIndex);
+  });
+
+  it("marks a selected tag chip active and leaves others unselected", () => {
+    const html = renderForm(READY, { ...emptyDraft(), tagIds: ["tag-vacation"] });
+    expect(html).toMatch(/class="chip active"[^>]*data-tag-id="tag-vacation"/);
+  });
+
+  it("caps the comment field at 4096 characters with no counter", () => {
+    const html = renderForm(READY, emptyDraft());
+    expect(html).toContain('maxlength="4096"');
+    expect(html).not.toMatch(/\d+\s*\/\s*4096/);
+  });
+
+  it("labels the Tags and Comment regions", () => {
+    const html = renderForm(READY, emptyDraft());
+    expect(html).toContain('<div class="field-label">Tags</div>');
+    expect(html).toContain('<div class="field-label">Comment</div>');
   });
 
   it("shows the offline banner and last-synced marker", () => {
