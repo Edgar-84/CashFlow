@@ -330,7 +330,7 @@ navigate into screens that must already accept what they will be handed.
       (D118/D123) is untouched and still covered.
       Files: `webapp/src/screens/add-expense.ts`,
       `webapp/tests/add-expense.test.ts`. Model: sonnet.
-- [ ] **U1.4 Screen 02b — edit expense** — implements
+- [x] **U1.4 Screen 02b — edit expense** — implements
       `docs/ui/screens/02b-edit-expense.md` on top of U1.3.
       AC: **every acceptance criterion in that spec**, notably — the screen
       opens pre-filled including the date (an expense from three weeks ago takes
@@ -720,6 +720,28 @@ human with a phone:
   without duplicating resolution logic outside the shared module. Flagged by
   the U0.2 reviewer as a plan/Contracts mismatch worth closing before U0.3
   starts.
+- 2026-08-07: **D417 — U1.4 extended its Files list beyond
+  `screens/add-expense.ts`/`main.ts`.** The archived-current-category edge
+  case ("rendered in the grid as a selected, dimmed cell") cannot be built
+  from `initialExpense` alone — `ExpenseResponse` carries no category name or
+  colour, and the composer's own `GET /categories` call excludes archived
+  rows by design (so it isn't offerable when picking a *new* category).
+  Touched, beyond the plan's Files list: `components/category-picker.ts`
+  (new optional `CategoryPickerItem.archived`, purely additive — dims and
+  natively `disable`s one cell, no `mount()`-side wiring needed since a
+  disabled `<button>` never fires `click`); `api/client.ts` (new
+  `getCategory(id)`, a thin wrapper matching the existing single-resource GET
+  shape — the backend route already exists, unchanged, so this needed no
+  backend delta); `docs/ui/components/category-picker.md` (the new variant,
+  same change per root CLAUDE.md's UI rule); their two test files. Rejected:
+  fetching the account's full `include_archived` category list instead —
+  wasteful (every archived category ever, for one cell), and running
+  `assignCategoryColors` over a list that mixes active and archived rows
+  risks shifting an *active* category's own position-based fallback colour,
+  which archiving a sibling must never do (`lib/category-colors.ts`'s own
+  invariant). The single-id `GET /categories/{id}` route already has no
+  `is_active` filter, so one targeted fetch (only when the expense's category
+  isn't already in the plain list) was both cheaper and safer.
 - 2026-08-07: **D412 — the side menu opens from Home only.** Every other screen
   owns a BackButton to Home; a drawer reachable from a sub-screen would put two
   different "go somewhere else" gestures on one surface. Extending it app-wide
@@ -890,7 +912,57 @@ human with a phone:
   here, unchanged from create mode) — both currently produce the
   category-stale message and recovery, which is wrong for the former. U1.4
   owns 02b's States table, so that's where this gets a real fix.
-- **Next:** M1 — `U1.4` Screen 02b — edit expense.
+- **U1.4 done.** `screens/add-expense.ts::mount`/`createController` gained
+  `mode`/`initialExpense` params (U1.3 already had the types; this unit is
+  the first real caller). New pure functions: `editChanges` (the PATCH
+  diff — only fields that differ from `initialExpense`, tags compared as a
+  set), `isEditDirty` (`editChanges` non-empty), `editButtonState`
+  ("Save changes"/dirty-gated, reusing `submitButtonState`'s two guard
+  labels but — deliberately — not its "category must be in the active list"
+  check, since the archived-category edge case needs the opposite).
+  `applyEditExpenseChrome` and `wireBackButton`'s new `{isDirtyFn, message}`
+  opts thread this into MainButton/BackButton chrome; `mount` picks between
+  the create/edit chrome and dirty-check via a mode check, and skips
+  auto-focusing the amount field in edit mode (screen doc's Viewport
+  section). `main.ts` gained `withArchivedCategory` (splices in the one
+  archived category via the new `ApiClient.getCategory`, only when
+  `initialExpense.category_id` isn't already in the loaded list) and
+  `showEditExpense`, exported but **not yet called from anywhere in the
+  app** — `expense-detail.ts`'s Edit button still opens the V2 field-picker
+  until U1.5 deletes it and wires "Edit" to this function in one coupled
+  change (U1.5's own AC). D417 records the Files-list extension this needed
+  (`components/category-picker.ts`, `api/client.ts`, and their specs/tests).
+  The 404-on-save States row is a real split, not one message: a PATCH 404
+  is a stale *expense* whenever `editChanges`'s payload has no `category_id`
+  key (the server's own `_validate_category` check only runs when that key
+  is present — `services/expense_service.py::update`'s doc comment), and
+  falls back to the stale-*category* message/recovery otherwise (the same
+  ambiguity create mode already had, since it always sends `category_id`).
+  The 403 message is edit-specific too ("...to edit this expense.", not
+  "...to add expenses."), per the screen doc's Copy table — both found and
+  fixed in the U1.4 reviewer's first pass, along with a keyboard-navigation
+  fix (arrow keys in `components/category-picker.ts` now skip the archived,
+  natively-`disabled` cell instead of stranding on it) and exporting
+  `main.ts::withArchivedCategory` with an injected `getCategory` param
+  (rather than closing over the module `client`) so it has direct test
+  coverage, matching `withCreatedTagPreselected`'s own precedent. Still not
+  built: the *navigation* half of "stale expense → back to screen 03a" (the
+  message is correct; leaving 02b for 03a instead of 03b is a new
+  `AddExpenseHandlers` callback `showEditExpense`'s own unwired caller would
+  need to supply, so it's U1.5's call along with the rest of the 03b↔02b
+  wiring).
+  **Deliberately not changed:** `datePillOptions` still appends a fourth
+  pill for an out-of-range date rather than "taking over" pill 3 — that
+  slot-rule rewrite is U2.4's own AC and touches `screens/add-expense.ts`
+  too; doing it early here would have finished U2.4's job inside U1.4 and
+  skipped its own tests. 02b's pre-fill still selects/highlights the right
+  date correctly under the current (4-pill) mechanic, so this is a sequencing
+  choice, not a missed AC. Also not built: the Loading-state's fuller
+  pre-fill (date/comment shown before categories/tags resolve, per the
+  screen doc's States table) — the amount field alone is already live from
+  `seedDraft` (existing mechanism, unchanged), and the rest isn't in the
+  unit's own gating Acceptance criteria list.
+- **Next:** M1 — `U1.5` Screen 03b — Edit routes to 02b, Delete confirms.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
@@ -908,4 +980,8 @@ human with a phone:
     (CP5), drop it — the rest of V4 does not lean on it.
   - Several units **delete** code and must delete its tests with it — see
     Risks.
+  - `main.ts::showEditExpense` (U1.4) is written and exported but **unwired**
+    — U1.5 calls it from screen 03b's "Edit" action (replacing the deleted
+    field-picker's `data-action="open-picker"` handler) rather than adding a
+    second route.
   - There is no migration in this plan and no stop-and-ask gate.

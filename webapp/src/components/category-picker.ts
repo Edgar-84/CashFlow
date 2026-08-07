@@ -18,6 +18,12 @@ export interface CategoryPickerItem {
   id: Uuid;
   name: string;
   colorVar: string; // e.g. "var(--category-slot-3)", resolved by the caller
+  /** Screen 02b's archived-current-category edge case (U1.4): rendered
+   * selected and dimmed, never tappable, regardless of the grid's own
+   * `disabled` prop. The caller is responsible for only ever setting this on
+   * the one archived category that happens to be the expense's own —
+   * archived categories are otherwise excluded from `items` entirely. */
+  archived?: boolean;
 }
 
 export interface CategoryPickerProps {
@@ -66,7 +72,9 @@ function escapeHtml(value: string): string {
 }
 
 function renderCell(item: CategoryPickerItem, selected: boolean, disabled: boolean): string {
-  return `<button type="button" class="cp-cell${selected ? " selected" : ""}" role="radio" aria-checked="${selected}" aria-label="${escapeHtml(item.name)}" data-testid="cp-cell" data-category-id="${item.id}"${disabled ? " disabled" : ""}>
+  const cellDisabled = disabled || item.archived === true;
+  const cellClass = `cp-cell${selected ? " selected" : ""}${item.archived ? " cp-cell-archived" : ""}`;
+  return `<button type="button" class="${cellClass}" role="radio" aria-checked="${selected}" aria-label="${escapeHtml(item.name)}" data-testid="cp-cell" data-category-id="${item.id}"${cellDisabled ? " disabled" : ""}>
     <span class="cp-swatch" style="background:${item.colorVar}" aria-hidden="true"></span>
     <span class="cp-name" aria-hidden="true">${escapeHtml(item.name)}</span>
   </button>`;
@@ -134,8 +142,15 @@ export function mount(root: HTMLElement, props: CategoryPickerProps): void {
     if (from === -1) {
       return;
     }
-    const nextIndex = nextGridFocusIndex(cells.length, from, e.key);
-    if (nextIndex === from) {
+    let nextIndex = nextGridFocusIndex(cells.length, from, e.key);
+    // Skip an archived cell (U1.4) — it's a native `disabled` button, which
+    // can never receive focus, so landing on one would strand arrow-key
+    // navigation instead of moving past it. Bounded by `cells.length` so a
+    // grid that somehow ends up all-disabled can't loop forever.
+    for (let guard = 0; guard < cells.length && cells[nextIndex]?.hasAttribute("disabled"); guard++) {
+      nextIndex = nextGridFocusIndex(cells.length, nextIndex, e.key);
+    }
+    if (nextIndex === from || cells[nextIndex]?.hasAttribute("disabled")) {
       return;
     }
     e.preventDefault();

@@ -2,9 +2,11 @@ import { ApiClient, ForbiddenError } from "./api/client";
 import { applyTheme, getInitData } from "./lib/telegram";
 import {
   createMemoryCache as createAddExpenseCache,
+  draftFromExpense,
   loadAddExpenseData,
   mount as mountAddExpense,
   type AddExpenseHandlers,
+  type AddExpenseLoadState,
   type Draft as AddExpenseDraft,
 } from "./screens/add-expense";
 import {
@@ -77,7 +79,7 @@ import {
   type Grouping,
   type StatisticsHandlers,
 } from "./screens/statistics";
-import type { Uuid } from "./api/types";
+import type { CategoryResponse, ExpenseResponse, Uuid } from "./api/types";
 
 const client = new ApiClient({ getInitData });
 const homeCache = createHomeCache();
@@ -293,6 +295,95 @@ async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
   mountAddExpense(root, { status: "loading" }, client, handlers, initialDraft);
   const state = await loadAddExpenseData(client, addExpenseCache);
   mountAddExpense(root, state, client, handlers, initialDraft);
+}
+
+/** Screen 02b's archived-current-category edge case (U1.4, docs/ui/screens/
+ * 02b-edit-expense.md's Edge cases): `loadAddExpenseData`'s plain
+ * `GET /categories` excludes archived rows, so an expense whose category has
+ * since been archived would open the composer with no selection at all. This
+ * fetches that *one* category by id — never a bulk `include_archived` list,
+ * which would also risk shifting an active category's own position-based
+ * fallback colour (see `add-expense.ts::categoryGridItems`'s own comment) —
+ * and splices it into the loaded state so that function can render it as the
+ * dimmed, unselectable cell the spec calls for. A no-op when the category is
+ * already in the list (the common case) or the state has nothing to splice
+ * into (loading/error/forbidden/empty). Never throws: a category that's
+ * gone entirely (not just archived) leaves the grid with no selection, the
+ * same fallback the screen already had before this unit.
+ *
+ * `getCategory` is threaded in explicitly (rather than closing over the
+ * module-level `client`) so this stays directly testable without a DOM —
+ * same reasoning as `withCreatedTagPreselected`'s own pure shape above. */
+export async function withArchivedCategory(
+  state: AddExpenseLoadState,
+  expense: ExpenseResponse,
+  getCategory: (id: Uuid) => Promise<CategoryResponse>,
+): Promise<AddExpenseLoadState> {
+  if (state.status !== "ready" && state.status !== "offline") {
+    return state;
+  }
+  if (state.categories.some((c) => c.id === expense.category_id)) {
+    return state;
+  }
+  try {
+    const archived = await getCategory(expense.category_id);
+    return { ...state, categories: [...state.categories, archived] };
+  } catch {
+    return state;
+  }
+}
+
+/** Mounts Screen 02b (Edit expense, U1.4) — the composer opened in `"edit"`
+ * mode, pre-filled from `expense`, straight off the record screen 03b
+ * already loaded (docs/ui/screens/02b-edit-expense.md's Data section: "the
+ * expense itself is not fetched here"). `onBack` returns to 03b, never Home
+ * — both a clean BackButton and a successful save land back on the record
+ * being edited, unlike `showAddExpense`'s Home destination.
+ *
+ * Exported for U1.5 to wire from screen 03b's "Edit" action; this unit
+ * builds the route and its own tests exercise `mount()`/`createController()`
+ * directly, but nothing in the running app calls this yet —
+ * `expense-detail.ts`'s Edit button still opens the old field-picker until
+ * U1.5 deletes it (that deletion and this wiring are one coupled change per
+ * U1.5's own AC, so it isn't split across two units). */
+export async function showEditExpense(
+  expense: ExpenseResponse,
+  onBack: () => void,
+  initialDraft?: AddExpenseDraft,
+): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  activeScreen = "add-expense";
+
+  const handlers: AddExpenseHandlers = {
+    onRetry: () => {
+      void showEditExpense(expense, onBack, initialDraft);
+    },
+    onClose: onBack,
+    onSuccess: onBack,
+    onMore: (draft) => {
+      categoriesReturnTo = () => void showEditExpense(expense, onBack, { ...draft, categoryId: null });
+      void showCategories();
+    },
+    onAddTag: (draft) => {
+      lastCreatedTagId = null;
+      tagsReturnTo = () => {
+        const tagIds = withCreatedTagPreselected(draft.tagIds, lastCreatedTagId);
+        lastCreatedTagId = null;
+        void showEditExpense(expense, onBack, { ...draft, tagIds });
+      };
+      void showTags();
+    },
+  };
+
+  const seedDraft = initialDraft ?? draftFromExpense(expense);
+  mountAddExpense(root, { status: "loading" }, client, handlers, seedDraft, "edit", expense);
+  const state = await withArchivedCategory(await loadAddExpenseData(client, addExpenseCache), expense, (id) =>
+    client.getCategory(id),
+  );
+  mountAddExpense(root, state, client, handlers, seedDraft, "edit", expense);
 }
 
 /** Mounts Expenses (U2.3, screen 03a). BackButton always returns to Home;

@@ -41,6 +41,7 @@ underneath** — the pair is the identity, and the two are never separated.
 |---|---|---|
 | Default | screen 02 | As above |
 | Read-only | 403 viewer | Cells rendered at 50% opacity, inert, "More" hidden |
+| Archived-selected | screen 02b (U1.4), the expense's own category was archived after the fact | That one cell only: dimmed to 50% opacity and `disabled`, but still drawn **selected** (rounded square, 600 weight). Appended after every active cell, before "More". Independent of the grid's own `disabled` prop |
 
 ## States
 
@@ -88,6 +89,7 @@ interface CategoryPickerItem {
   id: Uuid;
   name: string;
   colorVar: string;          // "var(--category-slot-3)", resolved by the caller
+  archived?: boolean;        // 02b's Archived-selected variant (U1.4) — dimmed, never tappable
 }
 
 interface CategoryPickerProps {
