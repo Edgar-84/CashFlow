@@ -9,6 +9,7 @@ import {
   createController,
   createMemoryCache,
   datePillOptions,
+  draftFromExpense,
   emptyDraft,
   isDirty,
   loadAddExpenseData,
@@ -159,6 +160,32 @@ describe("commentScrollOffset", () => {
 
   it("is the exact overhang once the field's bottom is below viewportStableHeight (the keyboard-aware height, not 100vh)", () => {
     expect(commentScrollOffset(700, 600)).toBe(100);
+  });
+});
+
+describe("draftFromExpense", () => {
+  it("maps an expense's amount, category, date, tags and comment into a draft", () => {
+    const expense = expenseResponse({
+      amount: 1250,
+      category_id: "cat-transport",
+      spent_at: "2026-07-20",
+      comment: "weekly shop",
+      tags: [tag("tag-vacation", "vacation"), tag("tag-work", "work")],
+    });
+
+    expect(draftFromExpense(expense)).toEqual({
+      amountInput: "12.50",
+      categoryId: "cat-transport",
+      tagIds: ["tag-vacation", "tag-work"],
+      comment: "weekly shop",
+      spentAt: "2026-07-20",
+    });
+  });
+
+  it("maps a null comment and no tags to an empty comment and an empty tag list", () => {
+    const draft = draftFromExpense(expenseResponse({ comment: null, tags: [] }));
+    expect(draft.comment).toBe("");
+    expect(draft.tagIds).toEqual([]);
   });
 });
 
@@ -485,6 +512,130 @@ describe("createController submit", () => {
         expect(outcome.message).not.toMatch(/\d{3}/);
       }
     }
+  });
+});
+
+describe("createController submit — edit mode (U1.4's hook)", () => {
+  it("PATCHes the expense being edited instead of POSTing a new one", async () => {
+    const expense = expenseResponse({ id: "exp-1", spent_at: "2026-08-02" });
+    const updateExpense = vi.fn().mockResolvedValue(expenseResponse());
+    const api = fakeApi({ updateExpense });
+    const controller = createController(
+      api,
+      CATEGORIES,
+      "EUR",
+      draftFromExpense(expense),
+      "edit",
+      expense,
+    );
+    controller.setAmountInput("50.00");
+
+    const outcome = await controller.submit();
+
+    expect(outcome.status).toBe("success");
+    expect(api.createExpense).not.toHaveBeenCalled();
+    expect(updateExpense).toHaveBeenCalledOnce();
+    expect(updateExpense).toHaveBeenCalledWith("exp-1", {
+      amount: 5000,
+      category_id: "cat-groceries",
+      tag_ids: [],
+      comment: null,
+      spent_at: "2026-08-02",
+    });
+  });
+
+  it("resolves a 'today' pill selection (null spentAt) to today, not the expense's original date", async () => {
+    const expense = expenseResponse({ spent_at: "2026-07-20" });
+    const updateExpense = vi.fn().mockResolvedValue(expenseResponse());
+    const api = fakeApi({ updateExpense });
+    const controller = createController(
+      api,
+      CATEGORIES,
+      "EUR",
+      draftFromExpense(expense),
+      "edit",
+      expense,
+      TODAY,
+    );
+    controller.setSpentAt(null); // the date row's own "today" convention
+
+    await controller.submit();
+
+    expect(updateExpense).toHaveBeenCalledWith(expense.id, expect.objectContaining({ spent_at: TODAY }));
+  });
+
+  it("rejects instead of silently posting a new expense when mode is 'edit' with no initialExpense", async () => {
+    const api = fakeApi();
+    const controller = createController(api, CATEGORIES, "EUR", validDraft(), "edit", null);
+
+    await expect(controller.submit()).rejects.toThrow(/edit mode requires initialExpense/);
+
+    expect(api.createExpense).not.toHaveBeenCalled();
+  });
+
+  it("sends an empty tag_ids array (not omitted) once every tag is cleared", async () => {
+    const expense = expenseResponse({ tags: [tag("tag-vacation", "vacation")] });
+    const updateExpense = vi.fn().mockResolvedValue(expenseResponse());
+    const api = fakeApi({ updateExpense });
+    const controller = createController(
+      api,
+      CATEGORIES,
+      "EUR",
+      draftFromExpense(expense),
+      "edit",
+      expense,
+    );
+    controller.toggleTag("tag-vacation");
+
+    await controller.submit();
+
+    expect(updateExpense).toHaveBeenCalledWith(expense.id, expect.objectContaining({ tag_ids: [] }));
+  });
+
+  it("leaves the draft in place after a successful save, unlike create mode's reset", async () => {
+    const expense = expenseResponse();
+    const api = fakeApi({ updateExpense: vi.fn().mockResolvedValue(expenseResponse()) });
+    const controller = createController(
+      api,
+      CATEGORIES,
+      "EUR",
+      draftFromExpense(expense),
+      "edit",
+      expense,
+    );
+
+    await controller.submit();
+
+    expect(controller.getDraft()).toEqual(draftFromExpense(expense));
+  });
+
+  it("a duplicate rapid submit in edit mode still issues exactly one PATCH", async () => {
+    let resolveUpdate: (value: ExpenseResponse) => void = () => {};
+    const updateExpense = vi.fn(
+      () =>
+        new Promise<ExpenseResponse>((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+    const expense = expenseResponse();
+    const api = fakeApi({ updateExpense });
+    const controller = createController(
+      api,
+      CATEGORIES,
+      "EUR",
+      draftFromExpense(expense),
+      "edit",
+      expense,
+    );
+
+    const first = controller.submit();
+    const second = controller.submit();
+    resolveUpdate(expenseResponse());
+    const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+
+    expect(updateExpense).toHaveBeenCalledOnce();
+    expect(firstOutcome.status).toBe("success");
+    expect(secondOutcome).toEqual({ status: "blocked" });
   });
 });
 

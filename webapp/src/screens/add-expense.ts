@@ -36,17 +36,27 @@ import type {
   Currency,
   ExpenseCreate,
   ExpenseResponse,
+  ExpenseUpdate,
   TagResponse,
   Uuid,
 } from "../api/types";
 
 // -- data --------------------------------------------------------------------
 
+/** Screen 02 always creates; screen 02b (U1.4) opens the same module in
+ * `"edit"` mode with an `initialExpense` to pre-fill from and PATCH back to.
+ * `createController` defaults to `"create"`, so every existing call site —
+ * including every test in this unit — is unaffected. */
+export type AddExpenseMode = "create" | "edit";
+
 export interface AddExpenseApi {
   getMe(): Promise<{ currency: Currency; account_name: string; today: string }>;
   listCategories(): Promise<CategoryResponse[]>;
   listTags(): Promise<TagResponse[]>;
   createExpense(data: ExpenseCreate): Promise<ExpenseResponse>;
+  /** Screen 02b's save (U1.4). Optional so a `"create"`-mode caller — every
+   * existing fake in this unit's tests — needs no change. */
+  updateExpense?(id: Uuid, data: ExpenseUpdate): Promise<ExpenseResponse>;
 }
 
 export interface AddExpenseFormData {
@@ -140,6 +150,21 @@ export interface Draft {
 
 export function emptyDraft(): Draft {
   return { amountInput: "", categoryId: null, tagIds: [], comment: "", spentAt: null };
+}
+
+/** Screen 02b's pre-fill (U1.4): the draft an edit opens with, straight from
+ * the expense screen 03b already loaded — no refetch. Unlike `emptyDraft`,
+ * `spentAt` is always the expense's own date, never `null` — "no override"
+ * only means "today" in create mode (see `Draft.spentAt` above); an edit has
+ * no such default to fall back on. */
+export function draftFromExpense(expense: ExpenseResponse): Draft {
+  return {
+    amountInput: formatAmount(expense.amount),
+    categoryId: expense.category_id,
+    tagIds: expense.tags.map((t) => t.id),
+    comment: expense.comment ?? "",
+    spentAt: expense.spent_at,
+  };
 }
 
 /** `spentAt` is deliberately excluded — docs/ui/screens/02-add-expense.md's
@@ -253,12 +278,28 @@ export interface AddExpenseController {
  * A stale-category 404/409 (U3.5) is the other recovering failure: the
  * selection is cleared and `categories` refetched via `api.listCategories`,
  * while the rest of the draft (amount, tags, comment, date) survives —
- * still "pure aside from the awaited API calls", so directly unit-testable. */
+ * still "pure aside from the awaited API calls", so directly unit-testable.
+ *
+ * `mode`/`initialExpense` are U1.4's hook: one `submit()` serves both
+ * screens rather than a second `update()` method, so the double-submit guard
+ * and the stale-category recovery need no duplicate. In `"edit"` mode the
+ * PATCH carries the full draft, not a diff against `initialExpense` — U1.4
+ * narrows that to changed fields only, once it also owns the "disabled
+ * until something differs" chrome that decides what counts as changed. A
+ * successful edit leaves the draft as-is (screen 02b returns to 03b showing
+ * it) rather than resetting to empty, which is create mode's own affordance
+ * for "add another". `today` resolves a `null` `spentAt` (the "today" pill's
+ * own convention, set by the same date row screen 02b reuses verbatim) back
+ * to a real date for the PATCH — falling back to `initialExpense.spent_at`
+ * instead would silently revert a deliberate "move this to today" edit. */
 export function createController(
-  api: Pick<AddExpenseApi, "createExpense" | "listCategories">,
+  api: Pick<AddExpenseApi, "createExpense" | "updateExpense" | "listCategories">,
   categories: CategoryResponse[],
   currency: Currency,
   initialDraft: Draft = emptyDraft(),
+  mode: AddExpenseMode = "create",
+  initialExpense: ExpenseResponse | null = null,
+  today: string | null = null,
 ): AddExpenseController {
   let draft = initialDraft;
   let submitting = false;
@@ -295,16 +336,37 @@ export function createController(
       if (!enabled || minor === null || !draft.categoryId) {
         return { status: "blocked" };
       }
+      if (mode === "edit" && !initialExpense) {
+        // Programmer error, not a user-facing scenario (webapp/CLAUDE.md's
+        // rule against validating what can't happen at a system boundary) —
+        // a host constructing an edit controller without the expense it
+        // edits is a wiring bug, not user input. Fails loud instead of
+        // silently falling through to the create branch below and posting a
+        // duplicate expense.
+        throw new Error("createController: edit mode requires initialExpense");
+      }
       submitting = true;
       try {
-        const expense = await api.createExpense({
-          amount: minor,
-          category_id: draft.categoryId,
-          tag_ids: draft.tagIds.length > 0 ? draft.tagIds : undefined,
-          comment: draft.comment.trim() === "" ? undefined : draft.comment.trim(),
-          spent_at: draft.spentAt ?? undefined,
-        });
-        draft = emptyDraft();
+        const expense =
+          mode === "edit" && initialExpense
+            ? await api.updateExpense!(initialExpense.id, {
+                amount: minor,
+                category_id: draft.categoryId,
+                // Edit sends the resolved set unconditionally — `tag_ids: []`
+                // clearing every tag is a real, distinct PATCH (02b's Edge
+                // cases), not "field omitted" the way create's `undefined` is.
+                tag_ids: draft.tagIds,
+                comment: draft.comment.trim() === "" ? null : draft.comment.trim(),
+                spent_at: draft.spentAt ?? today ?? initialExpense.spent_at,
+              })
+            : await api.createExpense({
+                amount: minor,
+                category_id: draft.categoryId,
+                tag_ids: draft.tagIds.length > 0 ? draft.tagIds : undefined,
+                comment: draft.comment.trim() === "" ? undefined : draft.comment.trim(),
+                spent_at: draft.spentAt ?? undefined,
+              });
+        draft = mode === "edit" ? draft : emptyDraft();
         return { status: "success", expense };
       } catch (err) {
         if (isStaleCategoryError(err)) {
