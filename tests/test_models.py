@@ -60,9 +60,11 @@ def test_account_response_and_user_me_response() -> None:
         created_at=datetime.now(UTC),
         currency=account.currency,
         account_name=account.name,
+        today=date(2026, 8, 4),
     )
     assert me.currency == Currency.PLN
     assert me.account_name == "Smith Family"
+    assert me.today == date(2026, 8, 4)
 
 
 def test_account_response_rejects_unsupported_currency() -> None:

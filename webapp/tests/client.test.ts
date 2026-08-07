@@ -347,6 +347,7 @@ describe("ApiClient — response parsing", () => {
       created_at: "2026-07-29T00:00:00Z",
       currency: "PLN",
       account_name: "Smith Family",
+      today: "2026-07-29",
     };
     const { client } = makeClient(jsonResponse(payload));
 

@@ -9,7 +9,7 @@ import hmac
 import json
 import time
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 from urllib.parse import parse_qsl, urlencode
 from uuid import UUID, uuid4
@@ -23,6 +23,7 @@ from api.deps import (
     InitDataError,
     PermissionChecker,
     PermissionDecision,
+    _family_today,
     enforce_ownership,
     resolve_permission,
     validate_init_data,
@@ -31,6 +32,18 @@ from config import get_settings
 from models.enums import Action, Resource, Role
 from models.permission import PermissionResponse
 from models.user import UserResponse
+
+# --- _family_today (U3.3) -----------------------------------------------------
+
+
+def test_family_today_resolves_in_the_given_timezone_not_utc() -> None:
+    # 23:30 UTC on 2026-08-03 is already 2026-08-04 in Europe/Belgrade
+    # (UTC+2 in August) — the exact D120 bug class this helper exists to
+    # avoid: a naive UTC date would answer "today" wrong for `UserMeResponse`.
+    now = datetime(2026, 8, 3, 23, 30, tzinfo=UTC)
+    assert _family_today("Europe/Belgrade", now) == date(2026, 8, 4)
+    assert _family_today("UTC", now) == date(2026, 8, 3)
+
 
 # --- helpers -----------------------------------------------------------------
 
