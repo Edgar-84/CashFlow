@@ -147,19 +147,41 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         )
         return {row["category_id"]: row["total"] for row in rows}
 
-    async def list(
-        self, *, limit: int = 50, offset: int = 0, **filters: Any
+    async def list(  # type: ignore[override]
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        account_id: UUID,
+        category_id: UUID | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        tz: str = "UTC",
     ) -> list[ExpenseResponse]:
-        params = list(filters.values())
-        if filters:
-            columns = list(filters.keys())
-            where = " AND ".join(f"expenses.{col} = ${i}" for i, col in enumerate(columns, start=1))
-            where_clause = f"WHERE {where} "
-        else:
-            where_clause = ""
+        # Explicit keywords replace BaseRepository's **filters equality-builder
+        # for this method's callers (mini-app-v4 plan Contracts, U0.1) — the
+        # narrower signature is deliberate, not LSP-incompatible in practice.
+        conditions = ["expenses.account_id = $1"]
+        params: list[Any] = [account_id]
+        if category_id is not None:
+            params.append(category_id)
+            conditions.append(f"expenses.category_id = ${len(params)}")
+        if start is not None and end is not None:
+            # Same (start AT TIME ZONE tz)::date window as get_by_period —
+            # spent_at is a bare DATE, so the UTC instants must be localized
+            # to `tz` before comparison or boundary rows misfile (D323).
+            params.append(start)
+            start_idx = len(params)
+            params.append(end)
+            end_idx = len(params)
+            params.append(tz)
+            tz_idx = len(params)
+            conditions.append(f"expenses.spent_at >= (${start_idx} AT TIME ZONE ${tz_idx})::date")
+            conditions.append(f"expenses.spent_at <  (${end_idx} AT TIME ZONE ${tz_idx})::date")
+        where_clause = "WHERE " + " AND ".join(conditions)
         limit_idx, offset_idx = len(params) + 1, len(params) + 2
         rows = await self._conn.fetch(
-            f"{self._SELECT_WITH_AUTHOR} {where_clause}"
+            f"{self._SELECT_WITH_AUTHOR} {where_clause} "
             f"ORDER BY expenses.created_at DESC LIMIT ${limit_idx} OFFSET ${offset_idx}",
             *params,
             limit,

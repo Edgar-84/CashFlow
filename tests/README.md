@@ -117,6 +117,12 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_zero_or_negative_amount_rejected_by_db_check` | DB `CHECK (amount > 0)` on `expenses` rejects a direct zero/negative insert with `asyncpg.CheckViolationError` (U1.6) |
 | `test_list_paginates_without_overlap_newest_first` | `list(limit=, offset=)` pages a 5-row seeded set with no overlap between pages, newest-`created_at`-first order preserved across the page boundary (U0.3 AC) |
 | `test_list_default_limit_is_50` | Omitting `limit`/`offset` still returns every row of a small set — default call unchanged for existing callers (U0.3 AC) |
+| `test_list_filters_by_category_id` | `list(category_id=...)` narrows to that category (mini-app-v4 U0.1) |
+| `test_list_filters_by_spent_at_window` | `list(start=, end=)` narrows to a half-open `spent_at` window (U0.1) |
+| `test_list_combines_category_and_period_filters` | `category_id` and `start`/`end` combine — only rows matching both are returned (U0.1) |
+| `test_list_filters_by_spent_at_not_created_at` | `list()` filters by `spent_at`, not `created_at` — an expense spent 3 August but created 7 August is inside a 3 August window and outside a 7 August one (U0.1, D314) |
+| `test_list_filters_by_local_spent_at_not_utc_calendar_date` | `list(tz="Europe/Belgrade")` compares `spent_at` against the LOCAL calendar date implied by `start`/`end`, same D323 boundary regression as `get_by_period` (U0.1) |
+| `test_list_paginates_the_filtered_set_not_the_unfiltered_one` | `list(category_id=, limit=, offset=)` pages the filtered set, not the whole account's expenses (U0.1 AC) |
 
 ### `test_budget_plan_repo.py` → [`repositories/budget_plan_repo.py`](../repositories/budget_plan_repo.py)
 | Test | Checks |

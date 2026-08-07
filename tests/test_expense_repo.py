@@ -656,6 +656,209 @@ async def test_list_populates_user_name(db_conn: asyncpg.Connection) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
+async def test_list_filters_by_category_id(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    transport = await make_category(db_conn, account_id=account_id, name="Transport")
+    food = await make_category(db_conn, account_id=account_id, name="Food")
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    transport_expense = await make_expense(
+        db_conn, account_id=account_id, user_id=user.id, category_id=transport
+    )
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=food)
+
+    results = await repo.list(account_id=account_id, category_id=transport)
+
+    assert [e.id for e in results] == [transport_expense.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_filters_by_spent_at_window(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    july_start = datetime(2026, 7, 1, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    in_window = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        spent_at=date(2026, 7, 15),
+    )
+    outside_window = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        spent_at=date(2026, 8, 15),
+    )
+
+    results = await repo.list(account_id=account_id, start=july_start, end=august_start)
+    result_ids = {e.id for e in results}
+
+    assert result_ids == {in_window.id}
+    assert outside_window.id not in result_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_combines_category_and_period_filters(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    transport = await make_category(db_conn, account_id=account_id, name="Transport")
+    food = await make_category(db_conn, account_id=account_id, name="Food")
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    july_start = datetime(2026, 7, 1, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    matching = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=transport,
+        spent_at=date(2026, 7, 15),
+    )
+    # Wrong category, right period.
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=food,
+        spent_at=date(2026, 7, 16),
+    )
+    # Right category, wrong period.
+    await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=transport,
+        spent_at=date(2026, 8, 16),
+    )
+
+    results = await repo.list(
+        account_id=account_id, category_id=transport, start=july_start, end=august_start
+    )
+
+    assert [e.id for e in results] == [matching.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_filters_by_spent_at_not_created_at(db_conn: asyncpg.Connection) -> None:
+    """D314: an expense with spent_at 3 August and created_at 7 August is
+    inside a 3 August window and outside a 7 August one."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    backdated = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        created_at=datetime(2026, 8, 7, tzinfo=UTC),
+        spent_at=date(2026, 8, 3),
+    )
+
+    third_results = await repo.list(
+        account_id=account_id,
+        start=datetime(2026, 8, 3, tzinfo=UTC),
+        end=datetime(2026, 8, 4, tzinfo=UTC),
+    )
+    seventh_results = await repo.list(
+        account_id=account_id,
+        start=datetime(2026, 8, 7, tzinfo=UTC),
+        end=datetime(2026, 8, 8, tzinfo=UTC),
+    )
+
+    assert [e.id for e in third_results] == [backdated.id]
+    assert backdated.id not in {e.id for e in seventh_results}
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_filters_by_local_spent_at_not_utc_calendar_date(
+    db_conn: asyncpg.Connection,
+) -> None:
+    """D323: same boundary regression as get_by_period — start/end are UTC
+    instants representing local midnight in `tz` (Europe/Belgrade is UTC+2 in
+    August), so spent_at must be compared against the LOCAL calendar date."""
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+
+    august_start = datetime(2026, 7, 31, 22, 0, tzinfo=UTC)
+    september_start = datetime(2026, 8, 31, 22, 0, tzinfo=UTC)
+
+    last_day_of_july = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        spent_at=date(2026, 7, 31),
+    )
+    last_day_of_august = await make_expense(
+        db_conn,
+        account_id=account_id,
+        user_id=user.id,
+        category_id=category_id,
+        spent_at=date(2026, 8, 31),
+    )
+
+    repo = ExpenseRepository(db_conn)
+    results = await repo.list(
+        account_id=account_id, start=august_start, end=september_start, tz="Europe/Belgrade"
+    )
+    result_ids = {e.id for e in results}
+
+    assert result_ids == {last_day_of_august.id}
+    assert last_day_of_july.id not in result_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_paginates_the_filtered_set_not_the_unfiltered_one(
+    db_conn: asyncpg.Connection,
+) -> None:
+    account_id = await make_account(db_conn)
+    transport = await make_category(db_conn, account_id=account_id, name="Transport")
+    food = await make_category(db_conn, account_id=account_id, name="Food")
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    # Interleave categories so a naive "filter after paginate" would drop rows.
+    seeded_transport = [
+        await make_expense(
+            db_conn,
+            account_id=account_id,
+            user_id=user.id,
+            category_id=transport,
+            created_at=datetime(2026, 7, day, tzinfo=UTC),
+        )
+        for day in range(1, 6)
+    ]
+    for day in range(1, 6):
+        await make_expense(
+            db_conn,
+            account_id=account_id,
+            user_id=user.id,
+            category_id=food,
+            created_at=datetime(2026, 7, day, 12, tzinfo=UTC),
+        )
+    newest_first_transport_ids = [e.id for e in reversed(seeded_transport)]
+
+    page1 = await repo.list(account_id=account_id, category_id=transport, limit=2, offset=0)
+    page2 = await repo.list(account_id=account_id, category_id=transport, limit=2, offset=2)
+    page3 = await repo.list(account_id=account_id, category_id=transport, limit=2, offset=4)
+
+    assert [e.id for e in page1] == newest_first_transport_ids[0:2]
+    assert [e.id for e in page2] == newest_first_transport_ids[2:4]
+    assert [e.id for e in page3] == newest_first_transport_ids[4:5]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
 async def test_get_by_period_populates_user_name(db_conn: asyncpg.Connection) -> None:
     account_id = await make_account(db_conn)
     category_id = await make_category(db_conn, account_id=account_id)
