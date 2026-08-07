@@ -570,6 +570,22 @@ Hermetic — the real app (`client`/`app` fixtures) with `UserRepository` and
 | `test_delete_user_as_admin` | `DELETE /users/{id}` → 204, row removed |
 | `test_delete_user_as_member_is_403` | Member `DELETE /users/{id}` → 403 |
 
+## API/route tests (`test_accounts_api.py`) → [`api/accounts.py`](../api/accounts.py)
+Hermetic — the real app (`client`/`app` fixtures) with `AccountRepository`/
+`UserRepository` replaced by in-memory fakes via `app.dependency_overrides`.
+No DB.
+
+| Test | Checks |
+|---|---|
+| `test_update_currency_as_admin` | Admin `PATCH /accounts/me` → 200, response is `AccountResponse` with the new currency |
+| `test_update_currency_reflected_in_get_users_me` | After the PATCH, `GET /users/me` reports the new currency on the next call (D401 AC) |
+| `test_update_currency_as_member_is_403` | Member → 403, stored currency unchanged (`require_admin` gate, D401) |
+| `test_update_currency_as_viewer_is_403` | Viewer → 403 |
+| `test_update_currency_unknown_code_is_422` | A code outside the `Currency` enum → 422 from Pydantic |
+| `test_update_currency_does_not_change_expense_amounts` | A seeded expense's `amount` is byte-for-byte unchanged after the PATCH — the direct D400 assertion, not just omission |
+| `test_no_path_variant_accepts_an_account_id` | `PATCH /accounts/{id}` → 404; there is no id-based route, only `/me` |
+| `test_update_currency_missing_credentials_is_401` | No auth headers → 401 |
+
 ## API/route tests (`test_permissions_api.py`) → [`api/permissions.py`](../api/permissions.py)
 Hermetic — the real app (`client`/`app` fixtures) with `PermissionRepository`/
 `UserRepository` replaced by in-memory fakes via `app.dependency_overrides`. No DB.
