@@ -308,7 +308,7 @@ navigate into screens that must already accept what they will be handed.
       the side menu still shows everything, newest first.
       Files: `webapp/src/api/client.ts`, `webapp/src/screens/expenses.ts`,
       `webapp/tests/expenses.test.ts`, `webapp/src/main.ts`. Model: sonnet.
-- [ ] **U1.2 Day grouping and the detail date move to `spent_at`** (D410) —
+- [x] **U1.2 Day grouping and the detail date move to `spent_at`** (D410) —
       the V3 defect this plan found while specifying screen 03.
       AC: an expense with `spent_at` 3 August and `created_at` 7 August appears
       under **3 August** in the list and reads 3 August on the detail screen;
@@ -724,6 +724,39 @@ human with a phone:
   owns a BackButton to Home; a drawer reachable from a sub-screen would put two
   different "go somewhere else" gestures on one surface. Extending it app-wide
   later is a decision with its own units.
+- 2026-08-07: **D416 — `spent_at` grouping/labelling drops the `tz` parameter
+  entirely, rather than reusing it.** `groupByDay`, `buildExpensesData`,
+  `createExpensesController` (`screens/expenses.ts`) and `buildDetailData`,
+  `loadDetail`, `createDetailController` (`screens/expense-detail.ts`) all took
+  an explicit `tz` **only** to convert `created_at` (an instant) into a
+  calendar day. `spent_at` is already a bare `YYYY-MM-DD`, resolved
+  server-side (D314) — there is no instant left to convert, so threading a
+  `tz` through would be dead API surface (CLAUDE.md's rule against `_`-hack
+  unused params). Both modules gained a private `parseCalendarDate` +
+  `formatSpentDay` pair instead (local `Date` from y/m/d components, never
+  `new Date("YYYY-MM-DD")` — that parses as UTC midnight and can drift a day
+  under a negative offset, the same D120 bug class in reverse). No caller
+  outside the two test files passed an explicit `tz`, so `main.ts` needed no
+  change. `lib/dates.ts::formatDay` (tz-based, instant→day) lost both its
+  callers this way and had no other caller anywhere in the app — deleted
+  along with its sole test file (`tests/dates.test.ts`) rather than left
+  orphaned; `webapp/CLAUDE.md`'s structure map dropped its line to match.
+  Also touched `webapp/src/styles/app.css`, outside this unit's Files list:
+  the `.dot` class was referenced in a comment but had no rule at all (a 0×0
+  span), so the AC's "renders at 9px … rather than disappearing" was a real,
+  unrelated-looking one-line gap that had to close in the same change.
+- 2026-08-07: **`groupByDay` sorts groups by `dayKey` descending instead of
+  relying on first-seen order** (review finding on this unit, fixed before
+  merge — not a separate decision, folded into D416's scope). Before D410,
+  the group key and the input's order key were both `created_at`, so
+  first-seen order and newest-day-first order were the same thing by
+  construction. Keying groups by `spent_at` while the input stays ordered by
+  `created_at` (server's `ORDER BY`) breaks that equivalence the moment the
+  two fields diverge across more than two distinct days — a backdated
+  expense typed last would otherwise surface its day *first*, contradicting
+  `docs/ui/screens/03-expenses.md`'s "newest day first". Rows *within* a
+  group still keep first-seen (`created_at`-descending) order; only the
+  groups themselves are re-sorted, by a plain `YYYY-MM-DD` string compare.
 
 ## STATE (handoff)
 - **Plan written 2026-08-07.** No unit implemented yet. The nine spec files
@@ -793,8 +826,31 @@ human with a phone:
   with one yet** — Home's donut/ranked-row tap still passes only
   `{categoryId}`; wiring the period through is U2.3's job (D404, "depends on
   U1.1"). Day grouping is untouched, still keyed off `created_at` (U1.2/D410).
-- **Next:** M1 — `U1.2` Day grouping and the detail date move to `spent_at`
-  (D410).
+- **U1.2 done.** `screens/expenses.ts`'s `ExpenseRow.spentAt` replaces
+  `createdAt`; `groupByDay` keys and labels off it directly (`spent_at` is
+  already `YYYY-MM-DD`, so it doubles as the group key, no parsing). The old
+  `dayKeyFor`(tz-based, on `created_at`) is gone; `screens/expense-detail.ts`'s
+  `dayLabel` reads `expense.spent_at` the same way. Both modules gained a
+  private `parseCalendarDate`/`formatSpentDay` pair (D416) — `spent_at` needs
+  no timezone conversion (it's already a resolved calendar day), so the `tz`
+  parameter was dropped everywhere it only served that purpose:
+  `groupByDay`, `buildExpensesData`, `createExpensesController`,
+  `buildDetailData`, `loadDetail`, `createDetailController`. `main.ts` needed
+  no change — none of its call sites passed an explicit `tz`. Also added the
+  `.dot` CSS rule (`app.css`, 9px, `border-radius: 50%`) — it was referenced
+  in a comment but had no actual rule, so the dot was invisible on both
+  screens before this unit; the JS-side grey fallback (`OTHER_COLOR_VAR`) was
+  already correct. Deleted `lib/dates.ts`/`tests/dates.test.ts` (orphaned by
+  the `tz` removal, no other caller) and dropped its line from
+  `webapp/CLAUDE.md`'s structure map. `groupByDay` now sorts its output
+  groups by `dayKey` descending — a reviewer-caught fix: once the group key
+  (`spent_at`) and the input's order key (`created_at`) can diverge, the old
+  "first-seen order" no longer guarantees newest-day-first (a backdated
+  expense typed last would otherwise render its day first); rows *within*
+  a group still keep first-seen order. Field-picker edit mode, the
+  delete/undo state machine, and every other part of `expense-detail.ts` are
+  untouched — that's U1.5.
+- **Next:** M1 — `U1.3` Composer gains a `mode` contract.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
@@ -802,7 +858,10 @@ human with a phone:
   - `GET /expenses`'s period offset is `period_offset`, **not** `offset` — the
     latter paginates and the bot depends on it (D402).
   - Filtering is by `spent_at` with an `AT TIME ZONE` conversion; a naive UTC
-    date comparison reintroduces D323.
+    date comparison reintroduces D323. Client-side, the opposite rule now
+    applies: `spent_at` is a bare date, so it must **never** be run through a
+    `timeZone`-aware `Intl`/`Date` conversion (D416) — parse it with
+    `parseCalendarDate`-style local y/m/d construction only.
   - Five units touch `screens/home.ts` (U2.1, U2.3, U3.2, U5.1, U5.2) and two
     touch `screens/add-expense.ts` (U1.3/U1.4, U2.4). `/clear` between them.
   - M5 is last and depends on nothing. If it goes badly on a real device
