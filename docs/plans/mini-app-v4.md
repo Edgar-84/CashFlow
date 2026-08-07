@@ -361,7 +361,7 @@ navigate into screens that must already accept what they will be handed.
 
 ### M2 — Home
 
-- [ ] **U2.1 Empty ring** (D405) — implements `01-home.md`'s Empty state and
+- [x] **U2.1 Empty ring** (D405) — implements `01-home.md`'s Empty state and
       its five new copy strings; the eight period-named strings are deleted.
       AC: an empty period renders a complete ring at the same 200px box and
       30px stroke as a populated donut, in `--separator`, with no segment gaps;
@@ -1004,7 +1004,28 @@ human with a phone:
   unit's Files list) even though nothing is a picker anymore — a naming
   wart flagged for a future pass if that file is touched for another
   reason, not worth its own unit.
-- **Next:** M2 — `U2.1` Empty ring (D405).
+- **U2.1 done.** `screens/home.ts`'s `HomeState`'s `"empty"` variant gained a
+  `currency` field (`loadHome` already had `data.currency` in hand, just
+  wasn't threading it through) so the empty ring's hole can format the zero
+  total for the right currency. `describeEmptyPeriod` dropped its five
+  offset-branching cases and the `now`/`describePeriod` import they needed —
+  a plain `EMPTY_COPY: Record<PeriodUnit, string>` lookup replaces the eight
+  V3 strings with the five deictic ones verbatim from the Copy table
+  (D405). New `renderEmptyDonut(currency)` draws one unbroken
+  `<circle>` at the populated donut's own `DONUT_RADIUS`/`DONUT_STROKE` (no
+  `stroke-dasharray`, so no segment gaps by construction) in
+  `stroke="var(--separator)"`, with `0.00 <currency>` in a `.amt.amt-zero`
+  span (new CSS rule, `--ink-secondary`); `renderEmpty` now renders it
+  between the period control and the sentence, so the donut's 200px slot
+  stays occupied instead of collapsing to bare text — the "moves nothing
+  above the ranked rows" AC falls out of reusing the same box, not a new
+  layout rule. The sentence itself moved off the shared
+  `.home-empty p, .home-error p, .home-readonly p` selector (which stays for
+  error/readonly) onto its own `.empty-copy` class, 12px below the ring,
+  13.5px, centred, per the Layout table's Empty row. Not built here: the ☰
+  button the unit's AC mentions staying enabled doesn't exist yet
+  (`U3.1`/`U3.2`) — nothing to keep enabled or test until then.
+- **Next:** `U2.2` Jump to present.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.

@@ -17,7 +17,6 @@ import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../li
 import { segments as donutSegments } from "../lib/donut";
 import { formatAmount } from "../lib/money";
 import {
-  describe as describePeriod,
   MAX_RANGE_DAYS,
   toQuery,
   type PeriodQuery,
@@ -108,7 +107,7 @@ export type HomeState =
   | { status: "loading"; period: PeriodValue }
   | { status: "error"; message: string; period: PeriodValue }
   | { status: "forbidden"; tiles: readonly HomeTile[] }
-  | { status: "empty"; tiles: readonly HomeTile[]; period: PeriodValue }
+  | { status: "empty"; tiles: readonly HomeTile[]; period: PeriodValue; currency: Currency }
   | ({ status: "ready" } & HomeData)
   | ({ status: "offline"; lastSyncedAt: string } & HomeData);
 
@@ -255,7 +254,7 @@ export async function loadHome(api: HomeApi, cache: HomeCache, period: PeriodVal
     });
     cache.set({ data, syncedAt: new Date().toISOString() });
     return periodTotal.total === 0
-      ? { status: "empty", tiles: data.tiles, period }
+      ? { status: "empty", tiles: data.tiles, period, currency: data.currency }
       : { status: "ready", ...data };
   } catch (err) {
     if (err instanceof ForbiddenError) {
@@ -407,40 +406,45 @@ function renderError(message: string, period: PeriodValue, now: Date): string {
   </div>`;
 }
 
-// docs/ui/screens/01-home.md's Copy table — the empty state names the period
-// in force ("Nothing today"/"Nothing in August"), never a generic "no data".
-// Reuses `lib/period.ts::describe`'s already-tested label for every case that
-// isn't one of the two most-common, explicitly-worded day offsets.
-function describeEmptyPeriod(period: PeriodValue, now: Date): string {
-  if (period.unit === "day" && period.offset === 0) {
-    return "Nothing today";
-  }
-  if (period.unit === "day" && period.offset === -1) {
-    return "Nothing yesterday";
-  }
-  if (period.unit === "week" && period.offset === 0) {
-    return "Nothing this week";
-  }
-  if (period.unit === "week") {
-    return "Nothing that week";
-  }
-  const label = describePeriod(period, now);
-  switch (period.unit) {
-    case "day":
-      return `Nothing on ${label}`;
-    case "month":
-    case "year":
-      return `Nothing in ${label}`;
-    case "custom":
-      return `Nothing from ${label}`;
-  }
+// docs/ui/screens/01-home.md's Copy table (D405): one sentence per unit,
+// deictic rather than period-named ("this day", not "August 3") — the empty
+// ring sits directly under a label that already names the period, so naming
+// it twice 100px apart is noise. Supersedes the eight offset-branching V3
+// strings ("Nothing today"/"Nothing in August"/...).
+const EMPTY_COPY: Record<PeriodUnit, string> = {
+  day: "There were no expenses on this day.",
+  week: "There were no expenses in this week.",
+  month: "There were no expenses in this month.",
+  year: "There were no expenses in this year.",
+  custom: "There were no expenses in this period.",
+};
+
+function describeEmptyPeriod(period: PeriodValue): string {
+  return EMPTY_COPY[period.unit];
 }
 
-function renderEmpty(tiles: readonly HomeTile[], period: PeriodValue, now: Date): string {
+// docs/ui/screens/01-home.md's Empty state (D405): the same 200px box and
+// 30px stroke as a populated donut (renderDonut) so switching into an empty
+// period moves nothing below it — one unbroken `--separator` arc (no
+// stroke-dasharray, so no segment gaps) and the formatted zero total in
+// `--ink-secondary` rather than `--ink`.
+function renderEmptyDonut(currency: Currency): string {
+  return `<div class="donut-wrap">
+    <svg class="donut" viewBox="0 0 200 200" role="img" data-testid="donut">
+      <circle cx="100" cy="100" r="${DONUT_RADIUS}" stroke="var(--separator)" stroke-width="${DONUT_STROKE}" fill="none" />
+    </svg>
+    <div class="donut-c">
+      <div class="amt amt-zero">${escapeHtml(formatAmount(0))} ${escapeHtml(currency)}</div>
+    </div>
+  </div>`;
+}
+
+function renderEmpty(tiles: readonly HomeTile[], period: PeriodValue, currency: Currency, now: Date): string {
   return `<div class="home-empty" data-testid="empty">
     <div class="card chart-card">
       ${renderPeriodControl(period, now, false)}
-      <p>${escapeHtml(describeEmptyPeriod(period, now))}</p>
+      ${renderEmptyDonut(currency)}
+      <p class="empty-copy">${escapeHtml(describeEmptyPeriod(period))}</p>
       ${renderAddButton()}
     </div>
     ${renderTiles(tiles)}
@@ -537,7 +541,7 @@ export function renderHome(state: HomeState, now: Date): string {
     case "forbidden":
       return renderReadOnly(state.tiles);
     case "empty":
-      return renderEmpty(state.tiles, state.period, now);
+      return renderEmpty(state.tiles, state.period, state.currency, now);
     case "ready":
       return renderReady(state, undefined, now, false);
     case "offline":
