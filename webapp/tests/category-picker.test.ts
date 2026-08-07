@@ -125,6 +125,36 @@ describe("renderCategoryPicker — long names", () => {
   });
 });
 
+describe("renderCategoryPicker — archived item (U1.4, 02b's archived-current-category edge case)", () => {
+  it("marks an archived item disabled and dimmed even though the grid itself isn't disabled", () => {
+    const html = renderCategoryPicker(
+      props({
+        items: [item("cat-1", "Groceries", "var(--category-slot-1)"), { ...item("cat-2", "Retired", "var(--category-slot-2)"), archived: true }],
+        selectedId: "cat-2",
+      }),
+    );
+    expect(cellTag(html, "cat-1")).not.toContain("disabled");
+    expect(cellTag(html, "cat-2")).toContain("disabled");
+    expect(cellTag(html, "cat-2")).toContain("cp-cell-archived");
+  });
+
+  it("still renders an archived item selected when it's the selectedId", () => {
+    const html = renderCategoryPicker(
+      props({
+        items: [{ ...item("cat-2", "Retired", "var(--category-slot-2)"), archived: true }],
+        selectedId: "cat-2",
+      }),
+    );
+    expect(cellTag(html, "cat-2")).toContain("selected");
+    expect(cellTag(html, "cat-2")).toContain('aria-checked="true"');
+  });
+
+  it("omitting archived behaves as not archived", () => {
+    const html = renderCategoryPicker(props());
+    expect(html).not.toContain("cp-cell-archived");
+  });
+});
+
 describe("renderCategoryPicker — disabled", () => {
   it("suppresses every cell and hides More", () => {
     const html = renderCategoryPicker(props({ disabled: true }));

@@ -57,6 +57,10 @@ export interface AddExpenseApi {
   /** Screen 02b's save (U1.4). Optional so a `"create"`-mode caller — every
    * existing fake in this unit's tests — needs no change. */
   updateExpense?(id: Uuid, data: ExpenseUpdate): Promise<ExpenseResponse>;
+  /** Screen 02b's archived-current-category lookup (U1.4) — `main.ts`'s edit
+   * route only, never called in create mode. Optional for the same reason
+   * `updateExpense` is. */
+  getCategory?(id: Uuid): Promise<CategoryResponse>;
 }
 
 export interface AddExpenseFormData {
@@ -214,14 +218,100 @@ export function submitButtonState(
   return { label: `Add ${formatAmount(minor)} ${currency} to ${category.name}`, enabled: true };
 }
 
+/** Screen 02b's PATCH payload (U1.4) — only the fields that actually differ
+ * from `initialExpense`, per its AC ("the PATCH carries only the changed
+ * fields") and its Edge cases ("changing only the date... without touching
+ * its amount"). Tags compare as a **set**, not a sequence — re-selecting the
+ * tag that was already selected must leave the button disabled, per the
+ * screen doc's MainButton section. `today` resolves a `null` `spentAt` (the
+ * date row's own "today" pill convention) exactly the way `submit()`'s edit
+ * branch already resolves it for the request body, so the diff and the
+ * actual PATCH can never disagree about what counts as a change. Returns
+ * `{}` when nothing differs; unreachable from the UI once MainButton is
+ * disabled on that state (Edge cases: "impossible; no empty PATCH is ever
+ * sent"), so `isEditDirty`/`editButtonState` below build directly on this
+ * rather than duplicating the comparison. */
+export function editChanges(draft: Draft, initialExpense: ExpenseResponse, today: string | null): ExpenseUpdate {
+  const changes: ExpenseUpdate = {};
+  const minor = parseAmount(draft.amountInput);
+  if (minor !== null && minor !== initialExpense.amount) {
+    changes.amount = minor;
+  }
+  if (draft.categoryId && draft.categoryId !== initialExpense.category_id) {
+    changes.category_id = draft.categoryId;
+  }
+  const spentAt = draft.spentAt ?? today ?? initialExpense.spent_at;
+  if (spentAt !== initialExpense.spent_at) {
+    changes.spent_at = spentAt;
+  }
+  const draftTagIds = new Set(draft.tagIds);
+  const originalTagIds = new Set(initialExpense.tags.map((t) => t.id));
+  const tagsMatch =
+    draftTagIds.size === originalTagIds.size && [...draftTagIds].every((id) => originalTagIds.has(id));
+  if (!tagsMatch) {
+    changes.tag_ids = draft.tagIds;
+  }
+  // Trimmed both sides, same storage convention `submit()`'s create branch
+  // already uses. The screen doc's Edge cases separately says "only
+  // whitespace added... counts as a change" — appending only whitespace to
+  // an already-trimmed comment normalizes to the same stored string either
+  // way, so nothing is actually lost by comparing trimmed; this is the same
+  // pre-existing ambiguity screen 02's own trim-on-submit already carries,
+  // not something new here.
+  const comment = draft.comment.trim() === "" ? null : draft.comment.trim();
+  if (comment !== (initialExpense.comment ?? null)) {
+    changes.comment = comment;
+  }
+  return changes;
+}
+
+export function isEditDirty(draft: Draft, initialExpense: ExpenseResponse, today: string | null): boolean {
+  return Object.keys(editChanges(draft, initialExpense, today)).length > 0;
+}
+
+/** MainButton chrome for 02b (U1.4). Unlike create's restated-action label,
+ * this always reads "Save changes" once valid — the two guard states,
+ * "Enter an amount" and "Choose a category", are reused verbatim from
+ * `submitButtonState` (screen doc: "the same two guards screen 02 has, same
+ * strings"). Deliberately does **not** check that `categoryId` is still in
+ * the account's active category list the way `submitButtonState` does: the
+ * archived-current-category edge case requires the opposite — that category
+ * stays selected and must not block Save on its own. */
+export function editButtonState(
+  draft: Draft,
+  initialExpense: ExpenseResponse,
+  today: string | null,
+): SubmitButtonState {
+  if (!draft.categoryId) {
+    return { label: "Choose a category", enabled: false };
+  }
+  if (parseAmount(draft.amountInput) === null) {
+    return { label: "Enter an amount", enabled: false };
+  }
+  return { label: "Save changes", enabled: isEditDirty(draft, initialExpense, today) };
+}
+
 export type SubmitOutcome =
   | { status: "success"; expense: ExpenseResponse }
   | { status: "blocked" }
   | { status: "error"; message: string };
 
-function submitErrorMessage(err: unknown): string {
+/** `staleExpense` (U1.4): the PATCH's own 404 came from `services/
+ * expense_service.py::update`'s `self.get(expense_id, …)` guard rather than
+ * its `_validate_category` one — see `isStaleExpenseError`'s doc comment for
+ * how the caller tells the two apart. Screen 02b's Copy table gives both the
+ * 403 and this 404 their own strings, distinct from screen 02's. */
+function submitErrorMessage(
+  err: unknown,
+  opts: { mode?: AddExpenseMode; staleExpense?: boolean } = {},
+): string {
   if (err instanceof ForbiddenError) {
-    return "You don't have permission to add expenses.";
+    return opts.mode === "edit"
+      ? "You don't have permission to edit this expense."
+      : "You don't have permission to add expenses.";
+  }
+  if (opts.staleExpense) {
+    return "That expense no longer exists.";
   }
   if (err instanceof NotFoundError) {
     return "That category no longer exists.";
@@ -247,6 +337,23 @@ function submitErrorMessage(err: unknown): string {
  * enough; the message text distinguishes the two for the user. */
 function isStaleCategoryError(err: unknown): boolean {
   return err instanceof NotFoundError || (err instanceof ApiError && err.status === 409);
+}
+
+/** Screen 02b's "Stale expense" vs "Stale category" states (U1.4) — both are
+ * a `NotFoundError` on the same `PATCH /expenses/{id}`, so the HTTP status
+ * alone can't tell them apart. `services/expense_service.py::update` raises
+ * its expense-missing 404 unconditionally (`self.get(expense_id, …)`, first
+ * line of the method) but only reaches `_validate_category`'s 404 when
+ * `category_id` is actually **in the payload** — "update skips it when the
+ * field is absent" (that method's own doc comment). So: no `category_id` in
+ * `changes` means the server never ran the category check at all, and the
+ * 404 can only be the expense itself. `category_id` present makes the two
+ * genuinely ambiguous from here; falling back to "stale category" in that
+ * case matches create mode's own established handling of the same
+ * ambiguity (screen 02 always sends `category_id`, so it never had to
+ * distinguish). */
+function isStaleExpenseError(err: unknown, changes: ExpenseUpdate): boolean {
+  return err instanceof NotFoundError && !("category_id" in changes);
 }
 
 export interface AddExpenseController {
@@ -280,18 +387,19 @@ export interface AddExpenseController {
  * while the rest of the draft (amount, tags, comment, date) survives —
  * still "pure aside from the awaited API calls", so directly unit-testable.
  *
- * `mode`/`initialExpense` are U1.4's hook: one `submit()` serves both
- * screens rather than a second `update()` method, so the double-submit guard
- * and the stale-category recovery need no duplicate. In `"edit"` mode the
- * PATCH carries the full draft, not a diff against `initialExpense` — U1.4
- * narrows that to changed fields only, once it also owns the "disabled
- * until something differs" chrome that decides what counts as changed. A
- * successful edit leaves the draft as-is (screen 02b returns to 03b showing
- * it) rather than resetting to empty, which is create mode's own affordance
- * for "add another". `today` resolves a `null` `spentAt` (the "today" pill's
- * own convention, set by the same date row screen 02b reuses verbatim) back
- * to a real date for the PATCH — falling back to `initialExpense.spent_at`
- * instead would silently revert a deliberate "move this to today" edit. */
+ * `mode`/`initialExpense` are U1.3's hook, and U1.4 is the unit that uses it
+ * for real: one `submit()` serves both screens rather than a second
+ * `update()` method, so the double-submit guard and the stale-category
+ * recovery need no duplicate. In `"edit"` mode the PATCH carries only what
+ * `editChanges` finds different from `initialExpense` (02b's AC), gated by
+ * `editButtonState`'s dirty check rather than `submitButtonState`'s
+ * always-valid-draft one. A successful edit leaves the draft as-is (screen
+ * 02b returns to 03b showing it) rather than resetting to empty, which is
+ * create mode's own affordance for "add another". `today` resolves a `null`
+ * `spentAt` (the "today" pill's own convention, set by the same date row
+ * screen 02b reuses verbatim) back to a real date for both the dirty check
+ * and the PATCH — falling back to `initialExpense.spent_at` instead would
+ * silently revert a deliberate "move this to today" edit. */
 export function createController(
   api: Pick<AddExpenseApi, "createExpense" | "updateExpense" | "listCategories">,
   categories: CategoryResponse[],
@@ -331,11 +439,6 @@ export function createController(
       if (submitting) {
         return { status: "blocked" };
       }
-      const minor = parseAmount(draft.amountInput);
-      const { enabled } = submitButtonState(draft, categories, currency);
-      if (!enabled || minor === null || !draft.categoryId) {
-        return { status: "blocked" };
-      }
       if (mode === "edit" && !initialExpense) {
         // Programmer error, not a user-facing scenario (webapp/CLAUDE.md's
         // rule against validating what can't happen at a system boundary) —
@@ -345,20 +448,20 @@ export function createController(
         // duplicate expense.
         throw new Error("createController: edit mode requires initialExpense");
       }
+      const minor = parseAmount(draft.amountInput);
+      const { enabled } =
+        mode === "edit" && initialExpense
+          ? editButtonState(draft, initialExpense, today)
+          : submitButtonState(draft, categories, currency);
+      if (!enabled || minor === null || !draft.categoryId) {
+        return { status: "blocked" };
+      }
+      const changes = mode === "edit" && initialExpense ? editChanges(draft, initialExpense, today) : null;
       submitting = true;
       try {
         const expense =
           mode === "edit" && initialExpense
-            ? await api.updateExpense!(initialExpense.id, {
-                amount: minor,
-                category_id: draft.categoryId,
-                // Edit sends the resolved set unconditionally — `tag_ids: []`
-                // clearing every tag is a real, distinct PATCH (02b's Edge
-                // cases), not "field omitted" the way create's `undefined` is.
-                tag_ids: draft.tagIds,
-                comment: draft.comment.trim() === "" ? null : draft.comment.trim(),
-                spent_at: draft.spentAt ?? today ?? initialExpense.spent_at,
-              })
+            ? await api.updateExpense!(initialExpense.id, changes!)
             : await api.createExpense({
                 amount: minor,
                 category_id: draft.categoryId,
@@ -369,7 +472,8 @@ export function createController(
         draft = mode === "edit" ? draft : emptyDraft();
         return { status: "success", expense };
       } catch (err) {
-        if (isStaleCategoryError(err)) {
+        const staleExpense = mode === "edit" && changes !== null && isStaleExpenseError(err, changes);
+        if (!staleExpense && isStaleCategoryError(err)) {
           draft = { ...draft, categoryId: null };
           try {
             categories = await api.listCategories();
@@ -379,7 +483,7 @@ export function createController(
             // that matters; the grid just shows the last-known list.
           }
         }
-        return { status: "error", message: submitErrorMessage(err) };
+        return { status: "error", message: submitErrorMessage(err, { mode, staleExpense }) };
       } finally {
         submitting = false;
       }
@@ -401,17 +505,39 @@ export function applyAddExpenseChrome(
   mainButton.setEnabled(enabled);
 }
 
+/** Screen 02b's MainButton chrome (U1.4) — `editButtonState`'s "Save
+ * changes"/dirty-gated label instead of create's restated action. */
+export function applyEditExpenseChrome(
+  draft: Draft,
+  initialExpense: ExpenseResponse,
+  today: string | null,
+): void {
+  const { label, enabled } = editButtonState(draft, initialExpense, today);
+  mainButton.show(label);
+  mainButton.setEnabled(enabled);
+}
+
 /** BackButton on a dirty draft confirms before discarding — Telegram's own
  * popup, never a custom modal (webapp/CLAUDE.md). A clean draft closes
- * immediately with no prompt. */
-export function wireBackButton(getDraft: () => Draft, onClose: () => void): void {
+ * immediately with no prompt. `isDirtyFn`/`message` default to screen 02's
+ * own shape; screen 02b (U1.4) passes its own dirty check (against
+ * `initialExpense`, not "any field non-empty") and its own copy ("Discard
+ * changes?", not "Discard this expense?" — 02b's Copy table), so the two
+ * screens' BackButtons never need separate wiring functions. */
+export function wireBackButton(
+  getDraft: () => Draft,
+  onClose: () => void,
+  opts: { isDirtyFn?: (draft: Draft) => boolean; message?: string } = {},
+): void {
+  const isDirtyFn = opts.isDirtyFn ?? isDirty;
+  const message = opts.message ?? "Discard this expense?";
   setBackButtonHandler(() => {
     void (async () => {
-      if (!isDirty(getDraft())) {
+      if (!isDirtyFn(getDraft())) {
         onClose();
         return;
       }
-      const discard = await confirmDiscard("Discard this expense?");
+      const discard = await confirmDiscard(message);
       if (discard) {
         onClose();
       }
@@ -452,9 +578,37 @@ function categoryPickerItems(categories: CategoryResponse[]): CategoryPickerItem
   }));
 }
 
+/** Screen 02b's archived-current-category edge case (U1.4): `categories` may
+ * (in edit mode) carry one archived row alongside the account's active ones
+ * — `main.ts`'s edit route merges it in via `ApiClient.getCategory` when
+ * `initialExpense.category_id` isn't in the plain `GET /categories` list.
+ * Splits that combined list into the selectable grid (active only, exactly
+ * what create mode already offers) plus, if the *selected* id is the
+ * archived row, one extra dimmed cell appended after it — never any other
+ * archived category, and never a tappable one. `color_slot` is read
+ * directly off the archived row rather than through `assignCategoryColors`
+ * over the combined list: D301 says a set slot never gets recomputed, and
+ * running position-based fallback over a list that mixes active and archived
+ * rows would risk shifting an *active* category's own fallback colour, which
+ * archiving one of its siblings must never do. */
+function categoryGridItems(categories: CategoryResponse[], selectedId: Uuid | null): CategoryPickerItem[] {
+  const active = categories.filter((c) => c.is_active !== false);
+  const items = categoryPickerItems(active);
+  const archived = selectedId ? categories.find((c) => c.id === selectedId && c.is_active === false) : undefined;
+  if (archived) {
+    items.push({
+      id: archived.id,
+      name: archived.name,
+      colorVar: categorySlotCssVar(archived.color_slot ?? null),
+      archived: true,
+    });
+  }
+  return items;
+}
+
 function renderCategoryGridSlot(categories: CategoryResponse[], selectedId: Uuid | null): string {
   return `<div class="category-picker-slot">${renderCategoryPicker({
-    items: categoryPickerItems(categories),
+    items: categoryGridItems(categories, selectedId),
     selectedId,
     onSelect: noop,
     onMore: noop,
@@ -704,6 +858,10 @@ export function mount(
   api: AddExpenseApi,
   handlers: AddExpenseHandlers,
   initialDraft: Draft = emptyDraft(),
+  // U1.4's hook, screen 02b: `initialExpense` non-null iff `mode === "edit"`,
+  // enforced by `createController`'s own guard below, not re-checked here.
+  mode: AddExpenseMode = "create",
+  initialExpense: ExpenseResponse | null = null,
 ): void {
   if (typeof document === "undefined") {
     return;
@@ -719,10 +877,17 @@ export function mount(
   root.innerHTML = renderAddExpense(state, seedDraft);
   root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
 
+  // Screen 02b's Viewport section: unlike screen 02, the amount field is
+  // never auto-focused here — the keypad opening over a form the user came
+  // to *read* is unhelpful when they may only be changing a tag or the date.
+  const autofocusAmount = mode !== "edit";
+
   if (state.status === "loading") {
     setBackButtonHandler(() => handlers.onClose());
     mainButton.hide();
-    root.querySelector<HTMLInputElement>('[data-testid="amount-input"]')?.focus();
+    if (autofocusAmount) {
+      root.querySelector<HTMLInputElement>('[data-testid="amount-input"]')?.focus();
+    }
     return;
   }
 
@@ -734,7 +899,28 @@ export function mount(
 
   const data: AddExpenseFormData = state;
   const lastSyncedAt = state.status === "offline" ? state.lastSyncedAt : undefined;
-  const controller = createController(api, data.categories, data.currency, seedDraft);
+  const controller = createController(api, data.categories, data.currency, seedDraft, mode, initialExpense, data.today);
+
+  const applyChrome = (): void => {
+    if (mode === "edit" && initialExpense) {
+      applyEditExpenseChrome(controller.getDraft(), initialExpense, data.today);
+    } else {
+      applyAddExpenseChrome(controller.getDraft(), controller.getCategories(), data.currency);
+    }
+  };
+
+  // Screen 02b's own dirty check and discard copy (U1.4) — see
+  // `wireBackButton`'s doc comment for why one function serves both screens.
+  const wireBack = (): void => {
+    if (mode === "edit" && initialExpense) {
+      wireBackButton(controller.getDraft, handlers.onClose, {
+        isDirtyFn: (d) => isEditDirty(d, initialExpense, data.today),
+        message: "Discard changes?",
+      });
+    } else {
+      wireBackButton(controller.getDraft, handlers.onClose);
+    }
+  };
 
   // Calendar button's sheet (U1.8's picker, `single` mode). BackButton closes
   // the picker, not the screen (AC) — the same nested-BackButton pattern
@@ -748,7 +934,7 @@ export function mount(
 
     const close = (): void => {
       pickerRoot.remove();
-      wireBackButton(controller.getDraft, handlers.onClose);
+      wireBack();
     };
     setBackButtonHandler(close);
 
@@ -776,13 +962,13 @@ export function mount(
       if (errorEl) {
         errorEl.textContent = amountError(controller.getDraft().amountInput) ?? "";
       }
-      applyAddExpenseChrome(controller.getDraft(), controller.getCategories(), data.currency);
+      applyChrome();
     });
 
     const pickerSlot = root.querySelector<HTMLElement>(".category-picker-slot");
     if (pickerSlot) {
       mountCategoryPicker(pickerSlot, {
-        items: categoryPickerItems(controller.getCategories()),
+        items: categoryGridItems(controller.getCategories(), controller.getDraft().categoryId),
         selectedId: controller.getDraft().categoryId,
         onSelect: (id) => {
           controller.setCategoryId(id);
@@ -862,12 +1048,12 @@ export function mount(
       { submitError, lastSyncedAt },
     );
     wireForm();
-    applyAddExpenseChrome(controller.getDraft(), controller.getCategories(), data.currency);
+    applyChrome();
   };
 
   wireForm();
-  applyAddExpenseChrome(controller.getDraft(), controller.getCategories(), data.currency);
-  wireBackButton(controller.getDraft, handlers.onClose);
+  applyChrome();
+  wireBack();
 
   mainButton.onClick(() => {
     void (async () => {
@@ -883,5 +1069,7 @@ export function mount(
     })();
   });
 
-  root.querySelector<HTMLInputElement>('[data-testid="amount-input"]')?.focus();
+  if (autofocusAmount) {
+    root.querySelector<HTMLInputElement>('[data-testid="amount-input"]')?.focus();
+  }
 }

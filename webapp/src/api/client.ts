@@ -235,6 +235,14 @@ export class ApiClient {
     });
   }
 
+  /** Single-category lookup, archived included (`GET /categories/{id}` has no
+   * `is_active` filter, unlike the list route). Screen 02b's own use (U1.4):
+   * resolving the name/colour of an expense's category when it has since
+   * been archived and so is missing from `listCategories()`'s default call. */
+  getCategory(id: Uuid): Promise<CategoryResponse> {
+    return this.request<CategoryResponse>("GET", `/categories/${id}`);
+  }
+
   createCategory(data: CategoryCreate): Promise<CategoryResponse> {
     return this.request<CategoryResponse>("POST", "/categories", { json: data });
   }

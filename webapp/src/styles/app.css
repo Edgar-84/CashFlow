@@ -1734,6 +1734,15 @@ body {
   opacity: 0.5;
 }
 
+/* Screen 02b's archived-current-category edge case (U1.4): a selected cell
+   that cannot be re-selected once the user moves off it, dimmed the same
+   0.5 opacity `.cp-disabled` already uses for a read-only grid — this is a
+   per-cell version of that, independent of the grid's own `disabled` prop. */
+.cp-cell-archived .cp-swatch,
+.cp-cell-archived .cp-name {
+  opacity: 0.5;
+}
+
 .cp-more-swatch {
   background: var(--separator);
   display: flex;

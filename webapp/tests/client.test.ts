@@ -82,6 +82,7 @@ describe("ApiClient — initData header", () => {
     await client.updateExpense("id", { amount: 200 });
     await client.deleteExpense("id");
     await client.listCategories();
+    await client.getCategory("c");
     await client.listTags();
     await client.listBudgetPlans();
     await client.getBudgetPlanProgress("bp");
@@ -92,7 +93,7 @@ describe("ApiClient — initData header", () => {
     await client.statisticsByCategory({ months_back: 1 });
     await client.statisticsByTag({ months_back: 2 });
 
-    expect(fetchFn.mock.calls.length).toBe(16);
+    expect(fetchFn.mock.calls.length).toBe(17);
     for (const [, init] of fetchFn.mock.calls as Array<[string, RequestInit]>) {
       expect(headersOf(init)[INIT_DATA_HEADER]).toBe("user=1&hash=deadbeef");
     }
@@ -166,6 +167,22 @@ describe("ApiClient — error mapping", () => {
     await expect(
       client.createBudgetPlan({ category_id: "c", amount: 1000 }),
     ).rejects.not.toBeInstanceOf(RetryableError);
+  });
+});
+
+describe("ApiClient — getCategory (U1.4, 02b's archived-category fetch)", () => {
+  it("GETs /categories/{id}, no query string", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse({ id: "cat-1", name: "Old", account_id: "a", created_at: "t" }));
+
+    await client.getCategory("cat-1");
+
+    const { url } = lastCall(fetchFn);
+    expect(url).toBe("https://api.test/categories/cat-1");
+  });
+
+  it("404 → NotFoundError, same mapping as every other single-resource GET", async () => {
+    const { client } = makeClient(jsonResponse({}, { status: 404 }));
+    await expect(client.getCategory("missing")).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
