@@ -372,7 +372,7 @@ navigate into screens that must already accept what they will be handed.
       rows; MainButton, the yellow button and the ☰ button all stay enabled.
       Files: `webapp/src/screens/home.ts`, `webapp/src/styles/app.css`,
       `webapp/tests/home.test.ts`. Model: sonnet.
-- [ ] **U2.2 Jump to present** — implements the revised
+- [x] **U2.2 Jump to present** — implements the revised
       `components/period-selector.md`.
       AC: **every new acceptance criterion in that spec**, notably — no jump
       control at offset 0 and one immediately right of `›` at offset −1; `‹`,
@@ -1025,7 +1025,33 @@ human with a phone:
   13.5px, centred, per the Layout table's Empty row. Not built here: the ☰
   button the unit's AC mentions staying enabled doesn't exist yet
   (`U3.1`/`U3.2`) — nothing to keep enabled or test until then.
-- **Next:** `U2.2` Jump to present.
+- **U2.2 done.** `period-selector.ts`'s nav row went from three cells to the
+  spec's five: a `.period-spacer` (44×44, `aria-hidden`, no listener) now
+  opens the row, and a `.period-jump-cell` closes it, both rendered
+  unconditionally so `‹`/label/`›` never shift between offset 0 and offset
+  −1 — only the jump cell's *contents* (a button or nothing) change. The
+  jump button reuses `.period-arrow`'s CSS (`class="period-arrow
+  period-jump"`) rather than a new rule, keeping it `--ink`-only by
+  construction. `JUMP_ICON` is a new inline SVG (two chevrons + a trailing
+  bar, 20px box, 2px stroke, `currentColor`) following the existing
+  `CALENDAR_ICON`-in-module pattern (`add-expense.ts`) rather than adding an
+  icon module — the design system's own Iconography section says that
+  review is triggered by the *next* icon past this list of eight, not this
+  one. `JUMP_ARIA_LABEL` is a small per-unit `Record`, same shape as the
+  existing prev/next `aria-label` template literals. `mount` wires
+  `data-action="jump"` to `onOffsetChange(0)` with no new callback, per the
+  component doc's Inputs section. Both spacer and jump cell are entirely
+  absent (not just empty) when `unit === "custom"`, matching the Variants
+  table. Click-wiring itself stays the project's accepted
+  code-reviewed-not-unit-tested gap (`vitest.config.ts`'s `environment:
+  "node"` has no `document`; no jsdom dependency was added to close it —
+  webapp/CLAUDE.md's no-new-dependency rule) — tests instead assert
+  `renderPeriodSelector`'s markup: the cell's presence/absence, per-unit
+  aria-label, DOM order (jump testid right of the next arrow), and the
+  offset-0/offset-−1 structural invariant (spacer/jump-cell/arrow counts
+  match).
+- **Next:** `U2.3` Donut goes display-only; ranked rows carry the period
+  (D404).
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.

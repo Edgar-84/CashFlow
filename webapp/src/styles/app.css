@@ -1220,6 +1220,17 @@ body {
   cursor: default;
 }
 
+/* Left spacer + jump cell: reserved 44px cells so `‹`/label/`›` sit at the
+   same horizontal position at offset 0 and offset -1 — appearing and
+   disappearing, the jump control moves nothing (component doc's "Why the
+   jump control has a reserved, always-present cell"). */
+.period-spacer,
+.period-jump-cell {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+}
+
 .period-label {
   flex: 1;
   display: flex;

@@ -59,15 +59,47 @@ function renderArrow(direction: "prev" | "next", value: PeriodValue, disabled: b
   return `<button type="button" class="period-arrow" data-action="${direction}" aria-label="${escapeHtml(ariaLabel)}"${atPresent ? ' aria-disabled="true"' : ""}${disabled ? " disabled" : ""} data-testid="period-arrow-${direction}">${glyph}</button>`;
 }
 
+// design-system.md Iconography: "two `›` chevrons + a 2px vertical bar at the
+// right edge, 20px box — the skip-to-end shape, not a plain double chevron."
+const JUMP_ICON =
+  '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false">' +
+  '<path d="M4 4L10 10L4 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" />' +
+  '<path d="M9 4L15 10L9 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" />' +
+  '<line x1="17" y1="4" x2="17" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />' +
+  "</svg>";
+
+// Copy table's per-unit accessible name — "a screen reader user arrowing
+// through months should hear the thing they are returning to".
+const JUMP_ARIA_LABEL: Record<Exclude<PeriodUnit, "custom">, string> = {
+  day: "Back to today",
+  week: "Back to this week",
+  month: "Back to this month",
+  year: "Back to this year",
+};
+
+function renderJumpCell(value: PeriodValue, disabled: boolean): string {
+  // Reserved cell (component doc's "Why the jump control has a reserved,
+  // always-present cell"): present only when offset < 0, but the 44px cell
+  // itself always renders so `›` and the label never shift under a tap.
+  if (value.unit === "custom" || value.offset === 0) {
+    return `<div class="period-jump-cell" aria-hidden="true"></div>`;
+  }
+  const ariaLabel = JUMP_ARIA_LABEL[value.unit];
+  return `<div class="period-jump-cell"><button type="button" class="period-arrow period-jump" data-action="jump" aria-label="${escapeHtml(ariaLabel)}"${disabled ? " disabled" : ""} data-testid="period-jump">${JUMP_ICON}</button></div>`;
+}
+
 function renderNav(value: PeriodValue, now: Date, disabled: boolean): string {
   const label = describePeriod(value, now);
-  // Custom active: arrows absent entirely — an arbitrary range has no
-  // next/previous (component doc's Variants table).
+  // Custom active: arrows and the jump control absent entirely — an
+  // arbitrary range has no next, previous or present (component doc's
+  // Variants table).
   const hasArrows = value.unit !== "custom";
   return `<div class="period-nav">
+    ${hasArrows ? '<div class="period-spacer" aria-hidden="true"></div>' : ""}
     ${hasArrows ? renderArrow("prev", value, disabled) : ""}
     <button type="button" class="period-label" aria-label="Change period" data-testid="period-label"${disabled ? " disabled" : ""}><span class="period-label-text">${escapeHtml(label)}</span></button>
     ${hasArrows ? renderArrow("next", value, disabled) : ""}
+    ${hasArrows ? renderJumpCell(value, disabled) : ""}
   </div>`;
 }
 
@@ -120,5 +152,12 @@ export function mount(root: HTMLElement, props: PeriodSelectorProps): void {
     }
     haptics.selection();
     props.onOffsetChange(props.value.offset + 1);
+  });
+
+  root.querySelector<HTMLElement>('[data-action="jump"]')?.addEventListener("click", () => {
+    // "Jump to the present" and "arrow forward to the present" are the same
+    // state transition — no callback of its own (component doc's Inputs).
+    haptics.selection();
+    props.onOffsetChange(0);
   });
 }
