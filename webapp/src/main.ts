@@ -325,7 +325,7 @@ async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
       return;
     }
     applyExpensesChrome(() => void showHome());
-    mountExpenses(root, state, handlers);
+    mountExpenses(root, state, handlers, new Date());
   }
 
   render({ status: "loading" });
