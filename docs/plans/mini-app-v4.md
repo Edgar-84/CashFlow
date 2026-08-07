@@ -238,7 +238,7 @@ Appearance and interaction are in `docs/ui/`, not here. Structural deltas only:
 
 ### M0 — Backend (no migration; nothing here is a stop-and-ask gate)
 
-- [ ] **U0.1 `expense_repo.list` filters by category and `spent_at` window** —
+- [x] **U0.1 `expense_repo.list` filters by category and `spent_at` window** —
       repository only, no route, no service wiring.
       AC: `list(account_id=…)` with no other filter returns exactly what it
       returns today, in the same order (the existing repo tests stay green
@@ -720,8 +720,16 @@ human with a phone:
   Delete stays on 03b only (closing the `[?]` in `02b`/`03b`); the side-menu
   references arrived and are saved under `docs/ui/refs/side-menu/` (D413,
   U3.1 unblocked); and **M5 was added** for the collapsing chart header (D414).
-- **Next:** U0.1 (`expense_repo.list` filters). It has no dependency on
-  anything else in the plan and unblocks the whole of M1.
+- **U0.1 done.** `expense_repo.list` takes explicit `account_id`,
+  `category_id`, `start`/`end`, `tz` keywords instead of `**filters: Any`;
+  no route/service wiring yet (that's U0.3). `ExpenseRepositoryProtocol` in
+  `services/expense_service.py` was updated to match — a type-only change,
+  the service still calls `list(account_id=, limit=, offset=)` unchanged.
+  The override is narrower than `BaseRepository.list(**filters)`, so the
+  method carries `# type: ignore[override]` (the plan's own Contracts
+  section mandates the narrower signature, D402/D403's callers).
+- **Next:** U0.2 (shared period-param validation, D403). U0.1 has no
+  dependency on anything else in the plan and unblocks the whole of M1.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.

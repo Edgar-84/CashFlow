@@ -31,7 +31,15 @@ class ExpenseRepositoryProtocol(Protocol):
     pass an in-memory fake instead of the real ExpenseRepository."""
 
     async def list(
-        self, *, limit: int = 50, offset: int = 0, **filters: Any
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        account_id: UUID,
+        category_id: UUID | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        tz: str = "UTC",
     ) -> list[ExpenseResponse]: ...
     async def get(self, id: UUID) -> ExpenseResponse | None: ...
     async def create(self, data: dict[str, Any]) -> ExpenseResponse: ...
