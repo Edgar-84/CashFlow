@@ -23,12 +23,38 @@ def _fake_tag(tag_id: UUID, account_id: UUID) -> TagResponse:
 class FakeExpenseRepo:
     def __init__(self, expenses: list[ExpenseResponse] | None = None) -> None:
         self._expenses: dict[UUID, ExpenseResponse] = {e.id: e for e in (expenses or [])}
+        self.list_calls: list[dict[str, Any]] = []
 
     async def list(
-        self, *, limit: int = 50, offset: int = 0, **filters: Any
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        account_id: UUID,
+        category_id: UUID | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        tz: str = "UTC",
     ) -> list[ExpenseResponse]:
-        account_id = filters.get("account_id")
+        self.list_calls.append(
+            {
+                "limit": limit,
+                "offset": offset,
+                "account_id": account_id,
+                "category_id": category_id,
+                "start": start,
+                "end": end,
+                "tz": tz,
+            }
+        )
         matches = [e for e in self._expenses.values() if e.account_id == account_id]
+        if category_id is not None:
+            matches = [e for e in matches if e.category_id == category_id]
+        if start is not None and end is not None:
+            # Mirrors the real repo's half-open `spent_at` window at the date
+            # granularity — the tz-aware `AT TIME ZONE` conversion itself is
+            # U0.1's repository-level coverage, not re-derived here.
+            matches = [e for e in matches if start.date() <= e.spent_at < end.date()]
         return matches[offset : offset + limit]
 
     async def get(self, id: UUID) -> ExpenseResponse | None:
@@ -216,12 +242,14 @@ def make_expense(
     category_id: UUID | None = None,
     amount: int = 1000,
     comment: str | None = None,
+    spent_at: date | None = None,
 ) -> ExpenseResponse:
     return ExpenseResponse(
         id=uuid4(),
         amount=amount,
         comment=comment,
         category_id=category_id or uuid4(),
+        spent_at=spent_at if spent_at is not None else date.today(),
         user_id=user_id or uuid4(),
         account_id=account_id,
         created_at=datetime.now(UTC),
@@ -272,6 +300,73 @@ async def test_list_passes_limit_and_offset_through_to_repo() -> None:
     page = await service.list(account_id, limit=2, offset=2)
 
     assert len(page) == 2
+
+
+async def test_list_no_period_params_is_byte_for_byte_unchanged() -> None:
+    # U0.3 AC: category_id=None, bounds=None reaches the repo exactly as
+    # today's call shape did (D402).
+    account_id = uuid4()
+    repo = FakeExpenseRepo([make_expense(account_id=account_id)])
+    service = make_service(repo)
+
+    await service.list(account_id, limit=10, offset=1)
+
+    assert repo.list_calls[-1] == {
+        "limit": 10,
+        "offset": 1,
+        "account_id": account_id,
+        "category_id": None,
+        "start": None,
+        "end": None,
+        "tz": "UTC",
+    }
+
+
+async def test_list_passes_category_id_through_to_repo() -> None:
+    account_id = uuid4()
+    category_id = uuid4()
+    mine = make_expense(account_id=account_id, category_id=category_id)
+    other_category = make_expense(account_id=account_id)
+    repo = FakeExpenseRepo([mine, other_category])
+    service = make_service(repo)
+
+    result = await service.list(account_id, category_id=category_id)
+
+    assert [e.id for e in result] == [mine.id]
+
+
+async def test_list_passes_bounds_through_to_repo() -> None:
+    account_id = uuid4()
+    inside = make_expense(account_id=account_id, spent_at=date(2026, 8, 3))
+    outside = make_expense(account_id=account_id, spent_at=date(2026, 8, 7))
+    repo = FakeExpenseRepo([inside, outside])
+    service = make_service(repo)
+    bounds = (
+        datetime(2026, 8, 3, tzinfo=UTC),
+        datetime(2026, 8, 4, tzinfo=UTC),
+    )
+
+    result = await service.list(account_id, bounds=bounds)
+
+    assert [e.id for e in result] == [inside.id]
+    assert repo.list_calls[-1]["start"] == bounds[0]
+    assert repo.list_calls[-1]["end"] == bounds[1]
+
+
+async def test_list_uses_family_tz_for_repo_call() -> None:
+    account_id = uuid4()
+    repo = FakeExpenseRepo([])
+    service = make_service(repo, family_tz="Europe/Belgrade")
+
+    await service.list(account_id)
+
+    assert repo.list_calls[-1]["tz"] == "Europe/Belgrade"
+
+
+def test_family_tz_property_exposes_constructor_value() -> None:
+    service = make_service(FakeExpenseRepo([]), family_tz="Europe/Belgrade")
+
+    assert service.family_tz == "Europe/Belgrade"
 
 
 async def test_get_returns_expense_in_account() -> None:
