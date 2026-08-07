@@ -704,7 +704,7 @@ every unit below.
       Files: `webapp/src/screens/add-expense.ts`,
       `webapp/tests/add-expense.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U3.5 Archived-category error paths** — the two failure modes the
+- [x] **U3.5 Archived-category error paths** — the two failure modes the
       redesign introduces surface as sentences. AC: a 404 on submit shows
       "That category no longer exists.", clears the selection and refetches,
       keeping the rest of the draft; a 409 (D302, writing into an archived
@@ -1570,6 +1570,31 @@ every unit below.
   an unreviewed visual change to two unrelated screens. Left as a flagged gap
   rather than fixed, same "out of scope, pre-existing" boundary D343 drew for
   `renderError`'s amount field.
+- D345 (2026-08-07, U3.5): the stale/archived-category refetch is owned by
+  `createController`, not `mount` — `AddExpenseController` gained
+  `getCategories()` alongside `getDraft()`, backed by a `categories` variable
+  the controller can reassign, so the recovery (`categoryId` cleared,
+  `api.listCategories()` re-awaited, rest of the draft untouched) stays "pure
+  aside from the awaited API calls" and directly unit-testable, matching the
+  file header's stated split — same reasoning as why `submit()` itself lives
+  here rather than in `mount`. `mount` was updated to read
+  `controller.getCategories()` everywhere it previously read `data.categories`
+  (the grid, the category picker mount, both `applyAddExpenseChrome` call
+  sites) so the refetched list actually reaches the next render; `data`
+  itself (currency/accountName/today/tags) stays the one-shot snapshot it
+  already was. A failed refetch (network blip right after the 404/409) is
+  swallowed — the cleared selection alone already forces a re-pick, which is
+  the part the AC cares about; the grid just falls back to the last-known
+  list rather than the screen erroring a second time. In passing, corrected
+  `submitErrorMessage`'s 404 text from its pre-existing approximation ("That
+  category no longer exists. Choose another and try again.") to the screen
+  doc's exact `err.stale` string ("That category no longer exists.") — the
+  longer text predates this unit and was never the spec's wording, D340-343's
+  own "exact string, no invented copy" precedent. No dedicated `ConflictError`
+  class for 409: `client.test.ts`'s existing "unmapped 4xx → plain `ApiError`"
+  test and `budgets.ts::saveErrorMessage`'s `err.status === 409` check are
+  already the codebase's convention, so `submitErrorMessage` matches on
+  `err instanceof ApiError && err.status === 409` the same way.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -2423,7 +2448,21 @@ every unit below.
   `viewportStableHeight: 0` edge case, a stale test count here) — all fixed;
   round 3 APPROVE, no findings. verify.sh green (638 backend + 555 webapp
   tests, typecheck/lint/build/secret-grep all pass).
-- Next: **U3.5** — Archived-category error paths (M3).
+- Done: **U3.5** — Archived-category error paths. `createController` gained
+  `getCategories()`; a stale-category (404) or archived-category (409, D302)
+  submit error now clears `draft.categoryId`, re-awaits `api.listCategories()`
+  into the controller's own list, and leaves the rest of the draft (amount,
+  tags, comment, date) untouched — `mount` re-reads
+  `controller.getCategories()` everywhere it used to read the one-shot
+  `data.categories` so the refetched grid actually renders. Messages are the
+  screen doc's exact `err.stale`/`err.archived` strings, no status code
+  either way; 409 is matched via `err instanceof ApiError && err.status ===
+  409` (no dedicated error class — see D345 for why that matches the
+  codebase's existing convention, and for the pre-existing 404 message text
+  it corrected in passing). See D345. verify.sh green (638 backend + 558
+  webapp tests, typecheck/lint/build/secret-grep all pass).
+- Next: **U4.1** — e2e smoke: period + archive through `initData` (M4). M3 is
+  now fully done.
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

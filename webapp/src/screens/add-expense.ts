@@ -199,7 +199,14 @@ function submitErrorMessage(err: unknown): string {
     return "You don't have permission to add expenses.";
   }
   if (err instanceof NotFoundError) {
-    return "That category no longer exists. Choose another and try again.";
+    return "That category no longer exists.";
+  }
+  // 409 (D302): the category existed when the grid was drawn but was
+  // archived before this submit landed. No dedicated error class — the
+  // status code is the only signal, same convention as
+  // `screens/budgets.ts::saveErrorMessage`'s duplicate-plan 409.
+  if (err instanceof ApiError && err.status === 409) {
+    return "That category was archived. Choose another.";
   }
   if (err instanceof ApiError) {
     return err.message;
@@ -207,8 +214,23 @@ function submitErrorMessage(err: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
+/** The two failure modes this unit recovers from (docs/ui/screens/02-add-
+ * expense.md's Stale/Archived category rows): the category picked at open
+ * no longer exists, or was archived between the grid rendering and this
+ * submit landing. Both share the same recovery shape — clear the
+ * selection, refetch the list — so `err.status === 409` alone (D302) is
+ * enough; the message text distinguishes the two for the user. */
+function isStaleCategoryError(err: unknown): boolean {
+  return err instanceof NotFoundError || (err instanceof ApiError && err.status === 409);
+}
+
 export interface AddExpenseController {
   getDraft(): Draft;
+  /** The category grid's current source list — starts as the `categories`
+   * constructor arg, replaced in place by a stale-category recovery
+   * (U3.5: a 404/409 on submit refetches so the archived/deleted category
+   * drops out of the grid the next render). */
+  getCategories(): CategoryResponse[];
   setAmountInput(value: string): void;
   setCategoryId(id: Uuid): void;
   toggleTag(id: Uuid): void;
@@ -226,9 +248,14 @@ export interface AddExpenseController {
  * reaches `createExpense` (AC: "exactly one POST", same shape as the bot's
  * D118/D123 confirm-step guard: disable/clear before the call). On success
  * the draft resets, so a stray replayed call afterwards is rejected by
- * `submitButtonState` (no category) rather than issuing a second write. */
+ * `submitButtonState` (no category) rather than issuing a second write.
+ *
+ * A stale-category 404/409 (U3.5) is the other recovering failure: the
+ * selection is cleared and `categories` refetched via `api.listCategories`,
+ * while the rest of the draft (amount, tags, comment, date) survives —
+ * still "pure aside from the awaited API calls", so directly unit-testable. */
 export function createController(
-  api: Pick<AddExpenseApi, "createExpense">,
+  api: Pick<AddExpenseApi, "createExpense" | "listCategories">,
   categories: CategoryResponse[],
   currency: Currency,
   initialDraft: Draft = emptyDraft(),
@@ -238,6 +265,7 @@ export function createController(
 
   return {
     getDraft: () => draft,
+    getCategories: () => categories,
     setAmountInput(value) {
       draft = { ...draft, amountInput: value };
     },
@@ -279,6 +307,16 @@ export function createController(
         draft = emptyDraft();
         return { status: "success", expense };
       } catch (err) {
+        if (isStaleCategoryError(err)) {
+          draft = { ...draft, categoryId: null };
+          try {
+            categories = await api.listCategories();
+          } catch {
+            // The refetch itself failing is not this AC's concern — the
+            // cleared selection still forces a re-pick, which is the part
+            // that matters; the grid just shows the last-known list.
+          }
+        }
         return { status: "error", message: submitErrorMessage(err) };
       } finally {
         submitting = false;
@@ -676,13 +714,13 @@ export function mount(
       if (errorEl) {
         errorEl.textContent = amountError(controller.getDraft().amountInput) ?? "";
       }
-      applyAddExpenseChrome(controller.getDraft(), data.categories, data.currency);
+      applyAddExpenseChrome(controller.getDraft(), controller.getCategories(), data.currency);
     });
 
     const pickerSlot = root.querySelector<HTMLElement>(".category-picker-slot");
     if (pickerSlot) {
       mountCategoryPicker(pickerSlot, {
-        items: categoryPickerItems(data.categories),
+        items: categoryPickerItems(controller.getCategories()),
         selectedId: controller.getDraft().categoryId,
         onSelect: (id) => {
           controller.setCategoryId(id);
@@ -756,13 +794,17 @@ export function mount(
     if (!container) {
       return;
     }
-    container.outerHTML = renderForm(data, controller.getDraft(), { submitError, lastSyncedAt });
+    container.outerHTML = renderForm(
+      { ...data, categories: controller.getCategories() },
+      controller.getDraft(),
+      { submitError, lastSyncedAt },
+    );
     wireForm();
-    applyAddExpenseChrome(controller.getDraft(), data.categories, data.currency);
+    applyAddExpenseChrome(controller.getDraft(), controller.getCategories(), data.currency);
   };
 
   wireForm();
-  applyAddExpenseChrome(controller.getDraft(), data.categories, data.currency);
+  applyAddExpenseChrome(controller.getDraft(), controller.getCategories(), data.currency);
   wireBackButton(controller.getDraft, handlers.onClose);
 
   mainButton.onClick(() => {

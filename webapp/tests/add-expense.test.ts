@@ -376,21 +376,6 @@ describe("createController submit", () => {
     expect(controller.getDraft().amountInput).toBe("38.40");
   });
 
-  it("maps a stale-category 404 to a human message and preserves the draft", async () => {
-    const api = fakeApi({ createExpense: vi.fn().mockRejectedValue(new NotFoundError()) });
-    const controller = createController(api, CATEGORIES, "EUR");
-    controller.setAmountInput("38.40");
-    controller.setCategoryId("cat-groceries");
-
-    const outcome = await controller.submit();
-
-    expect(outcome).toEqual({
-      status: "error",
-      message: "That category no longer exists. Choose another and try again.",
-    });
-    expect(controller.getDraft().categoryId).toBe("cat-groceries");
-  });
-
   it("maps a network failure to a retryable message and preserves the draft", async () => {
     const api = fakeApi({ createExpense: vi.fn().mockRejectedValue(new RetryableError()) });
     const controller = createController(api, CATEGORIES, "EUR");
@@ -407,14 +392,99 @@ describe("createController submit", () => {
   });
 
   it("maps an unmapped ApiError to its own message", async () => {
-    const api = fakeApi({ createExpense: vi.fn().mockRejectedValue(new ApiError("Request failed (409).", 409)) });
+    const api = fakeApi({ createExpense: vi.fn().mockRejectedValue(new ApiError("Request failed (422).", 422)) });
     const controller = createController(api, CATEGORIES, "EUR");
     controller.setAmountInput("38.40");
     controller.setCategoryId("cat-groceries");
 
     const outcome = await controller.submit();
 
-    expect(outcome).toEqual({ status: "error", message: "Request failed (409)." });
+    expect(outcome).toEqual({ status: "error", message: "Request failed (422)." });
+  });
+
+  // -- U3.5: stale/archived category recovery ------------------------------
+
+  it("a 404 (stale category) shows the exact sentence, clears the selection, refetches, and keeps the rest of the draft", async () => {
+    const REFETCHED = [category("cat-transport", "Transport")];
+    const api = fakeApi({
+      createExpense: vi.fn().mockRejectedValue(new NotFoundError()),
+      listCategories: vi.fn().mockResolvedValue(REFETCHED),
+    });
+    const controller = createController(api, CATEGORIES, "EUR");
+    controller.setAmountInput("38.40");
+    controller.setCategoryId("cat-groceries");
+    controller.toggleTag("tag-vacation");
+    controller.setComment("weekly shop");
+
+    const outcome = await controller.submit();
+
+    expect(outcome).toEqual({ status: "error", message: "That category no longer exists." });
+    expect(api.listCategories).toHaveBeenCalledOnce();
+    const draft = controller.getDraft();
+    expect(draft.categoryId).toBeNull();
+    expect(draft.amountInput).toBe("38.40");
+    expect(draft.tagIds).toEqual(["tag-vacation"]);
+    expect(draft.comment).toBe("weekly shop");
+    expect(controller.getCategories()).toEqual(REFETCHED);
+  });
+
+  it("a 409 (archived category, D302) shows the exact sentence and the same recovery as 404", async () => {
+    const REFETCHED = [category("cat-transport", "Transport")];
+    const api = fakeApi({
+      createExpense: vi.fn().mockRejectedValue(new ApiError("Conflict", 409)),
+      listCategories: vi.fn().mockResolvedValue(REFETCHED),
+    });
+    const controller = createController(api, CATEGORIES, "EUR");
+    controller.setAmountInput("38.40");
+    controller.setCategoryId("cat-groceries");
+
+    const outcome = await controller.submit();
+
+    expect(outcome).toEqual({ status: "error", message: "That category was archived. Choose another." });
+    expect(controller.getDraft().categoryId).toBeNull();
+    expect(controller.getCategories()).toEqual(REFETCHED);
+  });
+
+  it("a failed refetch after a stale-category error still clears the selection, keeping the last-known list", async () => {
+    const api = fakeApi({
+      createExpense: vi.fn().mockRejectedValue(new NotFoundError()),
+      listCategories: vi.fn().mockRejectedValue(new RetryableError()),
+    });
+    const controller = createController(api, CATEGORIES, "EUR");
+    controller.setAmountInput("38.40");
+    controller.setCategoryId("cat-groceries");
+
+    const outcome = await controller.submit();
+
+    expect(outcome).toEqual({ status: "error", message: "That category no longer exists." });
+    expect(controller.getDraft().categoryId).toBeNull();
+    expect(controller.getCategories()).toEqual(CATEGORIES);
+  });
+
+  it("neither message mentions a status code", async () => {
+    const notFound = createController(
+      fakeApi({ createExpense: vi.fn().mockRejectedValue(new NotFoundError()) }),
+      CATEGORIES,
+      "EUR",
+    );
+    notFound.setAmountInput("38.40");
+    notFound.setCategoryId("cat-groceries");
+    const notFoundOutcome = await notFound.submit();
+
+    const conflict = createController(
+      fakeApi({ createExpense: vi.fn().mockRejectedValue(new ApiError("Conflict", 409)) }),
+      CATEGORIES,
+      "EUR",
+    );
+    conflict.setAmountInput("38.40");
+    conflict.setCategoryId("cat-groceries");
+    const conflictOutcome = await conflict.submit();
+
+    for (const outcome of [notFoundOutcome, conflictOutcome]) {
+      if (outcome.status === "error") {
+        expect(outcome.message).not.toMatch(/\d{3}/);
+      }
+    }
   });
 });
 
