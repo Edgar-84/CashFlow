@@ -130,15 +130,22 @@ describe("datePillOptions", () => {
     ]);
   });
 
-  it("appends a fourth pill, labelled by weekday, for a selected date outside the three", () => {
+  it("replaces pill 3 with the selected date, labelled by short weekday, when it falls outside the three", () => {
     // 2026-07-20 is a Monday.
     const options = datePillOptions(TODAY, "2026-07-20");
-    expect(options).toHaveLength(4);
-    expect(options[3]).toEqual({ date: "2026-07-20", label: "monday" });
+    expect(options).toEqual([
+      { date: "2026-08-04", label: "today" },
+      { date: "2026-08-03", label: "yesterday" },
+      { date: "2026-07-20", label: "Mon" },
+    ]);
   });
 
-  it("does not duplicate a fourth pill when the selected date already matches a fixed one", () => {
-    expect(datePillOptions(TODAY, "2026-08-03")).toHaveLength(3);
+  it("stays at three pills, with pill 3 unchanged, when the selected date already matches a fixed one", () => {
+    expect(datePillOptions(TODAY, "2026-08-02")).toEqual([
+      { date: "2026-08-04", label: "today" },
+      { date: "2026-08-03", label: "yesterday" },
+      { date: "2026-08-02", label: "two days ago" },
+    ]);
   });
 });
 
@@ -1048,13 +1055,15 @@ describe("renderAddExpense", () => {
     expect(html).not.toMatch(/class="date-pill selected"[^>]*data-date="2026-08-04"/);
   });
 
-  it("adds a fourth selected pill for a date outside the three shortcuts", () => {
+  it("replaces pill 3 with a selected date outside the three shortcuts, never rendering a fourth", () => {
     const html = renderForm(READY, { ...emptyDraft(), spentAt: "2026-07-20" });
     expect(html).toMatch(/class="date-pill selected"[^>]*data-date="2026-07-20"/);
-    // The three fixed pills stay present, unselected.
+    // Pills 1 and 2 stay present, unselected; "two days ago" (pill 3) is gone.
     expect(html).toContain('data-testid="date-pill-2026-08-04"');
     expect(html).toContain('data-testid="date-pill-2026-08-03"');
-    expect(html).toContain('data-testid="date-pill-2026-08-02"');
+    expect(html).not.toContain('data-testid="date-pill-2026-08-02"');
+    expect(html).not.toContain("two days ago");
+    expect(html.match(/data-testid="date-pill-/g)).toHaveLength(3);
   });
 });
 

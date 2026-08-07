@@ -655,18 +655,18 @@ function formatPillDate(dateStr: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-const WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-
 export interface DatePillOption {
   date: string; // YYYY-MM-DD
   label: string;
 }
 
-/** The three fixed shortcuts, plus a fourth for `selected` when it falls
- * outside them — "a calendar date outside the three shortcuts appears as a
- * fourth selected pill" (screen doc). Its label is the lowercase weekday
- * name, matching the other three pills' lowercase-word style; not specified
- * by the screen doc, a U3.3 judgment call (plan Decision log). */
+/** Always exactly three pills — the row never grows a fourth and never
+ * scrolls. Pill 3 is a slot: it shows "two days ago" unless `selected` falls
+ * outside the three fixed shortcuts, in which case it holds `selected`
+ * instead, replacing "two days ago" rather than appending to it
+ * (docs/ui/screens/02-add-expense.md, "Pill 3 is a slot, not a fixed
+ * shortcut", D406 half one). Its second line then becomes the short weekday
+ * abbreviation ("Sun") rather than a word, per the screen doc's Copy table. */
 export function datePillOptions(today: string, selected: string): DatePillOption[] {
   const t = parseDateString(today);
   const fixed: DatePillOption[] = [
@@ -677,8 +677,8 @@ export function datePillOptions(today: string, selected: string): DatePillOption
   if (fixed.some((p) => p.date === selected)) {
     return fixed;
   }
-  const weekday = WEEKDAY_NAMES[(parseDateString(selected).getDay() + 6) % 7]; // Monday = 0
-  return [...fixed, { date: selected, label: weekday }];
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(parseDateString(selected));
+  return [fixed[0], fixed[1], { date: selected, label: weekday }];
 }
 
 /** Wraparound left/right focus movement for the (single-row) date

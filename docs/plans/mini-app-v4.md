@@ -394,7 +394,7 @@ navigate into screens that must already accept what they will be handed.
       `segmentTapTarget` and its tests are deleted rather than left unused.
       Files: `webapp/src/screens/home.ts`, `webapp/src/main.ts`,
       `webapp/tests/home.test.ts`. Model: sonnet.
-- [ ] **U2.4 Pill 3 becomes a slot** (D406, half one) — `datePillOptions` stops
+- [x] **U2.4 Pill 3 becomes a slot** (D406, half one) — `datePillOptions` stops
       appending a fourth pill.
       AC: choosing 3 August while today is 7 August leaves **three** pills, the
       third reading `8/3` over "Sun" and selected; the row never scrolls and
@@ -1061,7 +1061,22 @@ human with a phone:
   or its tests, since U1.1 already built the category+period filter and its
   "both halves" banner test. Statistics' `onBarTap` → `showExpenses({
   categoryId })` is untouched (no period there, out of scope).
-- **Next:** `U2.4` Pill 3 becomes a slot (D406, half one).
+- **U2.4 done.** `datePillOptions` no longer appends a fourth pill for a
+  selected date outside the three shortcuts — it replaces pill 3 (`{today,
+  yesterday}` stay `fixed[0]`/`fixed[1]`; the third slot holds `selected`)
+  instead of returning all four. The replaced pill's second line switched
+  from the old `WEEKDAY_NAMES` lookup (full lowercase name, a U3.3 judgment
+  call) to `Intl.DateTimeFormat("en-US", { weekday: "short" })` ("Sun"),
+  matching the screen doc's Copy table (`date.weekday`) now that D406 pins
+  the exact string — the array and its judgment-call comment are gone, not
+  just superseded. `renderDateRow`/`renderForm` needed no change: they
+  already render whatever `datePillOptions` returns, so the row's "never
+  four pills" behaviour falls out of the function's new return shape.
+  `nextDatePillFocusIndex` is untouched (generic over pill count). The
+  "no future date selectable" half of the AC was already satisfied by the
+  calendar's existing `maxDate: data.today` — nothing to change there either.
+- **Next:** `U2.5` Home hands the Day tab's date to screen 02 (D406, half
+  two) — depends on U2.4, now done.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
