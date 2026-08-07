@@ -260,7 +260,7 @@ Appearance and interaction are in `docs/ui/`, not here. Structural deltas only:
       period params still returns the current family month.
       Files: `api/period_params.py`(new), `api/statistics.py`,
       `tests/test_statistics_api.py`. Model: sonnet.
-- [ ] **U0.3 `GET /expenses` accepts category + period** (D402) — the route and
+- [x] **U0.3 `GET /expenses` accepts category + period** (D402) — the route and
       service wiring on top of U0.1 and U0.2 (D415: may extend
       `api/period_params.py`).
       AC: `category_id` returns only that category's expenses **across pages**,
@@ -755,8 +755,19 @@ human with a phone:
   was the narrower "extract `_validate_period`, no behaviour change." If
   U0.3's route wiring needs the combined resolve+validate shape, that is
   U0.3's decision to add, not a silent U0.2 scope change.
-- **Next:** U0.3 (`GET /expenses` accepts category + period, D402), on top of
-  U0.1 and U0.2.
+- **U0.3 done.** `GET /expenses` gained `category_id`/`period`/`period_offset`/
+  `start_date`/`end_date`, resolved through `api/period_params.py`'s new
+  `resolve_period_params` (D415's combined validate+resolve shape, built here
+  since this is its first caller) into `[start, end)` bounds the route passes
+  to `ExpenseService.list(category_id=, bounds=)`. The service threads
+  `bounds`/`category_id` plus its own `family_tz` (now also exposed as a
+  read-only `family_tz` property, so the route sources tz from the service
+  instance it already has instead of a second `get_settings()` call) to
+  `expense_repo.list`, unchanged since U0.1. `api/statistics.py` is untouched —
+  its three routes still call `validate_period_params` directly and resolve
+  their own bounds inside `statistics_service.py`, per D415.
+- **Next:** U0.4 (`PATCH /accounts/me`, D400/D401) — RISKY, reviewer subagent
+  required (account-wide write, admin-gated).
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.

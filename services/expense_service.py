@@ -123,6 +123,14 @@ class ExpenseService:
         self._notification_service = notification_service
         self._family_tz = family_tz
 
+    @property
+    def family_tz(self) -> str:
+        """Exposed read-only so the route can resolve `GET /expenses`'s
+        period params (D402) with the same tz this service already uses for
+        the repo's `AT TIME ZONE` window — Contracts' `list(bounds=...)`
+        shape keeps resolution in the route, not here (D415)."""
+        return self._family_tz
+
     async def get(self, expense_id: UUID, account_id: UUID) -> ExpenseResponse:
         expense = await self._expense_repo.get(expense_id)
         if expense is None or expense.account_id != account_id:
@@ -285,6 +293,21 @@ class ExpenseService:
     # method's bare `list[...]` annotation earlier in this class body — must
     # stay the last definition here.
     async def list(
-        self, account_id: UUID, *, limit: int = 50, offset: int = 0
+        self,
+        account_id: UUID,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        category_id: UUID | None = None,
+        bounds: tuple[datetime, datetime] | None = None,
     ) -> list[ExpenseResponse]:
-        return await self._expense_repo.list(account_id=account_id, limit=limit, offset=offset)
+        start, end = bounds if bounds is not None else (None, None)
+        return await self._expense_repo.list(
+            account_id=account_id,
+            limit=limit,
+            offset=offset,
+            category_id=category_id,
+            start=start,
+            end=end,
+            tz=self._family_tz,
+        )

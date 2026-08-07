@@ -5,7 +5,7 @@ replaced by in-memory fakes via app.dependency_overrides (tests/CLAUDE.md) — n
 """
 
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -227,6 +227,255 @@ async def test_list_expenses_limit_over_200_is_422(
     )
 
     assert response.status_code == 422
+
+
+async def test_list_expenses_no_new_params_is_byte_for_byte_unchanged(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    expenses = [make_expense(account_id=account_id, user_id=member.id) for _ in range(3)]
+    repo = override_repos(expenses)
+
+    response = await client.get("/expenses", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert {e["id"] for e in response.json()} == {str(e.id) for e in expenses}
+    assert repo.list_calls[-1]["category_id"] is None
+    assert repo.list_calls[-1]["start"] is None
+    assert repo.list_calls[-1]["end"] is None
+
+
+async def test_list_expenses_category_id_filters_across_pages(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    # The concrete bug the old client-side filter had: a target-category
+    # expense sitting past the default limit=50 page must still come back
+    # when filtering by category_id, because the repo filters before it
+    # paginates (U0.3 AC).
+    target_category = uuid4()
+    other_expenses = [make_expense(account_id=account_id, user_id=member.id) for _ in range(50)]
+    target_expense = make_expense(
+        account_id=account_id, user_id=member.id, category_id=target_category
+    )
+    override_repos([*other_expenses, target_expense])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"category_id": str(target_category)},
+    )
+
+    assert response.status_code == 200
+    assert [e["id"] for e in response.json()] == [str(target_expense.id)]
+
+
+async def test_list_expenses_period_day_offset_minus_one_returns_yesterday(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    today = date.today()
+    yesterday_expense = make_expense(
+        account_id=account_id, user_id=member.id, spent_at=today - timedelta(days=1)
+    )
+    today_expense = make_expense(account_id=account_id, user_id=member.id, spent_at=today)
+    override_repos([yesterday_expense, today_expense])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"period": "day", "period_offset": -1},
+    )
+
+    assert response.status_code == 200
+    assert [e["id"] for e in response.json()] == [str(yesterday_expense.id)]
+
+
+async def test_list_expenses_period_month_offset_zero_matches_this_month(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    this_month = date.today().replace(day=1)
+    last_month = (this_month - timedelta(days=1)).replace(day=1)
+    this_month_expense = make_expense(account_id=account_id, user_id=member.id, spent_at=this_month)
+    last_month_expense = make_expense(account_id=account_id, user_id=member.id, spent_at=last_month)
+    override_repos([this_month_expense, last_month_expense])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "period_offset": 0},
+    )
+
+    assert response.status_code == 200
+    assert [e["id"] for e in response.json()] == [str(this_month_expense.id)]
+
+
+async def test_list_expenses_period_custom_with_both_dates_works(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    inside = make_expense(account_id=account_id, user_id=member.id, spent_at=date(2026, 8, 3))
+    outside = make_expense(account_id=account_id, user_id=member.id, spent_at=date(2026, 8, 10))
+    override_repos([inside, outside])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"period": "custom", "start_date": "2026-08-03", "end_date": "2026-08-03"},
+    )
+
+    assert response.status_code == 200
+    assert [e["id"] for e in response.json()] == [str(inside.id)]
+
+
+async def test_list_expenses_period_custom_without_dates_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/expenses", headers=auth_headers(member.tg_id), params={"period": "custom"}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_list_expenses_period_custom_with_nonzero_offset_is_422_naming_period_offset(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+) -> None:
+    # Contracts Rules: "period_offset with period=custom → 422". Regression:
+    # this case used to fall through to services/period.py::resolve_period's
+    # own ValueError, which hardcodes the word "offset" and can't quote
+    # period_offset (review fix, U0.3).
+    override_repos([])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={
+            "period": "custom",
+            "period_offset": -1,
+            "start_date": "2026-08-01",
+            "end_date": "2026-08-03",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "period_offset" in response.json()["detail"]
+
+
+async def test_list_expenses_period_offset_positive_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "period_offset": 1},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_list_expenses_period_offset_without_period_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/expenses", headers=auth_headers(member.tg_id), params={"period_offset": -1}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_list_expenses_start_date_without_custom_is_422(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "start_date": "2026-08-03"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_list_expenses_period_offset_without_period_message_names_period_offset(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+) -> None:
+    # D402/D403: the 422 must quote what the caller actually sent
+    # (`period_offset`), not the statistics routes' `offset` spelling.
+    override_repos([])
+
+    response = await client.get(
+        "/expenses", headers=auth_headers(member.tg_id), params={"period_offset": -1}
+    )
+
+    assert response.status_code == 422
+    assert "period_offset" in response.json()["detail"]
+
+
+async def test_list_expenses_own_only_still_filters_with_category_id(
+    client: AsyncClient,
+    app: FastAPI,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    other_member: UserResponse,
+    account_id: UUID,
+) -> None:
+    target_category = uuid4()
+    mine = make_expense(account_id=account_id, user_id=member.id, category_id=target_category)
+    theirs = make_expense(
+        account_id=account_id, user_id=other_member.id, category_id=target_category
+    )
+    override_repos([mine, theirs])
+    app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo(
+        [
+            PermissionResponse(
+                id=uuid4(),
+                user_id=member.id,
+                resource=Resource.EXPENSES,
+                can_read=True,
+                own_only=True,
+            )
+        ]
+    )
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"category_id": str(target_category)},
+    )
+
+    assert response.status_code == 200
+    assert [e["id"] for e in response.json()] == [str(mine.id)]
 
 
 async def test_get_expense_as_viewer(

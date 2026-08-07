@@ -336,6 +336,11 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | `test_list_scopes_by_account` | `list()` excludes another account's expenses |
 | `test_list_defaults_to_limit_50_offset_0` | Omitting `limit`/`offset` still returns every row of a small set (U0.3 AC) |
 | `test_list_passes_limit_and_offset_through_to_repo` | `list(limit=, offset=)` is threaded to the repo call unchanged (U0.3) |
+| `test_list_no_period_params_is_byte_for_byte_unchanged` | `list()` with no `category_id`/`bounds` reaches the repo with `category_id=None`, `start=None`, `end=None` (D402) |
+| `test_list_passes_category_id_through_to_repo` | `list(category_id=)` narrows to that category |
+| `test_list_passes_bounds_through_to_repo` | `list(bounds=(start, end))` narrows to that `spent_at` window and threads `start`/`end` to the repo call |
+| `test_list_uses_family_tz_for_repo_call` | `list()` always passes the service's own `family_tz` to the repo, not a hardcoded `"UTC"` |
+| `test_family_tz_property_exposes_constructor_value` | The `family_tz` property exposes the constructor value — the route (D402/D415) reads it via `service.family_tz`, not a second settings lookup |
 | `test_get_returns_expense_in_account` | `get()` returns an expense belonging to the given account |
 | `test_get_missing_raises_not_found` | `get()` on an unknown id raises `NotFoundError` |
 | `test_get_foreign_account_raises_not_found` | `get()` on an expense from another account raises `NotFoundError` |
@@ -437,6 +442,18 @@ first time — plan Decision log handoff note).
 | `test_list_expenses_pages_without_overlap` | `GET /expenses?limit=&offset=` — two consecutive pages of a 5-row set are disjoint and each has the requested size (U0.3 AC) |
 | `test_list_expenses_default_limit_unchanged_for_existing_callers` | Omitting `limit`/`offset` still returns every row of a small set — default call unchanged (U0.3 AC) |
 | `test_list_expenses_limit_over_200_is_422` | `GET /expenses?limit=201` → 422 (U0.3 AC) |
+| `test_list_expenses_no_new_params_is_byte_for_byte_unchanged` | No `category_id`/`period`/etc. → the repo call carries `category_id=None`, `start=None`, `end=None` — today's shape unchanged (D402) |
+| `test_list_expenses_category_id_filters_across_pages` | `GET /expenses?category_id=` with the matching expense past the default `limit=50` page still comes back — the repo filters before it paginates, closing the client-side filter's "only within the first page" bug (D402/U0.3 AC) |
+| `test_list_expenses_period_day_offset_minus_one_returns_yesterday` | `period=day&period_offset=-1` returns exactly yesterday's expenses |
+| `test_list_expenses_period_month_offset_zero_matches_this_month` | `period=month&period_offset=0` returns exactly this month's expenses |
+| `test_list_expenses_period_custom_with_both_dates_works` | `period=custom` with `start_date`/`end_date` returns exactly the expenses inside that window |
+| `test_list_expenses_period_custom_without_dates_is_422` | `period=custom` with no dates → 422 |
+| `test_list_expenses_period_custom_with_nonzero_offset_is_422_naming_period_offset` | `period=custom` with a non-zero `period_offset` → 422 naming `period_offset` (review fix — used to fall through to `resolve_period`'s hardcoded "offset" wording) |
+| `test_list_expenses_period_offset_positive_is_422` | `period_offset=1` → 422 (`le=0`) |
+| `test_list_expenses_period_offset_without_period_is_422` | `period_offset` with no `period` → 422 |
+| `test_list_expenses_start_date_without_custom_is_422` | `start_date` with `period=month` (not `custom`) → 422 |
+| `test_list_expenses_period_offset_without_period_message_names_period_offset` | The 422 detail names `period_offset`, not the statistics routes' `offset` (D402/D403's `offset_param_name`) |
+| `test_list_expenses_own_only_still_filters_with_category_id` | An `own_only` override row still restricts to the caller's own expenses when `category_id` is also given |
 | `test_get_expense_as_viewer` | Viewer `GET /expenses/{id}` returns the expense |
 | `test_get_missing_expense_is_404` | Unknown id → 404 |
 | `test_create_expense_as_member` | Member `POST /expenses` → 201; response `account_id`/`user_id` are server-derived |

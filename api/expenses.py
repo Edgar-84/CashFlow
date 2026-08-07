@@ -1,10 +1,12 @@
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from api.deps import PermissionChecker, PermissionDecision, enforce_ownership, get_expense_service
-from models.enums import Action, Resource
+from api.period_params import resolve_period_params
+from models.enums import Action, PeriodUnit, Resource
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.user import UserResponse
 from services.expense_service import ExpenseService
@@ -19,8 +21,30 @@ async def list_expenses(
     service: Annotated[ExpenseService, Depends(get_expense_service)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    category_id: UUID | None = None,
+    period: PeriodUnit | None = None,
+    period_offset: Annotated[int, Query(le=0)] = 0,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[ExpenseResponse]:
-    expenses = await service.list(user.account_id, limit=limit, offset=offset)
+    # `period_offset`, not `offset` — `offset` already paginates and the bot
+    # depends on that spelling (plan Decision log D402).
+    try:
+        bounds = resolve_period_params(
+            period=period,
+            offset=period_offset,
+            start_date=start_date,
+            end_date=end_date,
+            offset_param_name="period_offset",
+            tz=service.family_tz,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    expenses = await service.list(
+        user.account_id, limit=limit, offset=offset, category_id=category_id, bounds=bounds
+    )
     # Default matrix leaves expense read unqualified (D26), but an override
     # permission row can still set own_only=True for read — step 6 has no
     # single "target record" for a list, so it's applied here as a filter
