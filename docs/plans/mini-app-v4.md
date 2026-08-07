@@ -345,7 +345,7 @@ navigate into screens that must already accept what they will be handed.
       Files: `webapp/src/screens/add-expense.ts`, `webapp/src/main.ts`,
       `webapp/tests/add-expense.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U1.5 Screen 03b — Edit routes to 02b, Delete confirms** (D407/D408) —
+- [x] **U1.5 Screen 03b — Edit routes to 02b, Delete confirms** (D407/D408) —
       implements `docs/ui/screens/03b-expense-detail.md`. The field-picker edit
       mode and the 5s undo state machine are **deleted**, not disabled.
       AC: "Edit" navigates to 02b carrying the loaded expense with no refetch;
@@ -779,6 +779,23 @@ human with a phone:
   `docs/ui/screens/03-expenses.md`'s "newest day first". Rows *within* a
   group still keep first-seen (`created_at`-descending) order; only the
   groups themselves are re-sorted, by a plain `YYYY-MM-DD` string compare.
+- 2026-08-07: **D418 — U1.5's "read-only viewer" hiding uses role +
+  ownership, not a server-sent flag.** `ExpenseResponse` carries no
+  `can_edit`; the screen doc's Edge cases name two cases needing identical
+  treatment — "a viewer" and "a member on a partner's expense under
+  own_only" — reasoning both from `api/CLAUDE.md`'s default matrix
+  (`viewer`: never writes; `member`: own-only). `loadDetail` now also asks
+  `getMe()` for `id`/`role` (already fetching it for `currency`) and
+  computes `canWrite = role !== "viewer" && (role === "admin" ||
+  expense.user_id === me.id)`. This is a best-effort UI hint reflecting the
+  *default* matrix, not a re-implementation of `PermissionChecker`: an
+  admin-set per-user override row (e.g. a member granted cross-account
+  `own_only=false`) is invisible to the client and would show a stale
+  Edit/Delete state until the real `PATCH`/`DELETE` 403s — no worse than not
+  hiding the buttons at all, and the server stays the sole enforcer.
+  Rejected: leaving both actions always visible and relying solely on the
+  write call's 403 (the doc's Edge cases explicitly ask for the buttons
+  themselves to be absent, not to fail after a tap).
 
 ## STATE (handoff)
 - **Plan written 2026-08-07.** No unit implemented yet. The nine spec files
@@ -962,7 +979,32 @@ human with a phone:
   screen doc's States table) — the amount field alone is already live from
   `seedDraft` (existing mechanism, unchanged), and the rest isn't in the
   unit's own gating Acceptance criteria list.
-- **Next:** M1 — `U1.5` Screen 03b — Edit routes to 02b, Delete confirms.
+- **U1.5 done.** `screens/expense-detail.ts` lost the field-picker edit mode
+  (`FieldEditMode`, per-field drafts, `saveAmount`/`saveComment`/
+  `saveCategory`/`saveTags`) and the 5s-undo delete state machine
+  (`pendingDelete`, `requestDelete`/`cancelDelete`/`confirmDelete`,
+  `UNDO_WINDOW_MS`) — deleted, not disabled, along with their tests
+  (Risks' "deleting code, not just adding it"). `ExpenseDetailApi` dropped
+  `listTags`/`updateExpense`: tag names now come straight off
+  `expense.tags` (already full `TagResponse` objects on the record, per
+  `models/expense.py`), and there is no `PATCH` left on this screen at all
+  — `docs/ui/screens/03b-expense-detail.md`'s Data table's own "`PATCH
+  /expenses/{id}` leaves this screen" line. "Edit" now calls
+  `handlers.onEdit(expense)` (`main.ts`'s `showEditExpense`, U1.4's route,
+  wired for the first time), handing over the already-loaded
+  `ExpenseResponse` with no refetch — `DetailLoadState`'s `"ready"` variant
+  now carries the raw `expense` alongside `DetailData` for exactly this.
+  "Delete expense" confirms via `lib/telegram.ts::confirmAction` (existing
+  primitive, first reused outside categories/tags) and calls `DELETE`
+  immediately on "Yes"; a 404 on that call is treated as success per the
+  screen doc's Edge cases (the row is gone either way). `canWrite` (D418)
+  hides both actions for a viewer role or a member viewing a partner's
+  expense. `data-action="open-picker"` stays on the Edit button unchanged
+  (app.css's filled-button rule keys off it, and app.css isn't in this
+  unit's Files list) even though nothing is a picker anymore — a naming
+  wart flagged for a future pass if that file is touched for another
+  reason, not worth its own unit.
+- **Next:** M2 — `U2.1` Empty ring (D405).
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
@@ -980,8 +1022,4 @@ human with a phone:
     (CP5), drop it — the rest of V4 does not lean on it.
   - Several units **delete** code and must delete its tests with it — see
     Risks.
-  - `main.ts::showEditExpense` (U1.4) is written and exported but **unwired**
-    — U1.5 calls it from screen 03b's "Edit" action (replacing the deleted
-    field-picker's `data-action="open-picker"` handler) rather than adding a
-    second route.
   - There is no migration in this plan and no stop-and-ask gate.
