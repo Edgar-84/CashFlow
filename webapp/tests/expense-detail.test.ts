@@ -44,7 +44,7 @@ function expenseResponse(overrides: Partial<ExpenseResponse> = {}): ExpenseRespo
 
 describe("buildDetailData", () => {
   it("turns an expense + categories/tags into the detail shape", () => {
-    const data = buildDetailData(expenseResponse(), CATEGORIES, TAGS, "EUR", "UTC");
+    const data = buildDetailData(expenseResponse(), CATEGORIES, TAGS, "EUR");
     expect(data).toMatchObject({
       id: "exp-1",
       amountMinor: 3840,
@@ -54,14 +54,25 @@ describe("buildDetailData", () => {
       authorName: "Edgar",
       comment: "weekly shop",
       selectedTagIds: ["tag-vacation"],
+      dayLabel: "Sun, Aug 2",
     });
     expect(data.colorVar).toBe("var(--category-slot-1)");
   });
 
   it("falls back to 'Unknown' and the neutral colour for a stale/deleted category id", () => {
-    const data = buildDetailData(expenseResponse({ category_id: "cat-deleted" }), CATEGORIES, TAGS, "EUR", "UTC");
+    const data = buildDetailData(expenseResponse({ category_id: "cat-deleted" }), CATEGORIES, TAGS, "EUR");
     expect(data.categoryLabel).toBe("Unknown");
     expect(data.colorVar).toBe("var(--ink-secondary)");
+  });
+
+  it("reads the day line off spent_at, not created_at (D410) — a backdated expense shows the day it was spent", () => {
+    const data = buildDetailData(
+      expenseResponse({ spent_at: "2026-08-03", created_at: "2026-08-07T10:00:00Z" }),
+      CATEGORIES,
+      TAGS,
+      "EUR",
+    );
+    expect(data.dayLabel).toBe("Mon, Aug 3");
   });
 });
 
@@ -81,7 +92,7 @@ function fakeApi(overrides: Partial<ExpenseDetailApi> = {}): ExpenseDetailApi {
 
 describe("loadDetail", () => {
   it("returns ready with the built detail data", async () => {
-    const state = await loadDetail(fakeApi(), "exp-1", "UTC");
+    const state = await loadDetail(fakeApi(), "exp-1");
     expect(state.status).toBe("ready");
     if (state.status === "ready") {
       expect(state.categoryLabel).toBe("Groceries");
@@ -108,7 +119,7 @@ describe("loadDetail", () => {
 // -- createDetailController -----------------------------------------------
 
 async function readyData(overrides: Partial<ExpenseResponse> = {}) {
-  const state = await loadDetail(fakeApi({ getExpense: vi.fn().mockResolvedValue(expenseResponse(overrides)) }), "exp-1", "UTC");
+  const state = await loadDetail(fakeApi({ getExpense: vi.fn().mockResolvedValue(expenseResponse(overrides)) }), "exp-1");
   if (state.status !== "ready") {
     throw new Error("expected ready");
   }
@@ -119,7 +130,7 @@ describe("createDetailController — edit round-trips one field at a time", () =
   it("saves an amount edit with its own PATCH, leaving other fields untouched", async () => {
     const data = await readyData();
     const updateExpense = vi.fn().mockResolvedValue(expenseResponse({ amount: 5000 }));
-    const controller = createDetailController(fakeApi({ updateExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ updateExpense }), data);
 
     controller.startEdit("amount");
     controller.setAmountDraft("50.00");
@@ -135,7 +146,7 @@ describe("createDetailController — edit round-trips one field at a time", () =
   it("rejects an invalid amount draft without calling the API", async () => {
     const data = await readyData();
     const updateExpense = vi.fn();
-    const controller = createDetailController(fakeApi({ updateExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ updateExpense }), data);
 
     controller.startEdit("amount");
     controller.setAmountDraft("abc");
@@ -148,7 +159,7 @@ describe("createDetailController — edit round-trips one field at a time", () =
   it("saves a comment edit, sending null for a cleared comment", async () => {
     const data = await readyData();
     const updateExpense = vi.fn().mockResolvedValue(expenseResponse({ comment: null }));
-    const controller = createDetailController(fakeApi({ updateExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ updateExpense }), data);
 
     controller.startEdit("comment");
     controller.setCommentDraft("   ");
@@ -162,7 +173,7 @@ describe("createDetailController — edit round-trips one field at a time", () =
   it("saves a category pick immediately, one PATCH per tap", async () => {
     const data = await readyData();
     const updateExpense = vi.fn().mockResolvedValue(expenseResponse({ category_id: "cat-transport" }));
-    const controller = createDetailController(fakeApi({ updateExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ updateExpense }), data);
 
     controller.startEdit("category");
     const ok = await controller.saveCategory("cat-transport");
@@ -176,7 +187,7 @@ describe("createDetailController — edit round-trips one field at a time", () =
   it("saves the whole tag selection as one PATCH when Done is tapped", async () => {
     const data = await readyData();
     const updateExpense = vi.fn().mockResolvedValue(expenseResponse({ tags: [tag("tag-work", "work")] }));
-    const controller = createDetailController(fakeApi({ updateExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ updateExpense }), data);
 
     controller.startEdit("tags");
     controller.toggleTagDraft("tag-vacation");
@@ -191,7 +202,7 @@ describe("createDetailController — edit round-trips one field at a time", () =
   it("keeps the edit open with a human message when a save fails", async () => {
     const data = await readyData();
     const updateExpense = vi.fn().mockRejectedValue(new ForbiddenError());
-    const controller = createDetailController(fakeApi({ updateExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ updateExpense }), data);
 
     controller.startEdit("amount");
     controller.setAmountDraft("50.00");
@@ -205,7 +216,7 @@ describe("createDetailController — edit round-trips one field at a time", () =
   it("cancelEdit discards the draft without calling the API", async () => {
     const data = await readyData();
     const updateExpense = vi.fn();
-    const controller = createDetailController(fakeApi({ updateExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ updateExpense }), data);
 
     controller.startEdit("amount");
     controller.setAmountDraft("999.00");
@@ -221,7 +232,7 @@ describe("createDetailController — delete with a 5s undo, before the API call"
   it("requestDelete flips pendingDelete without calling the API", async () => {
     const data = await readyData();
     const deleteExpense = vi.fn();
-    const controller = createDetailController(fakeApi({ deleteExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ deleteExpense }), data);
 
     controller.requestDelete();
 
@@ -232,7 +243,7 @@ describe("createDetailController — delete with a 5s undo, before the API call"
   it("cancelDelete (undo) restores state with no API call ever made", async () => {
     const data = await readyData();
     const deleteExpense = vi.fn();
-    const controller = createDetailController(fakeApi({ deleteExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ deleteExpense }), data);
 
     controller.requestDelete();
     controller.cancelDelete();
@@ -244,7 +255,7 @@ describe("createDetailController — delete with a 5s undo, before the API call"
   it("confirmDelete after the undo window calls the API exactly once", async () => {
     const data = await readyData();
     const deleteExpense = vi.fn().mockResolvedValue(undefined);
-    const controller = createDetailController(fakeApi({ deleteExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ deleteExpense }), data);
 
     controller.requestDelete();
     const outcome = await controller.confirmDelete();
@@ -257,7 +268,7 @@ describe("createDetailController — delete with a 5s undo, before the API call"
   it("confirmDelete is blocked (no-op) without a pending delete", async () => {
     const data = await readyData();
     const deleteExpense = vi.fn();
-    const controller = createDetailController(fakeApi({ deleteExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ deleteExpense }), data);
 
     const outcome = await controller.confirmDelete();
 
@@ -268,7 +279,7 @@ describe("createDetailController — delete with a 5s undo, before the API call"
   it("a failed delete restores the row (pendingDelete clears) with a human message", async () => {
     const data = await readyData();
     const deleteExpense = vi.fn().mockRejectedValue(new NotFoundError());
-    const controller = createDetailController(fakeApi({ deleteExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ deleteExpense }), data);
 
     controller.requestDelete();
     const outcome = await controller.confirmDelete();
@@ -281,7 +292,7 @@ describe("createDetailController — delete with a 5s undo, before the API call"
   it("maps a 403 delete failure to a human message", async () => {
     const data = await readyData();
     const deleteExpense = vi.fn().mockRejectedValue(new ForbiddenError());
-    const controller = createDetailController(fakeApi({ deleteExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ deleteExpense }), data);
 
     controller.requestDelete();
     const outcome = await controller.confirmDelete();
@@ -292,7 +303,7 @@ describe("createDetailController — delete with a 5s undo, before the API call"
   it("maps an unmapped ApiError to its own message on delete", async () => {
     const data = await readyData();
     const deleteExpense = vi.fn().mockRejectedValue(new ApiError("Request failed (409).", 409));
-    const controller = createDetailController(fakeApi({ deleteExpense }), data, "UTC");
+    const controller = createDetailController(fakeApi({ deleteExpense }), data);
 
     controller.requestDelete();
     const outcome = await controller.confirmDelete();
@@ -342,7 +353,7 @@ describe("renderDetail", () => {
 describe("renderDetailView — edit and delete states", () => {
   it("renders the field picker", async () => {
     const data = await readyData();
-    const controller = createDetailController(fakeApi(), data, "UTC");
+    const controller = createDetailController(fakeApi(), data);
     controller.openPicker();
     const html = renderDetailView(controller.getState());
     expect(html).toContain('data-testid="field-picker"');
@@ -354,7 +365,7 @@ describe("renderDetailView — edit and delete states", () => {
 
   it("renders the category chips with the current pick marked active", async () => {
     const data = await readyData();
-    const controller = createDetailController(fakeApi(), data, "UTC");
+    const controller = createDetailController(fakeApi(), data);
     controller.startEdit("category");
     const html = renderDetailView(controller.getState());
     expect(html).toContain('data-category-id="cat-groceries" aria-pressed="true"');
@@ -363,7 +374,7 @@ describe("renderDetailView — edit and delete states", () => {
 
   it("renders the undo banner while a delete is pending, no action buttons", async () => {
     const data = await readyData();
-    const controller = createDetailController(fakeApi(), data, "UTC");
+    const controller = createDetailController(fakeApi(), data);
     controller.requestDelete();
     const html = renderDetailView(controller.getState());
     expect(html).toContain('data-testid="pending-delete"');

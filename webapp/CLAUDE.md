@@ -41,7 +41,6 @@ task-methodology decomposes the spec.
 - `src/lib/telegram.ts` — the only module touching `window.Telegram.WebApp`:
   MainButton, BackButton, haptics, theme params, `initData`.
 - `src/lib/money.ts` — **the** minor-unit parse/format pair.
-- `src/lib/dates.ts` — rendering in `family_tz`.
 - `src/styles/tokens.css` — the token table from `docs/ui/design-system.md`,
   nothing else.
 - `src/styles/app.css` — layout/geometry/type for every screen's markup

@@ -36,7 +36,6 @@
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
-import { formatDay } from "../lib/dates";
 import { formatAmount, parseAmount } from "../lib/money";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { amountError } from "./add-expense";
@@ -51,6 +50,23 @@ import type {
 } from "../api/types";
 
 // -- data --------------------------------------------------------------------
+
+/** `expense.spent_at` ("YYYY-MM-DD") parsed into a **local** `Date` — never
+ * `new Date("YYYY-MM-DD")`, which parses as UTC midnight and can render a day
+ * early under a negative offset (D120's bug class). Private copy, same
+ * convention as `screens/expenses.ts`'s own. */
+function parseCalendarDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatSpentDay(dateStr: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(parseCalendarDate(dateStr));
+}
 
 export interface DetailData {
   id: Uuid;
@@ -72,7 +88,6 @@ export function buildDetailData(
   categories: CategoryResponse[],
   tags: TagResponse[],
   currency: Currency,
-  tz: string,
 ): DetailData {
   const category = categories.find((c) => c.id === expense.category_id);
   const colorBySlot = new Map(assignCategoryColors(categories).map((c) => [c.id, c.slot]));
@@ -86,7 +101,7 @@ export function buildDetailData(
     colorVar: category ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
     authorName: expense.user_name,
     comment: expense.comment,
-    dayLabel: formatDay(expense.created_at, tz),
+    dayLabel: formatSpentDay(expense.spent_at),
     categories,
     tags,
     selectedTagIds: expense.tags.map((t) => t.id),
@@ -124,11 +139,7 @@ function errorMessage(err: unknown): string {
 
 /** Never throws — every failure resolves to a state the caller can render
  * directly, same contract as `loadHome`/`loadAddExpenseData`. */
-export async function loadDetail(
-  api: ExpenseDetailApi,
-  id: Uuid,
-  tz: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
-): Promise<DetailLoadState> {
+export async function loadDetail(api: ExpenseDetailApi, id: Uuid): Promise<DetailLoadState> {
   try {
     const [me, expense, categories, tags] = await Promise.all([
       api.getMe(),
@@ -136,7 +147,7 @@ export async function loadDetail(
       api.listCategories(),
       api.listTags(),
     ]);
-    return { status: "ready", ...buildDetailData(expense, categories, tags, me.currency, tz) };
+    return { status: "ready", ...buildDetailData(expense, categories, tags, me.currency) };
   } catch (err) {
     if (err instanceof ForbiddenError) {
       return { status: "forbidden" };
@@ -186,11 +197,7 @@ export interface DetailController {
  * state machine. Each `save*` is its own round trip (plan AC: "edit
  * round-trips one field at a time") — a failure leaves `edit` unchanged so
  * the user can retry or cancel, and never touches any other field. */
-export function createDetailController(
-  api: ExpenseDetailApi,
-  initial: DetailData,
-  tz: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
-): DetailController {
+export function createDetailController(api: ExpenseDetailApi, initial: DetailData): DetailController {
   let data = initial;
   let edit: FieldEditMode = "closed";
   let amountDraft = "";
@@ -201,7 +208,7 @@ export function createDetailController(
   let deleting = false;
 
   function applyUpdated(updated: ExpenseResponse): void {
-    data = buildDetailData(updated, data.categories, data.tags, data.currency, tz);
+    data = buildDetailData(updated, data.categories, data.tags, data.currency);
   }
 
   async function save(mutate: () => Promise<ExpenseResponse>): Promise<boolean> {

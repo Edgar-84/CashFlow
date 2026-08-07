@@ -21,33 +21,28 @@
  *    (mirrors `home.ts`) so the period half of the filter/empty copy renders
  *    through the same `lib/period.ts::describe` Home's label uses.
  *
- * Known gap (asked and confirmed by the human before this unit was written):
- * day grouping uses the **device** timezone, not `family_tz` — nothing in the
- * current Contracts exposes `family_tz` to the browser (`GET /users/me`
- * doesn't carry it, there is no other endpoint for it). This is a list-display
- * grouping, not the month-boundary financial math D120/webapp/CLAUDE.md's
- * ironclad rule is about, so it's treated as a `lib/dates.ts::formatDay`-style
- * gap-fill (already tz-parameterized, no locked format) rather than a
- * blocking contract change. `groupByDay`/`createExpensesController` both take
- * an explicit `tz` for exactly this reason — the real fix, if ever needed, is
- * threading `family_tz` onto `UserMeResponse` and passing it in at the real
- * call site (`main.ts`), not touching this module. Note this grouping still
- * keys off `created_at`, not `spent_at` — that move is U1.2 (D410), not here.
+ * Day grouping keys off `spent_at` (D410/D314), the day the expense
+ * happened, not `created_at` (when the row was typed) — a backdated expense
+ * groups and subtotals under the day it was spent. `spent_at` is a bare
+ * `YYYY-MM-DD` already resolved server-side, so no device timezone ever
+ * enters this module: `parseCalendarDate` builds a **local** `Date` from its
+ * y/m/d components (never `new Date("YYYY-MM-DD")`, which parses as UTC
+ * midnight and can drift a day under a negative offset — D120's bug class,
+ * same convention as `screens/add-expense.ts`'s own private date helpers).
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
-import { formatDay } from "../lib/dates";
 import { formatAmount } from "../lib/money";
 import { describe as describePeriod, toQuery, type PeriodQuery, type PeriodValue } from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ForbiddenError } from "../api/client";
-import type { CategoryResponse, Currency, ExpenseResponse, IsoTimestamp, Uuid } from "../api/types";
+import type { CategoryResponse, Currency, ExpenseResponse, Uuid } from "../api/types";
 
 const PAGE_SIZE = 50;
 
 export interface ExpenseRow {
   id: Uuid;
-  createdAt: IsoTimestamp;
+  spentAt: string;
   categoryId: Uuid;
   categoryLabel: string;
   colorVar: string;
@@ -91,7 +86,7 @@ function buildRow(
   const slot = category ? (colorBySlot.get(category.id) ?? null) : null;
   return {
     id: expense.id,
-    createdAt: expense.created_at,
+    spentAt: expense.spent_at,
     categoryId: expense.category_id,
     categoryLabel: category?.name ?? "Unknown",
     colorVar: category ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
@@ -102,33 +97,44 @@ function buildRow(
   };
 }
 
-function dayKeyFor(iso: string, tz: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(iso));
+/** `row.spentAt` ("YYYY-MM-DD") parsed into a **local** `Date` — never
+ * `new Date("YYYY-MM-DD")`, which parses as UTC midnight and can render a
+ * day early under a negative offset (D120's bug class). */
+function parseCalendarDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
-/** Groups rows (assumed already newest-first, the API's `ORDER BY created_at
- * DESC`) into per-day buckets with a running subtotal. Days come out in
- * first-seen order, i.e. the same order as the input — no re-sort needed. */
-export function groupByDay(rows: ExpenseRow[], tz: string): ExpenseDayGroup[] {
-  const groups: ExpenseDayGroup[] = [];
+function formatSpentDay(dateStr: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(parseCalendarDate(dateStr));
+}
+
+/** Groups rows (assumed already newest-`created_at`-first, the API's
+ * `ORDER BY created_at DESC`) into per-day buckets with a running subtotal,
+ * keyed off `spent_at` (D410) — already `YYYY-MM-DD`, so it doubles as the
+ * group key with no further parsing. Rows *within* a group keep the input's
+ * first-seen order, but the **groups themselves** are sorted by `dayKey`
+ * descending: since `spent_at` and `created_at` can diverge (a backdated
+ * expense), first-seen-day order is no longer the same thing as newest-day
+ * order, and `docs/ui/screens/03-expenses.md` requires "newest day first"
+ * regardless. A plain string compare sorts `YYYY-MM-DD` correctly. */
+export function groupByDay(rows: ExpenseRow[]): ExpenseDayGroup[] {
   const byKey = new Map<string, ExpenseDayGroup>();
   for (const row of rows) {
-    const key = dayKeyFor(row.createdAt, tz);
+    const key = row.spentAt;
     let group = byKey.get(key);
     if (!group) {
-      group = { dayKey: key, label: formatDay(row.createdAt, tz), subtotalMinor: 0, rows: [] };
+      group = { dayKey: key, label: formatSpentDay(key), subtotalMinor: 0, rows: [] };
       byKey.set(key, group);
-      groups.push(group);
     }
     group.rows.push(row);
     group.subtotalMinor += row.minor;
   }
-  return groups;
+  return [...byKey.values()].sort((a, b) => (a.dayKey < b.dayKey ? 1 : a.dayKey > b.dayKey ? -1 : 0));
 }
 
 /** Pure: turns an accumulated page of raw expenses + categories into the
@@ -143,7 +149,6 @@ export function buildExpensesData(input: {
   categoryId?: Uuid;
   period?: PeriodValue;
   hasMore: boolean;
-  tz: string;
 }): ExpensesData {
   const categoryLabel = input.categoryId
     ? (input.categories.find((c) => c.id === input.categoryId)?.name ?? "this category")
@@ -155,7 +160,7 @@ export function buildExpensesData(input: {
     currency: input.currency,
     categoryLabel,
     period: input.period,
-    days: groupByDay(rows, input.tz),
+    days: groupByDay(rows),
     hasMore: input.hasMore,
   };
 }
@@ -211,7 +216,6 @@ export function createExpensesController(
   api: ExpensesApi,
   cache: ExpensesCache,
   filter: ExpensesFilter = {},
-  tz: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
 ): ExpensesController {
   let expenses: ExpenseResponse[] = [];
   let categories: CategoryResponse[] = [];
@@ -228,7 +232,6 @@ export function createExpensesController(
       categoryId: filter.categoryId,
       period: filter.period,
       hasMore,
-      tz,
     });
     if (data.days.length === 0 && !hasMore) {
       return { status: "empty", categoryLabel: data.categoryLabel, period: data.period };

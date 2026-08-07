@@ -142,6 +142,13 @@ body {
    indicator used by budgets/expenses/statistics/expense-detail; ranked rows
    get their own 36px `.swatch` (design-system.md's Sizing table). */
 
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
 .ranked-rows {
   display: flex;
   flex-direction: column;

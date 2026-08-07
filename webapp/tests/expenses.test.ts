@@ -42,25 +42,53 @@ function expense(overrides: Partial<ExpenseResponse> = {}): ExpenseResponse {
 }
 
 describe("groupByDay", () => {
-  it("groups rows into per-day buckets with a running subtotal, preserving first-seen order", () => {
+  it("groups rows into per-day buckets with a running subtotal, newest day first", () => {
     const rows = [
-      { ...buildRowFixture(expense({ id: "e1", created_at: "2026-07-29T10:00:00Z", amount: 1000 })) },
-      { ...buildRowFixture(expense({ id: "e2", created_at: "2026-07-29T20:00:00Z", amount: 500 })) },
-      { ...buildRowFixture(expense({ id: "e3", created_at: "2026-07-28T10:00:00Z", amount: 300 })) },
+      buildRowFixture(expense({ id: "e1", spent_at: "2026-07-29", amount: 1000 })),
+      buildRowFixture(expense({ id: "e2", spent_at: "2026-07-29", amount: 500 })),
+      buildRowFixture(expense({ id: "e3", spent_at: "2026-07-28", amount: 300 })),
     ];
-    const groups = groupByDay(rows, "UTC");
+    const groups = groupByDay(rows);
     expect(groups).toHaveLength(2);
     expect(groups[0].dayKey).toBe("2026-07-29");
+    expect(groups[0].label).toBe("Wed, Jul 29");
     expect(groups[0].subtotalMinor).toBe(1500);
     expect(groups[0].rows.map((r) => r.id)).toEqual(["e1", "e2"]);
     expect(groups[1].dayKey).toBe("2026-07-28");
     expect(groups[1].subtotalMinor).toBe(300);
   });
 
-  it("buckets by the given tz, not UTC — a late-UTC timestamp can fall on the next local day", () => {
-    const rows = [buildRowFixture(expense({ created_at: "2026-07-29T23:30:00Z" }))];
-    expect(groupByDay(rows, "UTC")[0].dayKey).toBe("2026-07-29");
-    expect(groupByDay(rows, "Europe/Belgrade")[0].dayKey).toBe("2026-07-30");
+  it("keys off spent_at, not created_at (D410) — a backdated expense groups and subtotals under the day it was spent", () => {
+    const rows = [
+      buildRowFixture(
+        expense({ id: "e1", spent_at: "2026-08-03", created_at: "2026-08-07T10:00:00Z", amount: 1000 }),
+      ),
+      buildRowFixture(
+        expense({ id: "e2", spent_at: "2026-08-07", created_at: "2026-08-07T11:00:00Z", amount: 200 }),
+      ),
+    ];
+    const groups = groupByDay(rows);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].dayKey).toBe("2026-08-07");
+    expect(groups[0].rows.map((r) => r.id)).toEqual(["e2"]);
+    expect(groups[0].subtotalMinor).toBe(200);
+    expect(groups[1].dayKey).toBe("2026-08-03");
+    expect(groups[1].label).toBe("Mon, Aug 3");
+    expect(groups[1].rows.map((r) => r.id)).toEqual(["e1"]);
+    expect(groups[1].subtotalMinor).toBe(1000);
+  });
+
+  it("sorts groups by day descending even when spent_at and created_at order disagree across three days — the input's first-seen (created_at-newest) order is e1, e2, e3, but the correct day order is e2, e3, e1", () => {
+    const rows = [
+      buildRowFixture(
+        // Backdated: typed last (newest created_at) but spent first among the three.
+        expense({ id: "e1", spent_at: "2026-08-03", created_at: "2026-08-07T12:00:00Z" }),
+      ),
+      buildRowFixture(expense({ id: "e2", spent_at: "2026-08-07", created_at: "2026-08-07T09:00:00Z" })),
+      buildRowFixture(expense({ id: "e3", spent_at: "2026-08-05", created_at: "2026-08-05T09:00:00Z" })),
+    ];
+    const groups = groupByDay(rows);
+    expect(groups.map((g) => g.dayKey)).toEqual(["2026-08-07", "2026-08-05", "2026-08-03"]);
   });
 });
 
@@ -69,7 +97,7 @@ describe("groupByDay", () => {
 function buildRowFixture(e: ExpenseResponse) {
   return {
     id: e.id,
-    createdAt: e.created_at,
+    spentAt: e.spent_at,
     categoryId: e.category_id,
     categoryLabel: "Groceries",
     colorVar: "var(--category-slot-1)",
@@ -82,9 +110,9 @@ function buildRowFixture(e: ExpenseResponse) {
 
 describe("buildExpensesData", () => {
   const EXPENSES: ExpenseResponse[] = [
-    expense({ id: "e1", category_id: "cat-groceries", created_at: "2026-07-29T10:00:00Z", amount: 1000 }),
-    expense({ id: "e2", category_id: "cat-transport", created_at: "2026-07-29T11:00:00Z", amount: 500 }),
-    expense({ id: "e3", category_id: "cat-groceries", created_at: "2026-07-28T09:00:00Z", amount: 300 }),
+    expense({ id: "e1", category_id: "cat-groceries", spent_at: "2026-07-29", amount: 1000 }),
+    expense({ id: "e2", category_id: "cat-transport", spent_at: "2026-07-29", amount: 500 }),
+    expense({ id: "e3", category_id: "cat-groceries", spent_at: "2026-07-28", amount: 300 }),
   ];
 
   it("groups all rows by day when no filter is given", () => {
@@ -93,7 +121,6 @@ describe("buildExpensesData", () => {
       categories: CATEGORIES,
       currency: "EUR",
       hasMore: false,
-      tz: "UTC",
     });
     expect(data.categoryLabel).toBeNull();
     expect(data.period).toBeUndefined();
@@ -107,7 +134,6 @@ describe("buildExpensesData", () => {
       currency: "EUR",
       categoryId: "cat-transport",
       hasMore: false,
-      tz: "UTC",
     });
     expect(data.categoryLabel).toBe("Transport");
     expect(data.days.flatMap((d) => d.rows).map((r) => r.id)).toEqual(["e1", "e2", "e3"]);
@@ -120,7 +146,6 @@ describe("buildExpensesData", () => {
       currency: "EUR",
       categoryId: "cat-gone",
       hasMore: false,
-      tz: "UTC",
     });
     expect(data.categoryLabel).toBe("this category");
     expect(data.days).toHaveLength(0);
@@ -134,7 +159,6 @@ describe("buildExpensesData", () => {
       currency: "EUR",
       period,
       hasMore: false,
-      tz: "UTC",
     });
     expect(data.period).toBe(period);
   });
@@ -145,7 +169,6 @@ describe("buildExpensesData", () => {
       categories: CATEGORIES,
       currency: "EUR",
       hasMore: false,
-      tz: "UTC",
     });
     expect(data.days[0].rows[0].colorVar).toBe("var(--category-slot-1)");
     expect(data.days[0].rows[0].categoryLabel).toBe("Groceries");
@@ -164,15 +187,13 @@ function fakeApi(overrides: Partial<ExpensesApi> = {}): ExpensesApi {
 function pageOf(count: number, opts: { startIndex?: number; day?: string } = {}): ExpenseResponse[] {
   const start = opts.startIndex ?? 0;
   const day = opts.day ?? "2026-07-29";
-  return Array.from({ length: count }, (_, i) =>
-    expense({ id: `e${start + i}`, created_at: `${day}T10:00:00Z`, amount: 100 }),
-  );
+  return Array.from({ length: count }, (_, i) => expense({ id: `e${start + i}`, spent_at: day, amount: 100 }));
 }
 
 describe("createExpensesController", () => {
   it("returns a ready state built from a fake ApiClient", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue(pageOf(3)) });
-    const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), {});
     const state = await controller.load();
     expect(state.status).toBe("ready");
     if (state.status === "ready") {
@@ -187,7 +208,7 @@ describe("createExpensesController", () => {
       .mockResolvedValueOnce(pageOf(50, { startIndex: 0 }))
       .mockResolvedValueOnce(pageOf(10, { startIndex: 50, day: "2026-07-28" }));
     const api = fakeApi({ listExpenses });
-    const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), {});
 
     const first = await controller.load();
     expect(first.status).toBe("ready");
@@ -213,12 +234,7 @@ describe("createExpensesController", () => {
       .mockResolvedValueOnce(pageOf(1, { startIndex: 50 }));
     const api = fakeApi({ listExpenses });
     const period: PeriodValue = { unit: "month", offset: -1 };
-    const controller = createExpensesController(
-      api,
-      createMemoryCache(),
-      { categoryId: "cat-transport", period },
-      "UTC",
-    );
+    const controller = createExpensesController(api, createMemoryCache(), { categoryId: "cat-transport", period });
 
     await controller.load();
     expect(listExpenses).toHaveBeenNthCalledWith(1, {
@@ -239,7 +255,7 @@ describe("createExpensesController", () => {
 
   it("shows an end-of-list marker once a short page confirms there is no more", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue(pageOf(1)) });
-    const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), {});
     const state = await controller.load();
     expect(state.status).toBe("ready");
     if (state.status === "ready") {
@@ -249,12 +265,7 @@ describe("createExpensesController", () => {
 
   it("resolves to empty (naming the category) when a filtered page has nothing and there is no more", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
-    const controller = createExpensesController(
-      api,
-      createMemoryCache(),
-      { categoryId: "cat-transport" },
-      "UTC",
-    );
+    const controller = createExpensesController(api, createMemoryCache(), { categoryId: "cat-transport" });
     const state = await controller.load();
     expect(state).toEqual({ status: "empty", categoryLabel: "Transport", period: undefined });
   });
@@ -262,14 +273,14 @@ describe("createExpensesController", () => {
   it("resolves empty carrying the period value, for the render layer to name it", async () => {
     const period: PeriodValue = { unit: "month", offset: 0 };
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
-    const controller = createExpensesController(api, createMemoryCache(), { period }, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), { period });
     const state = await controller.load();
     expect(state).toEqual({ status: "empty", categoryLabel: null, period });
   });
 
   it("resolves plain empty (no filter mentioned) when the whole account has nothing", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
-    const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), {});
     const state = await controller.load();
     expect(state).toEqual({ status: "empty", categoryLabel: null, period: undefined });
   });
@@ -279,21 +290,21 @@ describe("createExpensesController", () => {
     // error — the screen has no special-cased handling for this, it just
     // renders whatever page it received (plan's documented own_only risk).
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue(pageOf(2)) });
-    const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), {});
     const state = await controller.load();
     expect(state.status).toBe("ready");
   });
 
   it("maps a 403 to a forbidden state", async () => {
     const api = fakeApi({ listCategories: vi.fn().mockRejectedValue(new ForbiddenError()) });
-    const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), {});
     const state = await controller.load();
     expect(state).toEqual({ status: "forbidden" });
   });
 
   it("returns an error with no cached data to fall back on", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockRejectedValue(new RetryableError()) });
-    const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), {});
     const state = await controller.load();
     expect(state.status).toBe("error");
   });
@@ -301,12 +312,12 @@ describe("createExpensesController", () => {
   it("falls back to the last cached snapshot with a synced marker when offline", async () => {
     const cache = createMemoryCache();
     const goodApi = fakeApi({ listExpenses: vi.fn().mockResolvedValue(pageOf(2)) });
-    const goodController = createExpensesController(goodApi, cache, {}, "UTC");
+    const goodController = createExpensesController(goodApi, cache, {});
     const good = await goodController.load();
     expect(good.status).toBe("ready");
 
     const badApi = fakeApi({ listExpenses: vi.fn().mockRejectedValue(new RetryableError()) });
-    const badController = createExpensesController(badApi, cache, {}, "UTC");
+    const badController = createExpensesController(badApi, cache, {});
     const state = await badController.load();
     expect(state.status).toBe("offline");
     if (state.status === "offline") {
@@ -321,7 +332,7 @@ describe("createExpensesController", () => {
       .mockResolvedValueOnce(pageOf(50))
       .mockRejectedValueOnce(new RetryableError());
     const api = fakeApi({ listExpenses });
-    const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
+    const controller = createExpensesController(api, createMemoryCache(), {});
     const first = await controller.load();
     expect(first.status).toBe("ready");
 
@@ -384,7 +395,6 @@ describe("renderExpenses", () => {
       categories: CATEGORIES,
       currency: "EUR",
       hasMore: false,
-      tz: "UTC",
     });
     const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-testid="day-group"');
@@ -403,7 +413,6 @@ describe("renderExpenses", () => {
       categories: CATEGORIES,
       currency: "EUR",
       hasMore: true,
-      tz: "UTC",
     });
     const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-action="load-more"');
@@ -416,7 +425,6 @@ describe("renderExpenses", () => {
       categories: CATEGORIES,
       currency: "EUR",
       hasMore: false,
-      tz: "UTC",
     });
     const html = renderExpenses({ status: "offline", lastSyncedAt: "2026-08-02T09:00:00.000Z", ...data }, NOW);
     expect(html).toContain('data-testid="offline"');
@@ -430,7 +438,6 @@ describe("renderExpenses", () => {
       currency: "EUR",
       categoryId: "cat-transport",
       hasMore: false,
-      tz: "UTC",
     });
     const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-testid="filter-banner"');
@@ -445,7 +452,6 @@ describe("renderExpenses", () => {
       categoryId: "cat-transport",
       period: { unit: "month", offset: 0 },
       hasMore: false,
-      tz: "UTC",
     });
     const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-testid="filter-banner"');
@@ -459,7 +465,6 @@ describe("renderExpenses", () => {
       currency: "EUR",
       period: { unit: "month", offset: 0 },
       hasMore: false,
-      tz: "UTC",
     });
     const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-testid="filter-banner"');
@@ -472,7 +477,6 @@ describe("renderExpenses", () => {
       categories: CATEGORIES,
       currency: "EUR",
       hasMore: false,
-      tz: "UTC",
     });
     const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).not.toContain('data-testid="filter-banner"');
