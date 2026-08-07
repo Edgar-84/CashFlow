@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import database
+from api.accounts import router as accounts_router
 from api.budgets import router as budgets_router
 from api.categories import router as categories_router
 from api.deps import close_http_client
@@ -57,6 +58,7 @@ def create_app(webapp_dist: Path | None = None) -> FastAPI:
         return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     app.include_router(users_router)
+    app.include_router(accounts_router)
     app.include_router(permissions_router)
     app.include_router(categories_router)
     app.include_router(tags_router)

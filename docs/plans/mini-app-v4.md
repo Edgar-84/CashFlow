@@ -279,7 +279,7 @@ Appearance and interaction are in `docs/ui/`, not here. Structural deltas only:
       `api/period_params.py`(may extend, D415),
       `tests/test_expenses_api.py`, `tests/test_expense_service.py`.
       Model: sonnet.
-- [ ] **U0.4 `PATCH /accounts/me`** (D400/D401) — new thin service + router.
+- [x] **U0.4 `PATCH /accounts/me`** (D400/D401) — new thin service + router.
       AC: an **admin** changes the currency and `GET /users/me` reflects it on
       the next call; a **member** and a **viewer** each get 403 and the value is
       unchanged; an unknown code is 422; **no `expenses.amount` row changes** —
@@ -766,8 +766,18 @@ human with a phone:
   `expense_repo.list`, unchanged since U0.1. `api/statistics.py` is untouched —
   its three routes still call `validate_period_params` directly and resolve
   their own bounds inside `statistics_service.py`, per D415.
-- **Next:** U0.4 (`PATCH /accounts/me`, D400/D401) — RISKY, reviewer subagent
-  required (account-wide write, admin-gated).
+- **U0.4 done.** `models/account.py` gained `AccountUpdate` (`currency:
+  Currency | None = None`); `services/account_service.py` (new, thin) filters
+  `exclude_unset`/`None` the same way `UserService`/`CategoryService.update`
+  do for their own NOT NULL columns (an explicit `{"currency": null}` is
+  treated as omitted, not a 500), then calls `BaseRepository.update` as-is —
+  no repository code needed. `api/accounts.py` (new) exposes `PATCH
+  /accounts/me` behind `Depends(require_admin)`, deriving the account from
+  `user.account_id`; there is no `/accounts/{id}` route. `main.py` registers
+  the router. No `expenses` table access anywhere in this unit — the D400
+  "relabel only" guarantee is structural, not just tested.
+- **Next:** M1 — `U1.1` Expenses list filters server-side, implementing
+  `docs/ui/screens/03-expenses.md`'s Data section (webapp).
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
