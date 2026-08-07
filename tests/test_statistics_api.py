@@ -19,7 +19,7 @@ from test_deps import FakePermissionRepo
 from test_statistics_service import FakeExpensePeriodRepo, make_expense
 from test_users_api import TgLookupFakeUserRepo, auth_headers
 
-from api import deps
+from api import deps, period_params, statistics
 from models.enums import Resource, Role
 from models.expense import ExpenseResponse
 from models.permission import PermissionResponse
@@ -485,3 +485,40 @@ async def test_by_category_months_back_passthrough(
 
     assert response.status_code == 200
     assert response.json() == [{"category_id": str(category_id), "total": 700}]
+
+
+def test_statistics_module_imports_shared_validator() -> None:
+    """D403: `api/statistics.py` no longer defines its own period validator —
+    it imports `validate_period_params` from the shared `api/period_params.py`."""
+    assert not hasattr(statistics, "_validate_period")
+    assert statistics.validate_period_params is period_params.validate_period_params
+
+
+async def test_by_period_offset_without_period_message_names_offset(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"offset": -1},
+    )
+
+    assert response.status_code == 422
+    assert "offset" in response.json()["detail"]
+
+
+async def test_by_period_conflicting_families_message_names_offset(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.get(
+        "/statistics/by-period",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "months_back": 1},
+    )
+
+    assert response.status_code == 422
+    assert "period/offset" in response.json()["detail"]

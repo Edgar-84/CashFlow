@@ -636,6 +636,9 @@ Action.READ)`-gated — statistics has no `Resource` enum entry of its own (plan
 | `test_by_period_custom_missing_dates_is_422` | `period=custom` without `start_date`/`end_date` → 422 (`resolve_period`'s `ValueError` mapped by the route) |
 | `test_by_category_period_offset_passthrough` | `period`/`offset` are threaded through to `by-category` the same way as `by-period` |
 | `test_by_category_months_back_passthrough` | `months_back` is threaded through to `by-category` the same way as `by-period` |
+| `test_statistics_module_imports_shared_validator` | `api/statistics.py` defines no `_validate_period` of its own — it imports `validate_period_params` from `api/period_params.py` (mini-app-v4 D403) |
+| `test_by_period_offset_without_period_message_names_offset` | The 422 for `offset` without `period` quotes "offset" (mini-app-v4 D403, `offset_param_name` default) |
+| `test_by_period_conflicting_families_message_names_offset` | The 422 for `period` + `months_back` quotes "period/offset" verbatim as before the extraction (mini-app-v4 D403) |
 
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)
 | Test | Checks | Target |
