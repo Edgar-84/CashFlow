@@ -87,14 +87,14 @@ one.
 - Archived categories (`is_active = false`, D302) never appear here.
 
 ### Date
-Three pills plus a calendar button. Each pill is two lines `[ref]`: the numeric
-date above, the word below.
+**Always exactly three pills** plus a calendar button `[ref]`. Each pill is two
+lines: the numeric date above, the word below.
 
-| Pill | Line 1 | Line 2 |
-|---|---|---|
-| 1 | `8/4` | "today" |
-| 2 | `8/3` | "yesterday" |
-| 3 | `8/2` | "two days ago" |
+| Pill | Line 1 | Line 2 | Fixed? |
+|---|---|---|---|
+| 1 | `8/7` | "today" | always |
+| 2 | `8/6` | "yesterday" | always |
+| 3 | `8/5` | "two days ago" | **variable — see below** |
 
 - Default selection is **today**, so a user who ignores the row gets today's
   date — the current behaviour, unchanged.
@@ -105,9 +105,51 @@ date above, the word below.
   (`../components/date-range-picker.md`), not a second calendar.
 - **Future dates are not selectable**, in the pills or the calendar. Same rule
   as screen 01's arrows.
-- Once a calendar date outside the three shortcuts is chosen, a fourth pill
-  appears showing it, selected, and the row scrolls horizontally if needed
-  `[inferred]`.
+
+#### Pill 3 is a slot, not a fixed shortcut (2026-08-07, HUMAN — changed)
+The row never grows a fourth pill and never scrolls. Pill 3 holds whichever of
+these applies:
+
+| The expense's date is | Pill 3 shows | Selected pill |
+|---|---|---|
+| today (default) | `8/5` "two days ago" | 1 |
+| yesterday | `8/5` "two days ago" | 2 |
+| two days ago | `8/5` "two days ago" | 3 |
+| **any other past date** | that date, e.g. `8/3` | **3** |
+
+The date can arrive three ways — the composer opening with today, screen 01's
+Day tab handing over the day being viewed (see below), or the calendar — and
+all three land in the same slot. The user's own examples, verbatim
+(2026-08-07): opening from 6 August gives "8/7 today, 8/6 yesterday *(selected)*,
+8/5 two days ago, calendar"; opening from 3 August gives "8/7 today, 8/6
+yesterday, **8/3 *(selected)***, calendar".
+
+This **supersedes the earlier "a fourth pill appears… and the row scrolls
+horizontally"** rule, which was `[inferred]` and never built. Replacing the
+least-used shortcut keeps the row a fixed 3 + 1 on every phone width, and "two
+days ago" is the one of the three nobody reaches for when they already know the
+date they want.
+
+#### The second line of a replaced pill 3 `[inferred]`
+When pill 3 holds an arbitrary date it has no natural word for its second line.
+It renders the **weekday abbreviation** ("Sun"), so the pill keeps its two-line
+shape and the row's height never changes. It is never left blank and never
+becomes one line.
+
+#### The date handed over by screen 01 (V4)
+Screen 01's Day tab passes the day it is showing to this screen
+(`../screens/01-home.md`, Interactions). It arrives as a `YYYY-MM-DD` string,
+already resolved in `family_tz`, and is treated exactly as if the user had
+picked it here: it selects a pill (1, 2 or 3 per the table above) and becomes
+the `spent_at` on submit.
+
+- Only the **Day** tab passes one. From Week/Month/Year/Period this screen
+  opens on today, unchanged.
+- An incoming date **does not make the draft dirty** — it is a default, not an
+  edit, and the same rule already applies to tapping a pill.
+- The pills' own dates (`today`, `yesterday`, `two days ago`) are always
+  relative to the **family's today**, never to the incoming date. Opening from 3
+  August does not relabel pill 1 as "3 August".
 
 ### Tags
 - Multi-select, optional. Selected chip: `--ink` background, `--card` text.
@@ -199,7 +241,8 @@ nobody overflows. The cap is enforced silently by `maxlength`.
 | `tag.add` | "+ Add tag" | the trailing chip |
 | `date.today` | "today" | lowercase, as the reference |
 | `date.yesterday` | "yesterday" | |
-| `date.twoDaysAgo` | "two days ago" | |
+| `date.twoDaysAgo` | "two days ago" | pill 3's default second line |
+| `date.weekday` | "Sun" | **(V4)** pill 3's second line when it holds another date; `Intl` short weekday, `[inferred]` |
 | `mb.chooseCategory` | "Choose a category" | existing, unchanged |
 | `mb.enterAmount` | "Enter an amount" | existing, unchanged |
 | `mb.submit` | "Add {amount} {currency} to {category}" | existing, unchanged |
@@ -285,6 +328,17 @@ nobody overflows. The cap is enforced silently by `maxlength`.
 - [ ] "today" is selected on open, and the created expense's `spent_at` matches
       the selected pill.
 - [ ] No date after today can be selected, in the pills or the calendar.
+- [ ] **(V4)** Choosing 3 August from the calendar while today is 7 August
+      leaves **three** pills, with the third reading `8/3` over "Sun" and
+      selected — no fourth pill appears and the row does not scroll.
+- [ ] **(V4)** Opening this screen from screen 01's Day tab showing 3 August
+      pre-selects that same third pill; opening it from the Month tab
+      pre-selects "today".
+- [ ] **(V4)** Opening from screen 01 showing yesterday selects pill 2 and
+      leaves pill 3 reading "two days ago".
+- [ ] **(V4)** Opening from a past day and immediately tapping BackButton
+      returns to screen 01 with no discard prompt — an incoming date is not a
+      dirty draft.
 - [ ] The tag row's last chip reads "+ Add tag" and opens the Tags screen.
 - [ ] Selecting two tags and submitting creates one expense carrying both.
 - [ ] MainButton reads "Choose a category" and is disabled until a category is
@@ -301,6 +355,13 @@ nobody overflows. The cap is enforced silently by `maxlength`.
 - **No tag-row fold** in v1; **new tag pre-selected** on return from screen 07;
   **a date change alone does not make the draft dirty**; **no comment counter**
   (all 2026-08-04). Each is written into the sections above.
+- **The date row stays three pills** (2026-08-07, HUMAN). Pill 3 is a slot that
+  any other chosen date takes over; the never-built fourth-pill rule is gone.
+- **Only screen 01's Day tab hands over a date** (2026-08-07, HUMAN).
+- **This screen is reused, pre-filled, to edit an expense** (2026-08-07, HUMAN)
+  — specified separately in `02b-edit-expense.md`, which is this layout with a
+  different submit action and no create semantics. Nothing on *this* spec
+  changes because of it.
 - The **calendar's single-date variant gets no quick chips** — the three date
   pills already cover today / yesterday / two days ago.
 

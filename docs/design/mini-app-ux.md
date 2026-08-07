@@ -120,6 +120,18 @@ one unit.**
 | 05 | Statistics | The same shape, deeper | `GET /statistics/by-period\|by-category\|by-tag` | period + grouping switch; drill-down |
 | 06 | Categories | Where colour is assigned | `GET /categories`, `GET /statistics/by-category` | `POST`/`PATCH`/`DELETE /categories/{id}` |
 | 07 | Tags | The cross-cutting axis | `GET /tags`, `GET /statistics/by-tag` | `POST`/`PATCH`/`DELETE /tags/{id}` |
+| 08 | Settings | Account-level preferences | `GET /users/me` | `PATCH /accounts/me` |
+
+Added by V4 (2026-08-07), all specified under `docs/ui/`:
+
+| # | Screen | Job | Data in | Actions out |
+|---|--------|-----|---------|-------------|
+| 02b | Edit expense | Change an existing expense on the surface it was created on | `GET /categories`, `GET /tags` | `PATCH /expenses/{id}` |
+| 03b | Expense detail | One expense, and the two things you can do to it | `GET /expenses/{id}` | `DELETE /expenses/{id}`; opens 02b |
+
+03b shipped in V2 without a spec; V4 gives it one and changes both its actions.
+Navigation moved from the six-tile bottom row to a left drawer
+(`docs/ui/components/side-menu.md`) in the same milestone.
 
 ### Five states every screen must handle
 

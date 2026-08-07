@@ -42,30 +42,46 @@ In render order:
    - Active: `--ink`, weight 600, 2px `--ink` underline spanning the label's
      width, sitting on the row's bottom edge.
    - Inactive: `--ink-secondary`, weight 400, no underline.
-2. **Nav row** — 44px tall, three cells.
+2. **Nav row** — 44px tall, **five cells** (2026-08-07: was three).
+   - **Left spacer** — 44×44, empty, never interactive. Exists only so the
+     label stays optically centred in the row once the jump control occupies
+     the right end `[inferred]`.
    - `‹` — 44×44 hit target, 20px chevron, 2px stroke, `--ink`.
    - **Label** — centred, 15px/500 `--ink`, 1px `--separator` underline,
      tappable.
    - `›` — mirror of `‹`. Disabled at offset 0: `--ink-secondary` at 40%
      opacity, `aria-disabled`, no haptic on tap.
+   - **Jump to present** — 44×44 hit target, the skip-to-present glyph
+     (design-system Iconography: two chevrons plus a terminal bar), 2px stroke,
+     `--ink`. **Present only when `offset < 0`**; at offset 0 the cell is still
+     rendered but empty, so the row's geometry never changes.
 
 Both rows sit inside the host card's padding; the component draws no background
 and no border of its own.
+
+### Why the jump control has a reserved, always-present cell
+The straightforward implementation appends the button when the user arrows
+back and removes it at offset 0. That moves `›` and the label sideways on the
+tap that returns to the present — the control shifts under the finger that just
+used it. The cell is therefore always in the layout and only its contents
+appear and disappear `[inferred]`. The left spacer exists for the same reason
+one row up: without it the label is centred between `‹` and the right edge on
+one tab and somewhere else on another.
 
 ## Variants
 
 | Variant | When used | What differs |
 |---|---|---|
 | Full | screen 01 | Both rows, all five tabs |
-| Custom active | after a range is applied | Tab row unchanged with "Period" active; the nav row's arrows are **hidden** (an arbitrary range has no next or previous) and the label shows the range |
+| Custom active | after a range is applied | Tab row unchanged with "Period" active; the nav row's arrows **and the jump control** are all hidden (an arbitrary range has no next, previous, or present) and the label shows the range |
 
 ## States
 
 | State | Trigger | What the user sees |
 |---|---|---|
-| Default | offset < 0 | Both arrows enabled |
-| At present | offset = 0 | `›` disabled and dimmed; `‹` enabled |
-| Custom | unit = custom | Arrows hidden; label shows the range; "Period" tab active |
+| Default | offset < 0 | Both arrows enabled; the jump control is **visible** at the right end |
+| At present | offset = 0 | `›` disabled and dimmed; `‹` enabled; the jump cell is empty but still occupies its 44px |
+| Custom | unit = custom | Arrows and jump control hidden; label shows the range; "Period" tab active |
 | Pressed | tap on tab or arrow | 0.6 opacity for the press duration |
 | Disabled | host is offline | Whole component 50% opacity, tabs inert; tapping shows the host's offline message |
 | Loading | a fetch is in flight | **No change** — the control stays live and interactive. Only the host's chart skeletonises. |
@@ -85,6 +101,14 @@ just tapped is what makes a period switch feel slow.
 | `aria.prev` | "Previous {unit}" | e.g. "Previous week" |
 | `aria.next` | "Next {unit}" | |
 | `aria.label` | "Change period" | on the tappable label |
+| `aria.jump.day` | "Back to today" | the jump control, on the Day tab |
+| `aria.jump.week` | "Back to this week" | |
+| `aria.jump.month` | "Back to this month" | |
+| `aria.jump.year` | "Back to this year" | |
+
+The jump control's accessible name is **per unit**, not a generic "Back to the
+present" — a screen reader user arrowing through months should hear the thing
+they are returning to `[inferred]`.
 
 ### Label formats
 
@@ -158,6 +182,11 @@ interface PeriodSelectorProps {
 }
 ```
 
+The jump control needs **no callback of its own**: it calls
+`onOffsetChange(0)`. "Jump to the present" and "arrow forward to the present"
+are the same state transition, so giving them separate handlers would let the
+two paths drift. The host cannot tell them apart, and does not need to.
+
 The component **clamps nothing and validates nothing** — it renders `›` disabled
 when `value.offset === 0` and calls back. The clamp lives in the host so there
 is one place to reason about it, and the backend 422s a positive offset
@@ -176,6 +205,15 @@ by the absence of any such export.
 - [ ] With `offset: 0` the `›` arrow is present, visibly dimmed, and does not
       fire `onOffsetChange` when tapped.
 - [ ] With `offset: -1` both arrows are enabled.
+- [ ] With `offset: 0` no jump control is visible; with `offset: -1` a
+      skip-to-present glyph appears immediately to the right of `›`.
+- [ ] The `‹`, the label and the `›` sit at the same horizontal positions at
+      `offset: 0` and at `offset: -1` — appearing and disappearing, the jump
+      control moves nothing.
+- [ ] Tapping the jump control at `offset: -7` calls `onOffsetChange(0)`
+      exactly once, and the control then disappears.
+- [ ] The jump control's accessible name names the unit ("Back to this month"),
+      and it renders in `--ink`, never `--accent`.
 - [ ] Changing the unit calls `onUnitChange` and never `onOffsetChange`.
 - [ ] With `unit: "custom"` both arrows are absent and the label shows the range.
 - [ ] Tapping the label calls `onOpenPicker`, as does tapping the "Period" tab.
