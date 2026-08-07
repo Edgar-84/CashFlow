@@ -251,7 +251,7 @@ Appearance and interaction are in `docs/ui/`, not here. Structural deltas only:
       filtered set, not the unfiltered one.
       Files: `repositories/expense_repo.py`, `tests/test_expense_repo.py`.
       Model: sonnet.
-- [ ] **U0.2 Shared period-param validation** (D403) — extract
+- [x] **U0.2 Shared period-param validation** (D403) — extract
       `api/statistics.py::_validate_period` into `api/period_params.py` and
       have all three statistics routes import it. **No behaviour change.**
       AC: every existing statistics 422 test passes unchanged, including each
@@ -261,7 +261,8 @@ Appearance and interaction are in `docs/ui/`, not here. Structural deltas only:
       Files: `api/period_params.py`(new), `api/statistics.py`,
       `tests/test_statistics_api.py`. Model: sonnet.
 - [ ] **U0.3 `GET /expenses` accepts category + period** (D402) — the route and
-      service wiring on top of U0.1 and U0.2.
+      service wiring on top of U0.1 and U0.2 (D415: may extend
+      `api/period_params.py`).
       AC: `category_id` returns only that category's expenses **across pages**,
       not only within the first 50 (the concrete bug the client-side filter
       has); `period=day&period_offset=-1` returns yesterday's expenses and
@@ -275,6 +276,7 @@ Appearance and interaction are in `docs/ui/`, not here. Structural deltas only:
       green; `own_only` still filters after the query, as documented in the
       route's existing comment.
       Files: `api/expenses.py`, `services/expense_service.py`,
+      `api/period_params.py`(may extend, D415),
       `tests/test_expenses_api.py`, `tests/test_expense_service.py`.
       Model: sonnet.
 - [ ] **U0.4 `PATCH /accounts/me`** (D400/D401) — new thin service + router.
@@ -706,6 +708,18 @@ human with a phone:
   Rejected: morphing the ring into the bar (needs an SVG path or canvas
   animation for a 160ms effect); dropping sub-1% categories from the bar to
   avoid the 3px clamp (it would make the bar disagree with the donut).
+- 2026-08-07: **D415 — U0.2 built `validate_period_params` (raise-only), not
+  the Contracts section's `resolve_period_params` (validate + resolve,
+  returning bounds).** U0.2's own AC was "extract `_validate_period`, no
+  behaviour change" — building the combined resolver would have been new
+  behaviour for the statistics routes, which still resolve their own bounds
+  inside `statistics_service.py`. Consequence for U0.3: `api/period_params.py`
+  is not necessarily closed after U0.2 — U0.3's Files list now names it as
+  "may extend" so the combined shape (or whatever `GET /expenses` actually
+  needs to turn `period`/`period_offset` into bounds) has a place to land
+  without duplicating resolution logic outside the shared module. Flagged by
+  the U0.2 reviewer as a plan/Contracts mismatch worth closing before U0.3
+  starts.
 - 2026-08-07: **D412 — the side menu opens from Home only.** Every other screen
   owns a BackButton to Home; a drawer reachable from a sub-screen would put two
   different "go somewhere else" gestures on one surface. Extending it app-wide
@@ -728,8 +742,21 @@ human with a phone:
   The override is narrower than `BaseRepository.list(**filters)`, so the
   method carries `# type: ignore[override]` (the plan's own Contracts
   section mandates the narrower signature, D402/D403's callers).
-- **Next:** U0.2 (shared period-param validation, D403). U0.1 has no
-  dependency on anything else in the plan and unblocks the whole of M1.
+- **U0.2 done.** `_validate_period` moved from `api/statistics.py` to
+  `api/period_params.py::validate_period_params`, unchanged behaviour for the
+  three statistics routes (default `offset_param_name="offset"` reproduces
+  every existing message byte for byte). The function also gained the
+  `offset_param_name` keyword D403's Contracts section calls for, so U0.3 can
+  import it as-is with `offset_param_name="period_offset"` — U0.3's file list
+  does not touch `api/period_params.py` again. Deliberately **not** built yet:
+  the Contracts section's full `resolve_period_params` (validation *and*
+  resolution combined, returning bounds or `None`) — statistics still
+  resolves its own bounds inside `statistics_service.py`, and U0.2's own AC
+  was the narrower "extract `_validate_period`, no behaviour change." If
+  U0.3's route wiring needs the combined resolve+validate shape, that is
+  U0.3's decision to add, not a silent U0.2 scope change.
+- **Next:** U0.3 (`GET /expenses` accepts category + period, D402), on top of
+  U0.1 and U0.2.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
