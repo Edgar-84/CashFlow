@@ -29,6 +29,12 @@ identity (§2.3) — and it is why every token below has both values stated.
 | `--status-red` | `#e34948` | `#e66767` | Over-budget, and destructive text actions (e.g. screen 06's "Delete/Hide category") | [ref] |
 | `--accent` | `#F0B429` | `#E0A42B` | **The Add button on screen 01, and nothing else** | [inferred] |
 | `--accent-ink` | `#1A1206` | `#1A1206` | The `+` glyph inside it | [inferred] |
+| `--scrim` | `rgba(14,20,22,0.40)` | `rgba(0,0,0,0.55)` | The dimmed page behind the side menu (`components/side-menu.md`) — nothing else | [inferred] |
+
+**The empty donut ring has no token of its own.** It is drawn in `--separator`,
+the same value every row rule uses — a ring with no data is a rule bent into a
+circle, not a new colour role. Adding a `--ring-empty` alias for an identical
+value is the "parallel name" this file exists to prevent.
 
 ### `--accent` — the one declared exception to "chrome is ink"
 
@@ -149,7 +155,24 @@ reference screenshots at ~0.73 image-px-to-CSS-px and are approximate.
 | Period arrow hit target | 44 × 44px | [inferred] — minimum touch target |
 | Date shortcut pill (02) | 88 × 44px | `~88 × 45px [ref]` |
 | Tag chip (02) | 32px tall | `~32px [ref]` |
-| Bottom nav tile (01) | 32px tall, text only | [inferred] — see screen 01 |
+| Menu button (01, ☰) | 44 × 44px hit target, 20px glyph, 2px strokes | [inferred] — mirrors the Add button's card inset |
+| Side menu panel | `min(80vw, 320px)` wide, full viewport height | `~80% [ref]` — see `components/side-menu.md` |
+| Side menu header band | `16px` padding, two lines (15px/600 + 12px/400) | [ref: a distinct band] |
+| Collapsed chart header (01) | 68px tall: a 44px row over a 10px bar, `8px 12px` padding | [inferred] — see screen 01 |
+| Collapsed stacked bar (01) | 10px tall, 999px radius, 2px segment gaps, 3px minimum segment | [inferred] |
+| Side menu row | 48px tall, `0 16px` padding | [inferred] |
+| Jump-to-present button (period selector) | 44 × 44px hit target, 20px glyph | [inferred] — reuses the period arrow's target |
+| Settings currency row | 48px tall | [inferred] — same row height as the side menu |
+| Empty donut ring | same 200px box and 30px stroke as the populated donut | [inferred] — see below |
+
+**Bottom nav tile (01) — removed.** The six-tile strip is replaced by the side
+menu (2026-08-07, HUMAN); its 32px tile geometry is retained here only as the
+record of what the row was, and no screen renders it any more.
+
+The **empty donut ring** occupies exactly the geometry a populated donut would:
+same 200px box, same 30px stroke, one continuous arc in `--separator` with no
+gaps. Switching from a period with data to one without must move nothing on the
+screen — that is the whole reason it is a ring and not a blank space.
 | Date-range picker cell | 40 × 40px, 6-row grid | `docs/ui/components/date-range-picker.md` |
 | Date-range picker quick chip | 32px tall, 8px radius | reuses Tag chip's values |
 | Date-range picker sheet | max 85% `viewportStableHeight`, 16px padding | `docs/ui/components/date-range-picker.md` |
@@ -228,18 +251,42 @@ SVG in the module that uses them**, 24px box, 2px stroke, `currentColor`:
 | `‹` `›` | Period arrows (01, 05) | chevron, 2px stroke, 20px box |
 | Calendar | Date row (02), Period tab (01) | rounded square + two ticks |
 | Warning | Over-budget strip | triangle + bar + dot, in `--status-red` |
+| `☰` | Menu button (01) | three 2px horizontal strokes, 20px box, 5px apart |
+| Skip-to-present | Period selector's jump control | two `›` chevrons + a 2px vertical bar at the right edge, 20px box — the "skip to end" shape, not a plain double chevron |
+| `✓` | Selected currency (08), selected colour slot (06b) | two 2px strokes, 20px box |
+| Trash | Delete expense (03b) | lid + body, 2px stroke, 20px box, in `--status-red` |
 
 No icon file, no sprite sheet, no library. If this list passes about eight
 entries, revisit — that is the point at which an in-repo set earns its keep.
+
+**The list is at eight (2026-08-07).** The four added for V4 (menu,
+skip-to-present, check, trash) put it exactly on that threshold, so the next
+icon after these triggers the review, not a ninth ad-hoc inline SVG. What that
+review should ask is whether the eight share enough shape vocabulary (2px
+stroke, 20–24px box, `currentColor`) to justify one `components/icons.ts`
+module of pure string-returning functions — still no dependency, still no
+sprite sheet — rather than a library.
 
 ## Motion
 
 | Transition | Duration | Easing |
 |---|---|---|
 | Skeleton pulse | 1.4s, infinite | `ease-in-out`, opacity 1 → 0.6 → 1 |
+| Side menu slide in | 200ms | `ease-out`, `translateX(-100%)` → `0` |
+| Side menu slide out | 160ms | `ease-in`, the reverse |
+| Scrim fade | matches the panel it accompanies | `linear`, opacity 0 → 1 |
+| Collapsed chart header in/out | 160ms | `ease-out`, `translateY(-100%)` → `0` plus opacity |
 
-`prefers-reduced-motion: reduce` disables the skeleton pulse. Any new animation
-must sit inside the same `@media (prefers-reduced-motion: no-preference)` guard.
+`prefers-reduced-motion: reduce` disables the skeleton pulse, **the side menu's
+slide and the collapsed header's**: under that setting each appears and
+disappears instantly at full opacity, which is a state change, not an animation.
+Any new animation must sit inside the same `@media (prefers-reduced-motion:
+no-preference)` guard.
+
+**The donut ⇄ bar change is not a morph.** The two are separate elements that
+swap; nothing tweens between a ring and a bar. A shape interpolation would need
+either an SVG path animation or a canvas, and both cost more than the effect is
+worth at 160ms.
 
 ## Accessibility
 
