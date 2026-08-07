@@ -307,7 +307,7 @@ body {
   color: var(--ink-secondary);
 }
 
-/* -- add-expense form (U2.2) ------------------------------------------- */
+/* -- add-expense form (U2.2, redesigned amount/account/grid region U3.2) -- */
 
 .add-expense-form,
 .add-expense-skeleton,
@@ -332,9 +332,10 @@ body {
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.035em;
+  /* design-system.md Typography: "Amount input (screen 02)". */
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
@@ -349,9 +350,51 @@ body {
 }
 
 .currency-suffix {
-  font-size: 14px;
-  font-weight: 600;
+  /* design-system.md Typography: "Currency code (screen 02)". */
+  font-size: 20px;
+  font-weight: 500;
   color: var(--ink-secondary);
+}
+
+.currency-suffix-skeleton {
+  width: 32px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--card);
+}
+
+/* -- account field (U3.2, docs/ui/screens/02-add-expense.md region 2) ------
+   Read-only text, never a control — one account per user. `margin-top: 8px`
+   on top of the form's own 12px flex gap reaches the screen doc's "20px
+   above" (design-system.md's Spacing section: 20/24/28 is the
+   between-sections range this screen's regions use). */
+.account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+/* design-system.md Typography: "Meta / secondary" role (12-12.5px). */
+.account-label {
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+/* design-system.md Typography: "Period label" role (15px/500), reused here
+   for the same visual weight — no dedicated "Account name" row exists since
+   this isn't a new type role, just another user of an existing size. */
+.account-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.account-name-skeleton {
+  width: 96px;
+  height: 18px;
+  border-radius: 6px;
+  background: var(--card);
 }
 
 .field-error {
@@ -1881,7 +1924,9 @@ body {
   .budget-row-skeleton,
   .stats-bar-skeleton,
   .cat-cell-skeleton,
-  .tag-row-skeleton {
+  .tag-row-skeleton,
+  .currency-suffix-skeleton,
+  .account-name-skeleton {
     animation: skeleton-pulse 1.4s ease-in-out infinite;
   }
 }

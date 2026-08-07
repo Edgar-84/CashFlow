@@ -5,6 +5,7 @@ import {
   loadAddExpenseData,
   mount as mountAddExpense,
   type AddExpenseHandlers,
+  type Draft as AddExpenseDraft,
 } from "./screens/add-expense";
 import {
   applyBudgetsChrome,
@@ -115,6 +116,15 @@ type ActiveScreen =
   | "statistics";
 let activeScreen: ActiveScreen | null = null;
 
+/** Where Categories' BackButton goes (U3.2). Defaults to Home; Add Expense's
+ * "More" cell (`showAddExpense`'s `onMore` handler, below) points it back to
+ * itself instead, with the draft it was carrying, so a category created
+ * mid-composer returns the user to their in-progress expense rather than
+ * bouncing them to Home. Reset to Home at every *other* entry into
+ * Categories (Home's tile tap) so a stale "return to Add Expense" target
+ * never leaks into an unrelated visit. */
+let categoriesReturnTo: () => void = () => void showHome();
+
 function getRoot(): HTMLElement | null {
   if (typeof document === "undefined") {
     return null;
@@ -147,6 +157,7 @@ async function showHome(): Promise<void> {
       } else if (tile === "statistics") {
         void showStatistics();
       } else if (tile === "categories") {
+        categoriesReturnTo = () => void showHome();
         void showCategories();
       } else if (tile === "tags") {
         void showTags();
@@ -191,7 +202,11 @@ async function refreshHome(root: HTMLElement, handlers: HomeHandlers): Promise<v
   mountHome(root, state, handlers, new Date());
 }
 
-async function showAddExpense(): Promise<void> {
+/** Mounts Add Expense (U2.2, screen 02; grid/account redesign U3.2).
+ * `initialDraft` is set on the return leg of a "More" trip to Categories
+ * (see `onMore` below and `categoriesReturnTo`) — undefined on every other
+ * entry, which `mountAddExpense` treats as an empty draft. */
+async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
@@ -200,7 +215,7 @@ async function showAddExpense(): Promise<void> {
 
   const handlers: AddExpenseHandlers = {
     onRetry: () => {
-      void showAddExpense();
+      void showAddExpense(initialDraft);
     },
     onClose: () => {
       void showHome();
@@ -208,11 +223,18 @@ async function showAddExpense(): Promise<void> {
     onSuccess: () => {
       void showHome();
     },
+    onMore: (draft) => {
+      // `categoryId` is deliberately dropped — "More" exists to create a new
+      // category, so the whole point of returning is to pick one, not to
+      // silently keep whatever was selected before (component doc's AC).
+      categoriesReturnTo = () => void showAddExpense({ ...draft, categoryId: null });
+      void showCategories();
+    },
   };
 
-  mountAddExpense(root, { status: "loading" }, client, handlers);
+  mountAddExpense(root, { status: "loading" }, client, handlers, initialDraft);
   const state = await loadAddExpenseData(client, addExpenseCache);
-  mountAddExpense(root, state, client, handlers);
+  mountAddExpense(root, state, client, handlers, initialDraft);
 }
 
 /** Mounts Expenses (U2.3, screen 03a). BackButton always returns to Home;
@@ -304,16 +326,17 @@ async function showBudgets(): Promise<void> {
   mountBudgets(root, state, client, handlers);
 }
 
-/** Mounts Categories (U2.1, screen 06). BackButton always returns to Home,
- * same shape as Budgets/Expenses — this is the fix for the previously
- * dead "Categories" tile. */
+/** Mounts Categories (U2.1, screen 06). BackButton returns to `categoriesReturnTo`
+ * — Home by default (same shape as Budgets/Expenses, the original fix for the
+ * previously dead "Categories" tile), or back to Add Expense with its draft
+ * when reached via that screen's "More" cell (U3.2). */
 function buildCategoriesHandlers(): CategoriesHandlers {
   return {
     onRetry: () => {
       void showCategories();
     },
     onBack: () => {
-      void showHome();
+      categoriesReturnTo();
     },
     onSelectCategory: (id) => {
       void showCategoryForm(id);
