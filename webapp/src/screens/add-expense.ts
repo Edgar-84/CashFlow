@@ -16,7 +16,13 @@
  */
 
 import { formatAmount, parseAmount } from "../lib/money";
-import { confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
+import {
+  confirmDiscard,
+  getViewportStableHeight,
+  haptics,
+  mainButton,
+  setBackButtonHandler,
+} from "../lib/telegram";
 import { ApiError, ForbiddenError, NotFoundError } from "../api/client";
 import {
   mount as mountCategoryPicker,
@@ -464,14 +470,28 @@ function renderDateRow(today: string, spentAt: string | null): string {
   </div>`;
 }
 
+// "+ Add tag" is always the last chip, even with zero tags (screen doc edge
+// case: "the Tags section shows only '+ Add tag'") — so this never early-
+// returns empty markup the way the pre-U3.4 version did.
 function renderTagChips(tags: TagResponse[], selectedIds: Uuid[]): string {
-  if (tags.length === 0) {
-    return "";
-  }
   const chips = tags
     .map((t) => renderChip({ id: t.id, label: t.name, selected: selectedIds.includes(t.id), attr: "tag-id" }))
     .join("");
-  return `<div class="chip-row" data-testid="tag-chips">${chips}</div>`;
+  const addChip = '<button type="button" class="chip" data-testid="tag-add-chip">+ Add tag</button>';
+  return `<div class="field-label">Tags</div><div class="chip-row" data-testid="tag-chips">${chips}${addChip}</div>`;
+}
+
+/** How far (px) the just-focused comment field must scroll so the keyboard
+ * doesn't cover it — `fieldBottom` and `viewportStableHeight` are both in the
+ * same viewport-relative coordinate space `getBoundingClientRect()` returns.
+ * Zero (never negative) when the field is already clear. Pure so it's
+ * testable under Node; the DOM wiring around it (`mount`) is not — same
+ * accepted gap as every other DOM-touching helper in this file. Uses
+ * `viewportStableHeight`, not `window.innerHeight`/`100vh`, because only the
+ * former already excludes the on-screen keyboard (screen doc's Viewport
+ * section). */
+export function commentScrollOffset(fieldBottom: number, viewportStableHeight: number): number {
+  return Math.max(0, fieldBottom - viewportStableHeight);
 }
 
 export function renderForm(
@@ -492,7 +512,8 @@ export function renderForm(
     ${renderCategoryGridSlot(data.categories, draft.categoryId)}
     ${renderDateRow(data.today, draft.spentAt)}
     ${renderTagChips(data.tags, draft.tagIds)}
-    <textarea class="comment-input" data-testid="comment-input" placeholder="Add a note (optional)">${escapeHtml(draft.comment)}</textarea>
+    <div class="field-label">Comment</div>
+    <textarea class="comment-input" data-testid="comment-input" placeholder="Comment" maxlength="4096">${escapeHtml(draft.comment)}</textarea>
     ${opts.submitError ? `<p class="submit-error" data-testid="submit-error">${escapeHtml(opts.submitError)}</p>` : ""}
   </div>`;
 }
@@ -569,6 +590,12 @@ export interface AddExpenseHandlers {
    * can restore amount/tags/comment on return; `categoryId` is deliberately
    * not preserved — the whole point of "More" is to pick a new category. */
   onMore: (draft: Draft) => void;
+  /** "+ Add tag" chip tap (screen doc's Tags region, U3.4) — navigates to
+   * screen 07 (Tags). Carries the current draft, same shape as `onMore`; a
+   * tag created there returns pre-selected by main.ts appending its id to
+   * `tagIds` before re-mounting this screen (AC — "the rest of the draft
+   * intact"). */
+  onAddTag: (draft: Draft) => void;
 }
 
 export function mount(
@@ -705,9 +732,22 @@ export function mount(
       });
     });
 
+    root.querySelector('[data-testid="tag-add-chip"]')?.addEventListener("click", () => {
+      handlers.onAddTag(controller.getDraft());
+    });
+
     const commentInput = root.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]');
     commentInput?.addEventListener("input", () => {
       controller.setComment(commentInput.value);
+    });
+    // AC: focusing the comment field scrolls it clear of the keyboard.
+    // `getBoundingClientRect()` is viewport-relative, matching
+    // `getViewportStableHeight()`'s coordinate space.
+    commentInput?.addEventListener("focus", () => {
+      const offset = commentScrollOffset(commentInput.getBoundingClientRect().bottom, getViewportStableHeight());
+      if (offset > 0) {
+        window.scrollBy({ top: offset, behavior: "smooth" });
+      }
     });
   };
 

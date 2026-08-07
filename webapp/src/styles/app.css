@@ -483,6 +483,17 @@ body {
   outline-offset: 2px;
 }
 
+/* -- Tags/Comment section labels (U3.4, docs/ui/screens/02-add-expense.md
+   regions 5-6) — design-system.md's "Meta / secondary" Typography role
+   (12px, --ink-secondary), same values `.account-label`/`.cp-label` already
+   use for this role elsewhere on this screen; shared here since both new
+   labels are visually identical. */
+.field-label {
+  font-size: 12px;
+  color: var(--ink-secondary);
+  margin-bottom: 4px;
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;

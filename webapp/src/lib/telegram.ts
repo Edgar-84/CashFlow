@@ -7,6 +7,12 @@
 export interface TelegramWebApp {
   initData: string;
   colorScheme: "light" | "dark";
+  /** Visible viewport height in CSS px, already excluding the on-screen
+   * keyboard — unlike `100vh`/`window.innerHeight`, which do not shrink when
+   * the keyboard opens. Optional so every existing `fakeWebApp()` test
+   * fixture keeps compiling unchanged; `getViewportStableHeight()` below
+   * falls back when it's absent. */
+  viewportStableHeight?: number;
   expand(): void;
   MainButton: {
     setText(text: string): void;
@@ -58,6 +64,17 @@ export function getInitData(): string | null {
 
 export function expand(): void {
   getWebApp()?.expand();
+}
+
+/** Falls back to `window.innerHeight` outside Telegram (e.g. `pnpm dev` in a
+ * plain tab) — that fallback does not shrink for a keyboard, but there is no
+ * keyboard-aware signal available outside Telegram to fall back to. */
+export function getViewportStableHeight(): number {
+  const fromWebApp = getWebApp()?.viewportStableHeight;
+  if (typeof fromWebApp === "number") {
+    return fromWebApp;
+  }
+  return typeof window !== "undefined" ? window.innerHeight : 0;
 }
 
 let currentMainButtonHandler: (() => void) | null = null;

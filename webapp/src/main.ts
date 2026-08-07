@@ -125,6 +125,40 @@ let activeScreen: ActiveScreen | null = null;
  * never leaks into an unrelated visit. */
 let categoriesReturnTo: () => void = () => void showHome();
 
+/** Where Tags' BackButton goes (U3.4) — same shape as `categoriesReturnTo`.
+ * Add Expense's "+ Add tag" chip (`showAddExpense`'s `onAddTag` handler,
+ * below) points it back to itself with the draft it was carrying; every
+ * other entry into Tags (Home's tile tap) resets it to Home so a stale
+ * "return to Add Expense" target never leaks into an unrelated visit. */
+let tagsReturnTo: () => void = () => void showHome();
+
+/** The most recently *created* (not renamed) tag's id, read by
+ * `tagsReturnTo`'s Add-Expense closure to pre-select it on return (screen
+ * doc: "a tag created there returns pre-selected"). Set in `showTagForm`'s
+ * `onSaved` only when that form was opened in create mode. Reset at *every*
+ * entry into Tags — Home's tile tap, and `onAddTag` itself — not just the
+ * non-Add-Expense one: without also resetting on the Add-Expense leg, a tag
+ * created on some earlier, unrelated Tags visit (reached via the Home tile,
+ * whose own BackButton runs the default `tagsReturnTo` and so never
+ * consumes this var) would still be sitting here and would wrongly attach
+ * itself to a *later*, unconnected draft. Only one id is ever held — if a
+ * single Tags visit creates two tags, only the second is pre-selected, which
+ * matches the AC's singular "a tag created there". */
+let lastCreatedTagId: Uuid | null = null;
+
+/** Pure merge step of `tagsReturnTo`'s Add-Expense closure — appends
+ * `createdId` if it's set and not already present, otherwise returns
+ * `tagIds` unchanged. Pulled out and exported so this unit's routing
+ * decision has direct test coverage under Node, unlike the DOM-bound `showX`
+ * functions around it (D343's deferred NIT: "worth a test once this pattern
+ * is touched again" — U3.4 is that "again"). */
+export function withCreatedTagPreselected(tagIds: Uuid[], createdId: Uuid | null): Uuid[] {
+  if (createdId && !tagIds.includes(createdId)) {
+    return [...tagIds, createdId];
+  }
+  return tagIds;
+}
+
 function getRoot(): HTMLElement | null {
   if (typeof document === "undefined") {
     return null;
@@ -160,6 +194,8 @@ async function showHome(): Promise<void> {
         categoriesReturnTo = () => void showHome();
         void showCategories();
       } else if (tile === "tags") {
+        tagsReturnTo = () => void showHome();
+        lastCreatedTagId = null;
         void showTags();
       }
     },
@@ -202,10 +238,12 @@ async function refreshHome(root: HTMLElement, handlers: HomeHandlers): Promise<v
   mountHome(root, state, handlers, new Date());
 }
 
-/** Mounts Add Expense (U2.2, screen 02; grid/account redesign U3.2).
- * `initialDraft` is set on the return leg of a "More" trip to Categories
- * (see `onMore` below and `categoriesReturnTo`) — undefined on every other
- * entry, which `mountAddExpense` treats as an empty draft. */
+/** Mounts Add Expense (U2.2, screen 02; grid/account redesign U3.2, date row
+ * U3.3, tags/comment U3.4). `initialDraft` is set on the return leg of a
+ * "More" trip to Categories (see `onMore` below and `categoriesReturnTo`) or
+ * a "+ Add tag" trip to Tags (see `onAddTag` below and `tagsReturnTo`) —
+ * undefined on every other entry, which `mountAddExpense` treats as an empty
+ * draft. */
 async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
   const root = getRoot();
   if (!root) {
@@ -229,6 +267,26 @@ async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
       // silently keep whatever was selected before (component doc's AC).
       categoriesReturnTo = () => void showAddExpense({ ...draft, categoryId: null });
       void showCategories();
+    },
+    onAddTag: (draft) => {
+      // Unlike `onMore` above, `tagIds` is *not* dropped — the AC is that a
+      // tag created on screen 07 comes back pre-selected, appended to
+      // whatever was already picked. Reset here, not just at Home's tile
+      // entry: without this, a tag created on some earlier, unrelated Tags
+      // visit (reached via the Home tile, then never consumed because that
+      // visit's own BackButton ran the default `tagsReturnTo` rather than
+      // this closure) would still be sitting in `lastCreatedTagId` and would
+      // wrongly attach itself to *this* draft even though nothing was
+      // created on this trip. `tagsReturnTo`'s own closure reads
+      // `lastCreatedTagId` at call time (not closure-creation time), so it
+      // still sees whatever *this* Tags visit creates after this reset.
+      lastCreatedTagId = null;
+      tagsReturnTo = () => {
+        const tagIds = withCreatedTagPreselected(draft.tagIds, lastCreatedTagId);
+        lastCreatedTagId = null;
+        void showAddExpense({ ...draft, tagIds });
+      };
+      void showTags();
     },
   };
 
@@ -494,16 +552,18 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
   mountCategoryForm(root, client, draft, activeSiblings, usedSlots, handlers, expenseCount);
 }
 
-/** Mounts Tags (U2.4, screen 07a). BackButton always returns to Home, same
- * shape as Categories — this is the fix for the previously dead "Tags" tile.
- * Row and "Add tag" taps navigate to 07b (U2.5). */
+/** Mounts Tags (U2.4, screen 07a) — Home by default (the original fix for
+ * the previously dead "Tags" tile), or back to Add Expense with its draft
+ * when reached via that screen's "+ Add tag" chip (U3.4), same
+ * `tagsReturnTo` shape as Categories' `categoriesReturnTo`. Row and "Add
+ * tag" taps navigate to 07b (U2.5). */
 function buildTagsHandlers(): TagsHandlers {
   return {
     onRetry: () => {
       void showTags();
     },
     onBack: () => {
-      void showHome();
+      tagsReturnTo();
     },
     onSelectTag: (id) => {
       void showTagForm(id);
@@ -637,7 +697,13 @@ async function showTagForm(tagId: Uuid | null): Promise<void> {
     onClose: () => {
       void showTags();
     },
-    onSaved: () => {
+    onSaved: (tag) => {
+      // Only a *create* (`tagId === null` on entry) counts as "just
+      // created" for `tagsReturnTo`'s pre-selection — a rename leaves
+      // `lastCreatedTagId` alone.
+      if (tagId === null) {
+        lastCreatedTagId = tag.id;
+      }
       void showTags();
     },
     onDelete: (id) => {
