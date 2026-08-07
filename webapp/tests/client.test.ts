@@ -188,6 +188,37 @@ describe("ApiClient — query params", () => {
     expect(url).toBe("https://api.test/expenses");
   });
 
+  it("listExpenses serializes categoryId as category_id, alongside limit/offset", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse([]));
+
+    await client.listExpenses({ limit: 50, offset: 0, categoryId: "cat-1" });
+
+    const { url } = lastCall(fetchFn);
+    expect(url).toBe("https://api.test/expenses?limit=50&offset=0&category_id=cat-1");
+  });
+
+  it("listExpenses sends the period's offset as period_offset — offset already paginates (D402)", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse([]));
+
+    await client.listExpenses({ limit: 50, offset: 0, period: { period: "month", offset: -1 } });
+
+    const { url } = lastCall(fetchFn);
+    expect(url).toBe("https://api.test/expenses?limit=50&offset=0&period=month&period_offset=-1");
+  });
+
+  it("listExpenses serializes a custom period's start_date/end_date", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse([]));
+
+    await client.listExpenses({
+      period: { period: "custom", start_date: "2026-08-01", end_date: "2026-08-15" },
+    });
+
+    const { url } = lastCall(fetchFn);
+    expect(url).toBe(
+      "https://api.test/expenses?period=custom&start_date=2026-08-01&end_date=2026-08-15",
+    );
+  });
+
   it("statisticsByCategory sends months_back=0 (falsy but meaningful — current month)", async () => {
     const { client, fetchFn } = makeClient(jsonResponse([]));
 

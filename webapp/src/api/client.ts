@@ -190,9 +190,21 @@ export class ApiClient {
 
   // -- expenses ----------------------------------------------------------
 
-  listExpenses(opts: { limit?: number; offset?: number } = {}): Promise<ExpenseResponse[]> {
+  // `period`'s offset travels as `period_offset` — `offset` on this route
+  // already paginates and the bot depends on that spelling (D402).
+  listExpenses(
+    opts: { limit?: number; offset?: number; categoryId?: Uuid; period?: PeriodQuery } = {},
+  ): Promise<ExpenseResponse[]> {
     return this.request<ExpenseResponse[]>("GET", "/expenses", {
-      params: { limit: opts.limit, offset: opts.offset },
+      params: {
+        limit: opts.limit,
+        offset: opts.offset,
+        category_id: opts.categoryId,
+        period: opts.period?.period,
+        period_offset: opts.period?.offset,
+        start_date: opts.period?.start_date,
+        end_date: opts.period?.end_date,
+      },
     });
   }
 

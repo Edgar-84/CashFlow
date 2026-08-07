@@ -10,7 +10,10 @@ import {
   renderExpenses,
   type ExpensesApi,
 } from "../src/screens/expenses";
+import type { PeriodValue } from "../src/lib/period";
 import type { TelegramWebApp } from "../src/lib/telegram";
+
+const NOW = new Date(2026, 7, 15); // 15 August 2026, local wall-clock
 
 function category(id: string, name: string, created_at: string): CategoryResponse {
   return { id, name, account_id: "acc-1", created_at };
@@ -92,11 +95,12 @@ describe("buildExpensesData", () => {
       hasMore: false,
       tz: "UTC",
     });
-    expect(data.filterLabel).toBeNull();
+    expect(data.categoryLabel).toBeNull();
+    expect(data.period).toBeUndefined();
     expect(data.days.map((d) => d.rows.length)).toEqual([2, 1]);
   });
 
-  it("filters to one category client-side and names it in filterLabel", () => {
+  it("does no filtering of its own — every passed-in row renders, filtering is the server's job (D402)", () => {
     const data = buildExpensesData({
       expenses: EXPENSES,
       categories: CATEGORIES,
@@ -105,23 +109,34 @@ describe("buildExpensesData", () => {
       hasMore: false,
       tz: "UTC",
     });
-    expect(data.filterLabel).toBe("Transport");
-    expect(data.days).toHaveLength(1);
-    expect(data.days[0].rows).toHaveLength(1);
-    expect(data.days[0].rows[0].id).toBe("e2");
+    expect(data.categoryLabel).toBe("Transport");
+    expect(data.days.flatMap((d) => d.rows).map((r) => r.id)).toEqual(["e1", "e2", "e3"]);
   });
 
   it("falls back to a generic label when the filtered category id is unknown (e.g. deleted)", () => {
     const data = buildExpensesData({
-      expenses: EXPENSES,
+      expenses: [],
       categories: CATEGORIES,
       currency: "EUR",
       categoryId: "cat-gone",
       hasMore: false,
       tz: "UTC",
     });
-    expect(data.filterLabel).toBe("this category");
+    expect(data.categoryLabel).toBe("this category");
     expect(data.days).toHaveLength(0);
+  });
+
+  it("carries the period value through unchanged, for the render layer to describe()", () => {
+    const period: PeriodValue = { unit: "month", offset: 0 };
+    const data = buildExpensesData({
+      expenses: [],
+      categories: CATEGORIES,
+      currency: "EUR",
+      period,
+      hasMore: false,
+      tz: "UTC",
+    });
+    expect(data.period).toBe(period);
   });
 
   it("maps a row's category colour stably via the fixed slot order", () => {
@@ -191,6 +206,37 @@ describe("createExpensesController", () => {
     }
   });
 
+  it("sends categoryId and period on every page, server-side (D402) — the same filter Load more carries", async () => {
+    const listExpenses = vi
+      .fn()
+      .mockResolvedValueOnce(pageOf(50))
+      .mockResolvedValueOnce(pageOf(1, { startIndex: 50 }));
+    const api = fakeApi({ listExpenses });
+    const period: PeriodValue = { unit: "month", offset: -1 };
+    const controller = createExpensesController(
+      api,
+      createMemoryCache(),
+      { categoryId: "cat-transport", period },
+      "UTC",
+    );
+
+    await controller.load();
+    expect(listExpenses).toHaveBeenNthCalledWith(1, {
+      limit: 50,
+      offset: 0,
+      categoryId: "cat-transport",
+      period: { period: "month", offset: -1 },
+    });
+
+    await controller.loadMore();
+    expect(listExpenses).toHaveBeenNthCalledWith(2, {
+      limit: 50,
+      offset: 50,
+      categoryId: "cat-transport",
+      period: { period: "month", offset: -1 },
+    });
+  });
+
   it("shows an end-of-list marker once a short page confirms there is no more", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue(pageOf(1)) });
     const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
@@ -201,8 +247,8 @@ describe("createExpensesController", () => {
     }
   });
 
-  it("resolves to empty (naming the filter) when a filtered page has nothing and there is no more", async () => {
-    const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue(pageOf(1)) });
+  it("resolves to empty (naming the category) when a filtered page has nothing and there is no more", async () => {
+    const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
     const controller = createExpensesController(
       api,
       createMemoryCache(),
@@ -210,14 +256,22 @@ describe("createExpensesController", () => {
       "UTC",
     );
     const state = await controller.load();
-    expect(state).toEqual({ status: "empty", filterLabel: "Transport" });
+    expect(state).toEqual({ status: "empty", categoryLabel: "Transport", period: undefined });
+  });
+
+  it("resolves empty carrying the period value, for the render layer to name it", async () => {
+    const period: PeriodValue = { unit: "month", offset: 0 };
+    const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
+    const controller = createExpensesController(api, createMemoryCache(), { period }, "UTC");
+    const state = await controller.load();
+    expect(state).toEqual({ status: "empty", categoryLabel: null, period });
   });
 
   it("resolves plain empty (no filter mentioned) when the whole account has nothing", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
     const controller = createExpensesController(api, createMemoryCache(), {}, "UTC");
     const state = await controller.load();
-    expect(state).toEqual({ status: "empty", filterLabel: null });
+    expect(state).toEqual({ status: "empty", categoryLabel: null, period: undefined });
   });
 
   it("renders normally (no error state) when own_only silently returns a short page", async () => {
@@ -282,27 +336,43 @@ describe("createExpensesController", () => {
 
 describe("renderExpenses", () => {
   it("renders a loading skeleton", () => {
-    const html = renderExpenses({ status: "loading" });
+    const html = renderExpenses({ status: "loading" }, NOW);
     expect(html).toContain('data-testid="loading"');
   });
 
   it("renders a retry affordance on error", () => {
-    const html = renderExpenses({ status: "error", message: "The server is unreachable right now." });
+    const html = renderExpenses({ status: "error", message: "The server is unreachable right now." }, NOW);
     expect(html).toContain('data-action="retry"');
   });
 
   it("renders read-only on 403", () => {
-    const html = renderExpenses({ status: "forbidden" });
+    const html = renderExpenses({ status: "forbidden" }, NOW);
     expect(html).toContain("permission");
   });
 
-  it("names the filter in the empty state", () => {
-    const html = renderExpenses({ status: "empty", filterLabel: "Transport" });
+  it("names the category alone in the empty state", () => {
+    const html = renderExpenses({ status: "empty", categoryLabel: "Transport", period: undefined }, NOW);
     expect(html).toContain("Nothing here yet for Transport.");
   });
 
+  it("names the period alone in the empty state", () => {
+    const html = renderExpenses(
+      { status: "empty", categoryLabel: null, period: { unit: "month", offset: 0 } },
+      NOW,
+    );
+    expect(html).toContain("Nothing in August.");
+  });
+
+  it("names both halves in the empty state — period then category (V4, D404)", () => {
+    const html = renderExpenses(
+      { status: "empty", categoryLabel: "Transport", period: { unit: "month", offset: 0 } },
+      NOW,
+    );
+    expect(html).toContain("Nothing in August for Transport.");
+  });
+
   it("renders a generic empty message with no filter", () => {
-    const html = renderExpenses({ status: "empty", filterLabel: null });
+    const html = renderExpenses({ status: "empty", categoryLabel: null, period: undefined }, NOW);
     expect(html).toContain("No expenses yet.");
   });
 
@@ -316,7 +386,7 @@ describe("renderExpenses", () => {
       hasMore: false,
       tz: "UTC",
     });
-    const html = renderExpenses({ status: "ready", ...data });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-testid="day-group"');
     expect(html).toContain('data-testid="expense-row"');
     expect(html).toContain("10.00");
@@ -335,7 +405,7 @@ describe("renderExpenses", () => {
       hasMore: true,
       tz: "UTC",
     });
-    const html = renderExpenses({ status: "ready", ...data });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-action="load-more"');
     expect(html).not.toContain('data-testid="end-of-list"');
   });
@@ -348,12 +418,12 @@ describe("renderExpenses", () => {
       hasMore: false,
       tz: "UTC",
     });
-    const html = renderExpenses({ status: "offline", lastSyncedAt: "2026-08-02T09:00:00.000Z", ...data });
+    const html = renderExpenses({ status: "offline", lastSyncedAt: "2026-08-02T09:00:00.000Z", ...data }, NOW);
     expect(html).toContain('data-testid="offline"');
     expect(html).toContain("2026-08-02T09:00:00.000Z");
   });
 
-  it("shows the filter banner when a category filter is active", () => {
+  it("shows the filter banner naming the category alone when only a category filter is active", () => {
     const data = buildExpensesData({
       expenses: EXPENSES_FOR_FILTER_TEST,
       categories: CATEGORIES,
@@ -362,9 +432,50 @@ describe("renderExpenses", () => {
       hasMore: false,
       tz: "UTC",
     });
-    const html = renderExpenses({ status: "ready", ...data });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-testid="filter-banner"');
-    expect(html).toContain("Transport");
+    expect(html).toContain(">Transport<");
+  });
+
+  it("shows the filter banner naming both halves — 'Transport · August' (V4)", () => {
+    const data = buildExpensesData({
+      expenses: EXPENSES_FOR_FILTER_TEST,
+      categories: CATEGORIES,
+      currency: "EUR",
+      categoryId: "cat-transport",
+      period: { unit: "month", offset: 0 },
+      hasMore: false,
+      tz: "UTC",
+    });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
+    expect(html).toContain('data-testid="filter-banner"');
+    expect(html).toContain(">Transport · August<");
+  });
+
+  it("shows the filter banner naming the period alone, rendered by the same describe() Home's label uses", () => {
+    const data = buildExpensesData({
+      expenses: EXPENSES_FOR_FILTER_TEST,
+      categories: CATEGORIES,
+      currency: "EUR",
+      period: { unit: "month", offset: 0 },
+      hasMore: false,
+      tz: "UTC",
+    });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
+    expect(html).toContain('data-testid="filter-banner"');
+    expect(html).toContain(">August<");
+  });
+
+  it("renders no filter banner when unfiltered", () => {
+    const data = buildExpensesData({
+      expenses: EXPENSES_FOR_FILTER_TEST,
+      categories: CATEGORIES,
+      currency: "EUR",
+      hasMore: false,
+      tz: "UTC",
+    });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
+    expect(html).not.toContain('data-testid="filter-banner"');
   });
 });
 

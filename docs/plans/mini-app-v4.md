@@ -296,7 +296,7 @@ Appearance and interaction are in `docs/ui/`, not here. Structural deltas only:
 Ordered before Home: Home's ranked-row tap and its Add-button date handoff both
 navigate into screens that must already accept what they will be handed.
 
-- [ ] **U1.1 Expenses list filters server-side** — implements
+- [x] **U1.1 Expenses list filters server-side** — implements
       `docs/ui/screens/03-expenses.md`'s Data section and filter/empty copy.
       `buildExpensesData`'s client-side category filter is **deleted**.
       AC: opening the screen with `{categoryId, period}` sends both to the API
@@ -776,8 +776,25 @@ human with a phone:
   `user.account_id`; there is no `/accounts/{id}` route. `main.py` registers
   the router. No `expenses` table access anywhere in this unit — the D400
   "relabel only" guarantee is structural, not just tested.
-- **Next:** M1 — `U1.1` Expenses list filters server-side, implementing
-  `docs/ui/screens/03-expenses.md`'s Data section (webapp).
+- **U1.1 done.** `ApiClient.listExpenses` gained `categoryId`/`period` (sent
+  as `category_id`/`period`/`period_offset`/`start_date`/`end_date` — the
+  `period_offset` spelling per D402). `buildExpensesData`'s client-side
+  category filter is deleted; the function now only labels the filter
+  already applied server-side (`categoryLabel`, and `period: PeriodValue`
+  carried through **unresolved**, mirroring `home.ts`'s pattern of computing
+  `describe()` labels at render time, not in the data layer). `ExpensesData`/
+  the `"empty"` state variant split the old single `filterLabel` into
+  `categoryLabel` + `period`, so the render layer can produce the V4 copy:
+  banner "Transport · August" (no more "Filtered: " prefix), empty state
+  "Nothing in August for Transport." (period first, unlike the banner).
+  `renderExpenses`/`mount` gained an explicit `now: Date` param (mirrors
+  `home.ts`) — `main.ts`'s one call site passes `new Date()`. `ExpensesFilter`
+  gained an optional `period?: PeriodValue`, but **nothing calls `showExpenses`
+  with one yet** — Home's donut/ranked-row tap still passes only
+  `{categoryId}`; wiring the period through is U2.3's job (D404, "depends on
+  U1.1"). Day grouping is untouched, still keyed off `created_at` (U1.2/D410).
+- **Next:** M1 — `U1.2` Day grouping and the detail date move to `spent_at`
+  (D410).
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
