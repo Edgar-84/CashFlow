@@ -340,12 +340,9 @@ export async function withArchivedCategory(
  * — both a clean BackButton and a successful save land back on the record
  * being edited, unlike `showAddExpense`'s Home destination.
  *
- * Exported for U1.5 to wire from screen 03b's "Edit" action; this unit
- * builds the route and its own tests exercise `mount()`/`createController()`
- * directly, but nothing in the running app calls this yet —
- * `expense-detail.ts`'s Edit button still opens the old field-picker until
- * U1.5 deletes it (that deletion and this wiring are one coupled change per
- * U1.5's own AC, so it isn't split across two units). */
+ * Wired from screen 03b's "Edit" action (`showExpenseDetail`'s
+ * `DetailHandlers.onEdit`, U1.5) — that unit also deleted the old
+ * field-picker this route replaced. */
 export async function showEditExpense(
   expense: ExpenseResponse,
   onBack: () => void,
@@ -441,6 +438,9 @@ async function showExpenseDetail(id: Uuid, onBack: () => void): Promise<void> {
     },
     onBack,
     onDeleted: onBack,
+    onEdit: (expense) => {
+      void showEditExpense(expense, () => void showExpenseDetail(id, onBack));
+    },
   };
 
   applyDetailChrome(onBack);
