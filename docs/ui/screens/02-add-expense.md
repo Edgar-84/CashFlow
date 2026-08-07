@@ -233,6 +233,12 @@ nobody overflows. The cap is enforced silently by `maxlength`.
 2. **409 on writing into an archived category** (already in the V3 plan).
 3. **`UserMeResponse.account_name`** — confirmed missing (see Account above).
    One field, same join, mirrored in `api/types.ts`.
+4. **`UserMeResponse.today`** (U3.3) — confirmed missing. The date row's
+   "today"/"yesterday"/"two days ago" pills and their `spent_at` must resolve
+   in `family_tz`, never the device clock (D120's bug class) — nothing before
+   this exposed the family's current date to the client. Computed
+   server-side (`api/deps.py`) from `get_settings().family_tz`, mirrored in
+   `api/types.ts`.
 
 ## Accessibility
 - Every category swatch has its name directly under it; the swatch is never the

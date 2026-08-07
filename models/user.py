@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -29,8 +29,9 @@ class UserResponse(UserBase):
 
 
 class UserMeResponse(UserResponse):
-    """`GET /users/me` only — adds the caller's account currency (D211) and
-    name (U0.2c), both from the same `accounts` join.
+    """`GET /users/me` only — adds the caller's account currency (D211),
+    name (U0.2c) and today's date in `family_tz` (U3.3), all resolved
+    server-side.
 
     Deliberately not merged into ``UserResponse``: every other ``users``
     route/consumer (admin CRUD, ``PermissionChecker``, existing tests) reads
@@ -40,3 +41,8 @@ class UserMeResponse(UserResponse):
 
     currency: Currency
     account_name: str
+    # The Mini App's Add-expense date row must anchor on family_tz, never the
+    # device clock (D120's bug class) — this is the only place that date
+    # reaches the browser. `date`, not `datetime`: the client only ever
+    # renders/compares it as a plain calendar date.
+    today: date

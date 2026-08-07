@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import FastAPI
@@ -174,17 +175,33 @@ async def test_get_me_includes_account_currency_and_name(
     assert response.json()["account_name"] == account.name
 
 
+async def test_get_me_includes_today_in_family_tz(
+    client: AsyncClient, override_repo: OverrideRepo, member: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.get("/users/me", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    expected = datetime.now(UTC).astimezone(ZoneInfo(get_settings().family_tz)).date().isoformat()
+    assert response.json()["today"] == expected
+
+
 async def test_list_users_response_has_no_currency_field(
     client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse
 ) -> None:
-    # UserResponse (every route but /me) stays untouched by D211/U0.2c — no
-    # currency or account_name leaks in, and no accounts JOIN is needed here.
+    # UserResponse (every route but /me) stays untouched by D211/U0.2c/U3.3 —
+    # no currency, account_name or today leaks in, and no accounts JOIN is
+    # needed here.
     override_repo()
 
     response = await client.get("/users", headers=auth_headers(admin.tg_id))
 
     assert response.status_code == 200
-    assert all("currency" not in u and "account_name" not in u for u in response.json())
+    assert all(
+        "currency" not in u and "account_name" not in u and "today" not in u
+        for u in response.json()
+    )
 
 
 async def test_get_me_as_viewer_returns_own_row(

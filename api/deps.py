@@ -20,10 +20,12 @@ import json
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from typing import Annotated
 from urllib.parse import parse_qsl
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import asyncpg
 import httpx
@@ -260,18 +262,32 @@ async def get_current_user(
     return users[0]
 
 
+def _family_today(tz: str, now: datetime | None = None) -> date:
+    """Today's wall-clock date in `tz` (U3.3) — mirrors
+    `services/expense_service.py::_local_today`'s "localize, then take the
+    date" rule; not imported from there since that function is private to
+    its module (each layer keeps its own copy, same convention
+    `services/period.py` and the webapp's date modules already follow).
+    `now` is injectable for deterministic tests."""
+    return (now or datetime.now(UTC)).astimezone(ZoneInfo(tz)).date()
+
+
 async def get_current_user_with_currency(
     user: Annotated[UserResponse, Depends(get_current_user)],
     account_repo: Annotated[AccountRepository, Depends(get_account_repo)],
 ) -> UserMeResponse:
-    """``GET /users/me`` only — adds the caller's account currency (D211) and
-    name (U0.2c), both from the same account row.
+    """``GET /users/me`` only — adds the caller's account currency (D211),
+    name (U0.2c) and today's date in `family_tz` (U3.3), all from the same
+    account row / settings.
 
     ``account_id`` is FK-enforced NOT NULL, so the account always resolves.
     """
     account = await account_repo.get(user.account_id)
     assert account is not None
-    return UserMeResponse(**user.model_dump(), currency=account.currency, account_name=account.name)
+    today = _family_today(get_settings().family_tz)
+    return UserMeResponse(
+        **user.model_dump(), currency=account.currency, account_name=account.name, today=today
+    )
 
 
 async def require_admin(

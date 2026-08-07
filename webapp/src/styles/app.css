@@ -404,6 +404,85 @@ body {
   color: var(--status-red);
 }
 
+/* -- date row (U3.3, docs/ui/screens/02-add-expense.md region 4) -----------
+   `margin-top: 12px` on top of the form's 12px flex gap reaches the screen
+   doc's "24px above" (design-system.md Spacing: 20/24/28 between sections),
+   same convention as `.account-field`'s own `margin-top` comment above. Pill
+   sizing (88x44px) and radius (8px) come straight from design-system.md's
+   Sizing/Radii tables; its Typography table has no dedicated row for the
+   pill's two lines, so they reuse the nearest existing roles — "Row title"
+   (13.5px/600) for the date, "Caption" (11px) for the word underneath. */
+.date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.date-pills {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  flex: 1;
+}
+
+.date-pill {
+  flex: 0 0 auto;
+  width: 88px;
+  height: 44px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.date-pill.selected {
+  background: var(--ink);
+  color: var(--card);
+}
+
+.date-pill:focus-visible {
+  outline: 2px solid var(--category-slot-1);
+  outline-offset: 2px;
+}
+
+.date-pill-date {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.date-pill-label {
+  font-size: 11px;
+}
+
+.date-calendar-btn {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.date-calendar-btn:focus-visible {
+  outline: 2px solid var(--category-slot-1);
+  outline-offset: 2px;
+}
+
 .chip-row {
   display: flex;
   flex-wrap: wrap;

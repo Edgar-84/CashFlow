@@ -680,7 +680,7 @@ every unit below.
       Files: `webapp/src/screens/add-expense.ts`,
       `webapp/tests/add-expense.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U3.3 Date row** — the three pills, the calendar button, and `spent_at`
+- [x] **U3.3 Date row** — the three pills, the calendar button, and `spent_at`
       on the wire. AC: pills read "today", "yesterday" and "two days ago" with
       their dates above, dates resolved in `family_tz` and **not** from the
       device clock; "today" is selected on open and the created expense's
@@ -1461,6 +1461,40 @@ every unit below.
   deliberately drops `categoryId` — going to Categories exists to create a
   new category, so forcing a fresh pick is the point, not an oversight
   (matches `docs/ui/components/category-picker.md`'s own framing).
+- D343 (2026-08-07, U3.3): **`UserMeResponse` gains a `today: date` field**
+  — a contract delta not in the plan line's Files list, same shape as D342's
+  first item. The AC is explicit that the date row's pills and `spent_at`
+  resolve in `family_tz`, "**not** from the device clock" — but nothing
+  before this unit exposed the family's current date to the client; every
+  prior "now" the webapp injects (Home's period selector, the calendar's
+  `maxDate`, D327) is deliberately *device*-local, accepted there because
+  it's only cosmetic (arrow-disable, calendar scroll position). This AC
+  can't be met the same way. Added a private `_family_today(tz, now=None)`
+  in `api/deps.py` (mirrors `services/expense_service.py::_local_today`'s
+  "localize, then take the date" body exactly, not imported from there — each
+  layer keeps its own copy, the convention `services/period.py` and the
+  webapp's own date modules already follow) and wired it into
+  `get_current_user_with_currency`. `docs/ui/screens/02-add-expense.md`'s
+  Data section gained a 4th backend-delta bullet documenting it, mirroring
+  how `account_name` (U0.2c) is documented there.
+  On the client: `Draft.spentAt: string | null` — `null` means "no
+  override" and is treated as equivalent to an explicit `today` string
+  everywhere (the "today" pill's own tap sets it back to `null`), so a
+  fresh/untouched submit **omits** `spent_at` from the `POST` entirely
+  rather than sending `data.today` explicitly — the server's own D314
+  default resolves to the identical `family_tz` day, and omitting removes
+  any window for a client/server clock-skew mismatch rather than trusting
+  the client's copy to still be fresh. A date outside the three shortcuts
+  (calendar-picked) renders as a fourth pill labelled by lowercase weekday
+  name (`datePillOptions`) — not specified by the screen doc, a judgment
+  call: matches the other three pills' lowercase-word style, and a weekday
+  is more useful at a glance than repeating the numeric date already on the
+  line above. The calendar button reuses U1.8's `date-range-picker` in
+  `single` mode (already built); its BackButton-closes-picker-not-screen AC
+  is met by restoring the form's own `wireBackButton` handler on close,
+  unlike `screens/home.ts::openPicker`'s precedent of restoring to `null` —
+  Home's BackButton is otherwise always `null`, add-expense's never is while
+  the form is mounted.
   `renderCategoryChips`/the old `data-testid="category-chips"` chip row are
   gone from this screen; tag chips are untouched (still the old inline chip
   markup — U3.4's job).
@@ -2274,8 +2308,29 @@ every unit below.
   "Currency code" Typography row for the 20px/500 value the screen spec had
   already resolved. verify.sh green (636 backend + 530 webapp tests,
   typecheck/lint/build/secret-grep all pass).
-- Next: **U3.3** — Date row (the three pills, the calendar button, and
-  `spent_at` on the wire) (M3).
+- Done: **U3.3** — Date row wired into `screens/add-expense.ts` (M3): three
+  pills ("today"/"yesterday"/"two days ago", numeric date above each,
+  `datePillOptions`), a calendar button reusing U1.8's `date-range-picker` in
+  `single` mode, and `spent_at` on the `POST /expenses` wire. Required a
+  backend contract delta not in the plan line's Files list —
+  `UserMeResponse.today` — since the AC demands `family_tz`, never the
+  device clock, and nothing before this exposed that date to the client; see
+  D343 for the full reasoning (the `_family_today` helper, why `spentAt:
+  null` omits `spent_at` from the POST rather than sending an explicit
+  `today`, the weekday-labelled fourth pill for a calendar-picked date, and
+  why the calendar's BackButton restores the form's own handler rather than
+  `null` like `home.ts::openPicker` does). `isDirty` deliberately excludes
+  `spentAt` (screen doc: "a changed date alone does not make it dirty").
+  `docs/ui/screens/02-add-expense.md`'s Data section documents the
+  `UserMeResponse.today` delta. Reviewer round 1 (reviewer subagent): APPROVE
+  with a WARN — the screen doc's Accessibility section states "the date row
+  is a radiogroup. Arrow keys move within each," and the initial pass wired
+  clicks only; fixed same round by adding `nextDatePillFocusIndex` (mirrors
+  `components/category-picker.ts::nextGridFocusIndex`, minus that grid's
+  up/down rows — the date row is a single line) and a `keydown` listener on
+  `.date-pills`, directly tested. verify.sh green (638 backend + 541 webapp
+  tests, typecheck/lint/build/secret-grep all pass).
+- Next: **U3.4** — Tags and comment (the bottom of the screen) (M3).
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

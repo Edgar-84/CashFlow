@@ -7,9 +7,11 @@ import {
   applyAddExpenseChrome,
   createController,
   createMemoryCache,
+  datePillOptions,
   emptyDraft,
   isDirty,
   loadAddExpenseData,
+  nextDatePillFocusIndex,
   renderAddExpense,
   renderForm,
   submitButtonState,
@@ -29,6 +31,7 @@ function tag(id: string, name: string): TagResponse {
 
 const CATEGORIES: CategoryResponse[] = [category("cat-groceries", "Groceries"), category("cat-transport", "Transport")];
 const TAGS: TagResponse[] = [tag("tag-vacation", "vacation")];
+const TODAY = "2026-08-04"; // a Tuesday
 
 function expenseResponse(overrides: Partial<ExpenseResponse> = {}): ExpenseResponse {
   return {
@@ -76,6 +79,10 @@ describe("isDirty", () => {
     expect(isDirty({ ...emptyDraft(), tagIds: ["tag-vacation"] })).toBe(true);
     expect(isDirty({ ...emptyDraft(), comment: "note" })).toBe(true);
   });
+
+  it("stays false for a date change alone (docs/ui/screens/02-add-expense.md's BackButton AC)", () => {
+    expect(isDirty({ ...emptyDraft(), spentAt: "2026-08-02" })).toBe(false);
+  });
 });
 
 describe("submitButtonState", () => {
@@ -108,11 +115,46 @@ describe("submitButtonState", () => {
   });
 });
 
+describe("datePillOptions", () => {
+  it("returns today/yesterday/two days ago, in that order, when one of them is selected", () => {
+    expect(datePillOptions(TODAY, TODAY)).toEqual([
+      { date: "2026-08-04", label: "today" },
+      { date: "2026-08-03", label: "yesterday" },
+      { date: "2026-08-02", label: "two days ago" },
+    ]);
+  });
+
+  it("appends a fourth pill, labelled by weekday, for a selected date outside the three", () => {
+    // 2026-07-20 is a Monday.
+    const options = datePillOptions(TODAY, "2026-07-20");
+    expect(options).toHaveLength(4);
+    expect(options[3]).toEqual({ date: "2026-07-20", label: "monday" });
+  });
+
+  it("does not duplicate a fourth pill when the selected date already matches a fixed one", () => {
+    expect(datePillOptions(TODAY, "2026-08-03")).toHaveLength(3);
+  });
+});
+
+describe("nextDatePillFocusIndex", () => {
+  it("moves right/left by one, wrapping at the ends of the pill row", () => {
+    expect(nextDatePillFocusIndex(4, 0, "ArrowRight")).toBe(1);
+    expect(nextDatePillFocusIndex(4, 3, "ArrowRight")).toBe(0);
+    expect(nextDatePillFocusIndex(4, 0, "ArrowLeft")).toBe(3);
+    expect(nextDatePillFocusIndex(4, 2, "ArrowLeft")).toBe(1);
+  });
+
+  it("ignores unrelated keys and an empty row", () => {
+    expect(nextDatePillFocusIndex(4, 1, "Enter")).toBe(1);
+    expect(nextDatePillFocusIndex(0, 0, "ArrowRight")).toBe(0);
+  });
+});
+
 // -- loadAddExpenseData ---------------------------------------------------
 
 function fakeApi(overrides: Partial<AddExpenseApi> = {}): AddExpenseApi {
   return {
-    getMe: vi.fn().mockResolvedValue({ currency: "EUR", account_name: "Family" }),
+    getMe: vi.fn().mockResolvedValue({ currency: "EUR", account_name: "Family", today: TODAY }),
     listCategories: vi.fn().mockResolvedValue(CATEGORIES),
     listTags: vi.fn().mockResolvedValue(TAGS),
     createExpense: vi.fn().mockResolvedValue(expenseResponse()),
@@ -121,7 +163,7 @@ function fakeApi(overrides: Partial<AddExpenseApi> = {}): AddExpenseApi {
 }
 
 describe("loadAddExpenseData", () => {
-  it("returns ready with categories/tags/currency/account name from a fake ApiClient", async () => {
+  it("returns ready with categories/tags/currency/account name/today from a fake ApiClient", async () => {
     const state = await loadAddExpenseData(fakeApi(), createMemoryCache());
     expect(state).toEqual({
       status: "ready",
@@ -129,6 +171,7 @@ describe("loadAddExpenseData", () => {
       tags: TAGS,
       currency: "EUR",
       accountName: "Family",
+      today: TODAY,
     });
   });
 
@@ -191,6 +234,7 @@ describe("createController seeding", () => {
       categoryId: null,
       tagIds: ["tag-vacation"],
       comment: "weekly shop",
+      spentAt: null,
     };
     const controller = createController(fakeApi(), CATEGORIES, "EUR", initialDraft);
     expect(controller.getDraft()).toEqual(initialDraft);
@@ -225,6 +269,7 @@ describe("createController submit", () => {
       category_id: "cat-groceries",
       tag_ids: ["tag-vacation"],
       comment: "weekly shop",
+      spent_at: undefined,
     });
     expect(controller.getDraft()).toEqual(emptyDraft());
   });
@@ -242,7 +287,31 @@ describe("createController submit", () => {
       category_id: "cat-groceries",
       tag_ids: undefined,
       comment: undefined,
+      spent_at: undefined,
     });
+  });
+
+  it("omits spent_at (server defaults to today in family_tz) when the date wasn't changed", async () => {
+    const api = fakeApi();
+    const controller = createController(api, CATEGORIES, "EUR");
+    controller.setAmountInput("10");
+    controller.setCategoryId("cat-groceries");
+
+    await controller.submit();
+
+    expect(api.createExpense).toHaveBeenCalledWith(expect.objectContaining({ spent_at: undefined }));
+  });
+
+  it("sends the picked date's spent_at once the date pill/calendar overrides it", async () => {
+    const api = fakeApi();
+    const controller = createController(api, CATEGORIES, "EUR");
+    controller.setAmountInput("10");
+    controller.setCategoryId("cat-groceries");
+    controller.setSpentAt("2026-08-02");
+
+    await controller.submit();
+
+    expect(api.createExpense).toHaveBeenCalledWith(expect.objectContaining({ spent_at: "2026-08-02" }));
   });
 
   it("a duplicate rapid submit issues exactly one POST", async () => {
@@ -324,7 +393,13 @@ describe("createController submit", () => {
 
 // -- renderAddExpense / renderForm ----------------------------------------
 
-const READY = { categories: CATEGORIES, tags: TAGS, currency: "EUR" as const, accountName: "Family" };
+const READY = {
+  categories: CATEGORIES,
+  tags: TAGS,
+  currency: "EUR" as const,
+  accountName: "Family",
+  today: TODAY,
+};
 
 describe("renderAddExpense", () => {
   it("renders a loading skeleton with a live, focused amount field and 8 grid skeletons", () => {
@@ -419,6 +494,33 @@ describe("renderAddExpense", () => {
     const html = renderForm(READY, emptyDraft(), { submitError: "That category no longer exists." });
     expect(html).toContain('data-testid="submit-error"');
     expect(html).toContain("That category no longer exists.");
+  });
+
+  it("renders three date pills reading today/yesterday/two days ago, with today's dates above, today selected", () => {
+    const html = renderForm(READY, emptyDraft());
+    expect(html).toContain('data-testid="date-pill-2026-08-04"');
+    expect(html).toContain('data-testid="date-pill-2026-08-03"');
+    expect(html).toContain('data-testid="date-pill-2026-08-02"');
+    expect(html).toMatch(/class="date-pill selected"[^>]*data-date="2026-08-04"/);
+    expect(html).toMatch(/8\/4[\s\S]*?today/);
+    expect(html).toMatch(/8\/3[\s\S]*?yesterday/);
+    expect(html).toMatch(/8\/2[\s\S]*?two days ago/);
+    expect(html).toContain('data-testid="date-calendar-button"');
+  });
+
+  it("selects the yesterday pill once the draft's date is set to it", () => {
+    const html = renderForm(READY, { ...emptyDraft(), spentAt: "2026-08-03" });
+    expect(html).toMatch(/class="date-pill selected"[^>]*data-date="2026-08-03"/);
+    expect(html).not.toMatch(/class="date-pill selected"[^>]*data-date="2026-08-04"/);
+  });
+
+  it("adds a fourth selected pill for a date outside the three shortcuts", () => {
+    const html = renderForm(READY, { ...emptyDraft(), spentAt: "2026-07-20" });
+    expect(html).toMatch(/class="date-pill selected"[^>]*data-date="2026-07-20"/);
+    // The three fixed pills stay present, unselected.
+    expect(html).toContain('data-testid="date-pill-2026-08-04"');
+    expect(html).toContain('data-testid="date-pill-2026-08-03"');
+    expect(html).toContain('data-testid="date-pill-2026-08-02"');
   });
 });
 

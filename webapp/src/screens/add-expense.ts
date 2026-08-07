@@ -23,6 +23,7 @@ import {
   renderCategoryPicker,
   type CategoryPickerItem,
 } from "../components/category-picker";
+import { mount as mountDateRangePicker } from "../components/date-range-picker";
 import { assignCategoryColors, categorySlotCssVar } from "../lib/category-colors";
 import type {
   CategoryResponse,
@@ -36,7 +37,7 @@ import type {
 // -- data --------------------------------------------------------------------
 
 export interface AddExpenseApi {
-  getMe(): Promise<{ currency: Currency; account_name: string }>;
+  getMe(): Promise<{ currency: Currency; account_name: string; today: string }>;
   listCategories(): Promise<CategoryResponse[]>;
   listTags(): Promise<TagResponse[]>;
   createExpense(data: ExpenseCreate): Promise<ExpenseResponse>;
@@ -50,6 +51,9 @@ export interface AddExpenseFormData {
    * never a picker (one account per user, docs/ui/screens/02-add-expense.md's
    * Account section). */
   accountName: string;
+  /** `UserMeResponse.today` (U3.3), `YYYY-MM-DD` in `family_tz` — the date
+   * row's anchor. Never derived from the device clock (D120's bug class). */
+  today: string;
 }
 
 export interface AddExpenseSnapshot {
@@ -98,6 +102,7 @@ export async function loadAddExpenseData(
       tags,
       currency: me.currency,
       accountName: me.account_name,
+      today: me.today,
     };
     cache.set({ data, syncedAt: new Date().toISOString() });
     return categories.length === 0 ? { status: "empty" } : { status: "ready", ...data };
@@ -121,12 +126,18 @@ export interface Draft {
   categoryId: Uuid | null;
   tagIds: Uuid[];
   comment: string;
+  /** `YYYY-MM-DD`, or `null` for "no override" — the "today" pill, which is
+   * also the server's own default for an omitted `spent_at` (D314), so
+   * `null` and an explicit `today` string are equivalent on submit (U3.3). */
+  spentAt: string | null;
 }
 
 export function emptyDraft(): Draft {
-  return { amountInput: "", categoryId: null, tagIds: [], comment: "" };
+  return { amountInput: "", categoryId: null, tagIds: [], comment: "", spentAt: null };
 }
 
+/** `spentAt` is deliberately excluded — docs/ui/screens/02-add-expense.md's
+ * BackButton section: "a changed date alone does not make it dirty". */
 export function isDirty(draft: Draft): boolean {
   return (
     draft.amountInput.trim() !== "" ||
@@ -196,6 +207,9 @@ export interface AddExpenseController {
   setCategoryId(id: Uuid): void;
   toggleTag(id: Uuid): void;
   setComment(value: string): void;
+  /** `null` clears the override — picking the "today" pill again, or a
+   * calendar date that happens to equal today. */
+  setSpentAt(date: string | null): void;
   submit(): Promise<SubmitOutcome>;
 }
 
@@ -235,6 +249,9 @@ export function createController(
     setComment(value) {
       draft = { ...draft, comment: value };
     },
+    setSpentAt(date) {
+      draft = { ...draft, spentAt: date };
+    },
     async submit(): Promise<SubmitOutcome> {
       if (submitting) {
         return { status: "blocked" };
@@ -251,6 +268,7 @@ export function createController(
           category_id: draft.categoryId,
           tag_ids: draft.tagIds.length > 0 ? draft.tagIds : undefined,
           comment: draft.comment.trim() === "" ? undefined : draft.comment.trim(),
+          spent_at: draft.spentAt ?? undefined,
         });
         draft = emptyDraft();
         return { status: "success", expense };
@@ -344,6 +362,108 @@ function renderAccountField(accountName: string): string {
   </div>`;
 }
 
+// -- date row (docs/ui/screens/02-add-expense.md's Date region, U3.3) -------
+//
+// Pure date-string helpers mirroring `components/date-range-picker.ts`'s own
+// private copies — that module's header comment already states the
+// convention this file follows too: each pure module owns its own rather
+// than sharing. Every `Date` here is local wall-clock and every
+// `YYYY-MM-DD` string a plain calendar date (no `Date.UTC`, no
+// `toISOString`, no `new Date("YYYY-MM-DD")` — D120's bug class). `today`
+// itself always comes from `AddExpenseFormData.today` (`UserMeResponse`,
+// resolved server-side in `family_tz`), never `new Date()`.
+
+function parseDateString(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function toDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(d: Date, days: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
+}
+
+/** "8/4" — the pill's numeric line (screen doc's Pill table). */
+function formatPillDate(dateStr: string): string {
+  const d = parseDateString(dateStr);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+const WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+export interface DatePillOption {
+  date: string; // YYYY-MM-DD
+  label: string;
+}
+
+/** The three fixed shortcuts, plus a fourth for `selected` when it falls
+ * outside them — "a calendar date outside the three shortcuts appears as a
+ * fourth selected pill" (screen doc). Its label is the lowercase weekday
+ * name, matching the other three pills' lowercase-word style; not specified
+ * by the screen doc, a U3.3 judgment call (plan Decision log). */
+export function datePillOptions(today: string, selected: string): DatePillOption[] {
+  const t = parseDateString(today);
+  const fixed: DatePillOption[] = [
+    { date: today, label: "today" },
+    { date: toDateString(addDays(t, -1)), label: "yesterday" },
+    { date: toDateString(addDays(t, -2)), label: "two days ago" },
+  ];
+  if (fixed.some((p) => p.date === selected)) {
+    return fixed;
+  }
+  const weekday = WEEKDAY_NAMES[(parseDateString(selected).getDay() + 6) % 7]; // Monday = 0
+  return [...fixed, { date: selected, label: weekday }];
+}
+
+/** Wraparound left/right focus movement for the (single-row) date
+ * `radiogroup` — docs/ui/screens/02-add-expense.md's Accessibility section:
+ * "the date row is a radiogroup. Arrow keys move within each." Same shape as
+ * `components/category-picker.ts::nextGridFocusIndex`, minus that grid's
+ * up/down rows (this row has only one). */
+export function nextDatePillFocusIndex(count: number, from: number, key: string): number {
+  if (count === 0) {
+    return from;
+  }
+  switch (key) {
+    case "ArrowRight":
+      return (from + 1) % count;
+    case "ArrowLeft":
+      return (from - 1 + count) % count;
+    default:
+      return from;
+  }
+}
+
+const CALENDAR_ICON =
+  '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+  '<rect x="3" y="5" width="18" height="16" rx="3" stroke="currentColor" stroke-width="2" fill="none" />' +
+  '<line x1="8" y1="3" x2="8" y2="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />' +
+  '<line x1="16" y1="3" x2="16" y2="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />' +
+  "</svg>";
+
+function renderDateRow(today: string, spentAt: string | null): string {
+  const selected = spentAt ?? today;
+  const pills = datePillOptions(today, selected)
+    .map((p) => {
+      const isSelected = p.date === selected;
+      return `<button type="button" class="date-pill${isSelected ? " selected" : ""}" role="radio" aria-checked="${isSelected}" data-date="${p.date}" data-testid="date-pill-${p.date}">
+        <span class="date-pill-date">${escapeHtml(formatPillDate(p.date))}</span>
+        <span class="date-pill-label">${escapeHtml(p.label)}</span>
+      </button>`;
+    })
+    .join("");
+  return `<div class="date-row" data-testid="date-row">
+    <div class="date-pills" role="radiogroup" aria-label="Date">${pills}</div>
+    <button type="button" class="date-calendar-btn" data-testid="date-calendar-button" aria-label="Choose a date">${CALENDAR_ICON}</button>
+  </div>`;
+}
+
 function renderTagChips(tags: TagResponse[], selectedIds: Uuid[]): string {
   if (tags.length === 0) {
     return "";
@@ -370,6 +490,7 @@ export function renderForm(
     <p class="field-error" data-testid="amount-error">${error ? escapeHtml(error) : ""}</p>
     ${renderAccountField(data.accountName)}
     ${renderCategoryGridSlot(data.categories, draft.categoryId)}
+    ${renderDateRow(data.today, draft.spentAt)}
     ${renderTagChips(data.tags, draft.tagIds)}
     <textarea class="comment-input" data-testid="comment-input" placeholder="Add a note (optional)">${escapeHtml(draft.comment)}</textarea>
     ${opts.submitError ? `<p class="submit-error" data-testid="submit-error">${escapeHtml(opts.submitError)}</p>` : ""}
@@ -488,6 +609,38 @@ export function mount(
   const lastSyncedAt = state.status === "offline" ? state.lastSyncedAt : undefined;
   const controller = createController(api, data.categories, data.currency, seedDraft);
 
+  // Calendar button's sheet (U1.8's picker, `single` mode). BackButton closes
+  // the picker, not the screen (AC) — the same nested-BackButton pattern
+  // `screens/home.ts::openPicker` uses for the range variant, except the
+  // close restores the form's own dirty-check BackButton handler
+  // (`wireBackButton`) rather than `null`, since add-expense's BackButton is
+  // never null while the form is mounted.
+  const openDatePicker = (value: string, onPick: (date: string) => void): void => {
+    const pickerRoot = document.createElement("div");
+    root.appendChild(pickerRoot);
+
+    const close = (): void => {
+      pickerRoot.remove();
+      wireBackButton(controller.getDraft, handlers.onClose);
+    };
+    setBackButtonHandler(close);
+
+    mountDateRangePicker(pickerRoot, {
+      mode: "single",
+      value: { start: value, end: value },
+      maxDate: data.today,
+      // Inert in `single` mode — no summary/footer render, so no length
+      // validity check ever surfaces (component doc's Variants table).
+      maxRangeDays: 1,
+      onChange: () => {},
+      onApply: (range) => {
+        close();
+        onPick(range.start);
+      },
+      onCancel: close,
+    });
+  };
+
   const wireForm = (): void => {
     const amountInput = root.querySelector<HTMLInputElement>('[data-testid="amount-input"]');
     amountInput?.addEventListener("input", () => {
@@ -513,6 +666,36 @@ export function mount(
         },
       });
     }
+
+    const datePills = Array.from(root.querySelectorAll<HTMLElement>("[data-date]"));
+    datePills.forEach((el) => {
+      el.addEventListener("click", () => {
+        haptics.selection();
+        const date = el.dataset.date!;
+        controller.setSpentAt(date === data.today ? null : date);
+        rerenderForm();
+      });
+    });
+
+    root.querySelector<HTMLElement>('[data-testid="date-row"] .date-pills')?.addEventListener("keydown", (e) => {
+      const from = datePills.indexOf(document.activeElement as HTMLElement);
+      if (from === -1) {
+        return;
+      }
+      const nextIndex = nextDatePillFocusIndex(datePills.length, from, e.key);
+      if (nextIndex === from) {
+        return;
+      }
+      e.preventDefault();
+      datePills[nextIndex]?.focus();
+    });
+
+    root.querySelector('[data-testid="date-calendar-button"]')?.addEventListener("click", () => {
+      openDatePicker(controller.getDraft().spentAt ?? data.today, (date) => {
+        controller.setSpentAt(date === data.today ? null : date);
+        rerenderForm();
+      });
+    });
 
     root.querySelectorAll<HTMLElement>("[data-tag-id]").forEach((el) => {
       el.addEventListener("click", () => {
