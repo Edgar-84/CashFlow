@@ -1,11 +1,12 @@
-/** Screen 02 — Add expense (docs/design/mini-app-ux.md §4). The one-surface
- * composer: amount focused on open, category chips (required, single-select),
+/** Screen 02 — Add expense (docs/ui/screens/02-add-expense.md). The one-surface
+ * composer: amount focused on open (before any fetch resolves), account name,
+ * the U3.1 category grid (required, single-select, "More" opens screen 06),
  * tag chips (optional, multi-select), comment, then the Telegram MainButton
  * restates the action and submits.
  *
  * Layers, same split as screens/home.ts:
- *  - data: `loadAddExpenseData` fetches the categories/tags/currency the form
- *    needs, mirroring `loadHome`'s never-throws contract.
+ *  - data: `loadAddExpenseData` fetches the categories/tags/currency/account
+ *    name the form needs, mirroring `loadHome`'s never-throws contract.
  *  - draft: `createController` owns the in-progress `Draft` and the
  *    double-submit guard (D118/D123's shape) — pure aside from the awaited
  *    `createExpense` call, so it's directly unit-testable without a DOM.
@@ -17,6 +18,12 @@
 import { formatAmount, parseAmount } from "../lib/money";
 import { confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ApiError, ForbiddenError, NotFoundError } from "../api/client";
+import {
+  mount as mountCategoryPicker,
+  renderCategoryPicker,
+  type CategoryPickerItem,
+} from "../components/category-picker";
+import { assignCategoryColors, categorySlotCssVar } from "../lib/category-colors";
 import type {
   CategoryResponse,
   Currency,
@@ -29,7 +36,7 @@ import type {
 // -- data --------------------------------------------------------------------
 
 export interface AddExpenseApi {
-  getMe(): Promise<{ currency: Currency }>;
+  getMe(): Promise<{ currency: Currency; account_name: string }>;
   listCategories(): Promise<CategoryResponse[]>;
   listTags(): Promise<TagResponse[]>;
   createExpense(data: ExpenseCreate): Promise<ExpenseResponse>;
@@ -39,6 +46,10 @@ export interface AddExpenseFormData {
   categories: CategoryResponse[];
   tags: TagResponse[];
   currency: Currency;
+  /** `UserMeResponse.account_name` (U0.2c) — read-only text on this screen,
+   * never a picker (one account per user, docs/ui/screens/02-add-expense.md's
+   * Account section). */
+  accountName: string;
 }
 
 export interface AddExpenseSnapshot {
@@ -82,7 +93,12 @@ export async function loadAddExpenseData(
       api.listCategories(),
       api.listTags(),
     ]);
-    const data: AddExpenseFormData = { categories, tags, currency: me.currency };
+    const data: AddExpenseFormData = {
+      categories,
+      tags,
+      currency: me.currency,
+      accountName: me.account_name,
+    };
     cache.set({ data, syncedAt: new Date().toISOString() });
     return categories.length === 0 ? { status: "empty" } : { status: "ready", ...data };
   } catch (err) {
@@ -195,8 +211,9 @@ export function createController(
   api: Pick<AddExpenseApi, "createExpense">,
   categories: CategoryResponse[],
   currency: Currency,
+  initialDraft: Draft = emptyDraft(),
 ): AddExpenseController {
-  let draft = emptyDraft();
+  let draft = initialDraft;
   let submitting = false;
 
   return {
@@ -295,11 +312,36 @@ function renderChip(opts: { id: string; label: string; selected: boolean; attr: 
   );
 }
 
-function renderCategoryChips(categories: CategoryResponse[], selectedId: Uuid | null): string {
-  const chips = categories
-    .map((c) => renderChip({ id: c.id, label: c.name, selected: c.id === selectedId, attr: "category-id" }))
-    .join("");
-  return `<div class="chip-row" data-testid="category-chips">${chips}</div>`;
+// No-op stand-ins for the callbacks `CategoryPickerProps` requires — the pure
+// render never invokes them, only `mountCategoryPicker` (in `mount`, below)
+// wires the real handlers, same convention as `screens/home.ts`'s own `noop`
+// for `renderPeriodSelector`.
+const noop = () => {};
+
+function categoryPickerItems(categories: CategoryResponse[]): CategoryPickerItem[] {
+  const colors = assignCategoryColors(categories);
+  const slotById = new Map(colors.map((c) => [c.id, c.slot]));
+  return categories.map((c) => ({
+    id: c.id,
+    name: c.name,
+    colorVar: categorySlotCssVar(slotById.get(c.id) ?? null),
+  }));
+}
+
+function renderCategoryGridSlot(categories: CategoryResponse[], selectedId: Uuid | null): string {
+  return `<div class="category-picker-slot">${renderCategoryPicker({
+    items: categoryPickerItems(categories),
+    selectedId,
+    onSelect: noop,
+    onMore: noop,
+  })}</div>`;
+}
+
+function renderAccountField(accountName: string): string {
+  return `<div class="account-field" data-testid="account-field">
+    <div class="account-label">Account</div>
+    <div class="account-name" data-testid="account-name">${escapeHtml(accountName)}</div>
+  </div>`;
 }
 
 function renderTagChips(tags: TagResponse[], selectedIds: Uuid[]): string {
@@ -323,19 +365,37 @@ export function renderForm(
     <div class="card field">
       <input class="amount-input" data-testid="amount-input" inputmode="decimal" autofocus
         value="${escapeHtml(draft.amountInput)}" placeholder="0.00" />
-      <div class="currency-suffix">${escapeHtml(data.currency)}</div>
+      <div class="currency-suffix" data-testid="currency-suffix">${escapeHtml(data.currency)}</div>
     </div>
     <p class="field-error" data-testid="amount-error">${error ? escapeHtml(error) : ""}</p>
-    ${renderCategoryChips(data.categories, draft.categoryId)}
+    ${renderAccountField(data.accountName)}
+    ${renderCategoryGridSlot(data.categories, draft.categoryId)}
     ${renderTagChips(data.tags, draft.tagIds)}
     <textarea class="comment-input" data-testid="comment-input" placeholder="Add a note (optional)">${escapeHtml(draft.comment)}</textarea>
     ${opts.submitError ? `<p class="submit-error" data-testid="submit-error">${escapeHtml(opts.submitError)}</p>` : ""}
   </div>`;
 }
 
-function renderSkeleton(): string {
+/** The amount field is real and focused here too (never a static placeholder)
+ * — docs/ui/screens/02-add-expense.md's Loading row: "typing never waits on
+ * a fetch". Account and the category grid (host-owned per the component
+ * doc's States table — the component itself "renders nothing" for loading)
+ * are skeletons; `.cat-cell-skeleton` is reused verbatim from
+ * `screens/categories.ts`'s own 8-cell loading grid, same shape. */
+function renderSkeleton(amountInput: string): string {
+  const cells = Array.from({ length: 8 }, () => `<div class="cat-cell-skeleton"></div>`).join("");
   return `<div class="add-expense-skeleton" data-testid="loading">
-    <div class="field-skeleton"></div>
+    <div class="card field">
+      <input class="amount-input" data-testid="amount-input" inputmode="decimal" autofocus
+        value="${escapeHtml(amountInput)}" placeholder="0.00" />
+      <div class="currency-suffix-skeleton" data-testid="currency-skeleton"></div>
+    </div>
+    <div class="account-field">
+      <div class="account-label">Account</div>
+      <div class="account-name-skeleton" data-testid="account-skeleton"></div>
+    </div>
+    <div class="cp-label">Categories</div>
+    <div class="cp-grid" data-testid="category-grid-skeleton">${cells}</div>
     <div class="chips-skeleton"></div>
   </div>`;
 }
@@ -359,10 +419,10 @@ function renderEmpty(): string {
   </div>`;
 }
 
-export function renderAddExpense(state: AddExpenseLoadState): string {
+export function renderAddExpense(state: AddExpenseLoadState, draft: Draft = emptyDraft()): string {
   switch (state.status) {
     case "loading":
-      return renderSkeleton();
+      return renderSkeleton(draft.amountInput);
     case "error":
       return renderError(state.message);
     case "forbidden":
@@ -370,9 +430,9 @@ export function renderAddExpense(state: AddExpenseLoadState): string {
     case "empty":
       return renderEmpty();
     case "ready":
-      return renderForm(state, emptyDraft());
+      return renderForm(state, draft);
     case "offline":
-      return renderForm(state, emptyDraft(), { lastSyncedAt: state.lastSyncedAt });
+      return renderForm(state, draft, { lastSyncedAt: state.lastSyncedAt });
   }
 }
 
@@ -383,6 +443,11 @@ export interface AddExpenseHandlers {
   onRetry: () => void;
   onClose: () => void;
   onSuccess: () => void;
+  /** "More" cell tap (docs/ui/components/category-picker.md) — navigates to
+   * screen 06 (Categories). Carries the current draft so the host (main.ts)
+   * can restore amount/tags/comment on return; `categoryId` is deliberately
+   * not preserved — the whole point of "More" is to pick a new category. */
+  onMore: (draft: Draft) => void;
 }
 
 export function mount(
@@ -390,12 +455,28 @@ export function mount(
   state: AddExpenseLoadState,
   api: AddExpenseApi,
   handlers: AddExpenseHandlers,
+  initialDraft: Draft = emptyDraft(),
 ): void {
   if (typeof document === "undefined") {
     return;
   }
-  root.innerHTML = renderAddExpense(state);
+  // `mount` is called twice per open (main.ts renders "loading" synchronously,
+  // then awaits `loadAddExpenseData` and renders again) — the amount field is
+  // live and focused from the first call (AC: focused before any network call
+  // resolves), so whatever the user already typed into it must survive the
+  // second call's full re-render, not just `initialDraft`'s stale value.
+  const priorAmount = root.querySelector<HTMLInputElement>('[data-testid="amount-input"]')?.value;
+  const seedDraft: Draft = { ...initialDraft, amountInput: priorAmount ?? initialDraft.amountInput };
+
+  root.innerHTML = renderAddExpense(state, seedDraft);
   root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
+
+  if (state.status === "loading") {
+    setBackButtonHandler(() => handlers.onClose());
+    mainButton.hide();
+    root.querySelector<HTMLInputElement>('[data-testid="amount-input"]')?.focus();
+    return;
+  }
 
   if (state.status !== "ready" && state.status !== "offline") {
     setBackButtonHandler(() => handlers.onClose());
@@ -405,7 +486,7 @@ export function mount(
 
   const data: AddExpenseFormData = state;
   const lastSyncedAt = state.status === "offline" ? state.lastSyncedAt : undefined;
-  const controller = createController(api, data.categories, data.currency);
+  const controller = createController(api, data.categories, data.currency, seedDraft);
 
   const wireForm = (): void => {
     const amountInput = root.querySelector<HTMLInputElement>('[data-testid="amount-input"]');
@@ -418,13 +499,20 @@ export function mount(
       applyAddExpenseChrome(controller.getDraft(), data.categories, data.currency);
     });
 
-    root.querySelectorAll<HTMLElement>("[data-category-id]").forEach((el) => {
-      el.addEventListener("click", () => {
-        haptics.selection();
-        controller.setCategoryId(el.dataset.categoryId as Uuid);
-        rerenderForm();
+    const pickerSlot = root.querySelector<HTMLElement>(".category-picker-slot");
+    if (pickerSlot) {
+      mountCategoryPicker(pickerSlot, {
+        items: categoryPickerItems(data.categories),
+        selectedId: controller.getDraft().categoryId,
+        onSelect: (id) => {
+          controller.setCategoryId(id);
+          rerenderForm();
+        },
+        onMore: () => {
+          handlers.onMore(controller.getDraft());
+        },
       });
-    });
+    }
 
     root.querySelectorAll<HTMLElement>("[data-tag-id]").forEach((el) => {
       el.addEventListener("click", () => {

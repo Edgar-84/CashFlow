@@ -112,7 +112,7 @@ describe("submitButtonState", () => {
 
 function fakeApi(overrides: Partial<AddExpenseApi> = {}): AddExpenseApi {
   return {
-    getMe: vi.fn().mockResolvedValue({ currency: "EUR" }),
+    getMe: vi.fn().mockResolvedValue({ currency: "EUR", account_name: "Family" }),
     listCategories: vi.fn().mockResolvedValue(CATEGORIES),
     listTags: vi.fn().mockResolvedValue(TAGS),
     createExpense: vi.fn().mockResolvedValue(expenseResponse()),
@@ -121,9 +121,15 @@ function fakeApi(overrides: Partial<AddExpenseApi> = {}): AddExpenseApi {
 }
 
 describe("loadAddExpenseData", () => {
-  it("returns ready with categories/tags/currency from a fake ApiClient", async () => {
+  it("returns ready with categories/tags/currency/account name from a fake ApiClient", async () => {
     const state = await loadAddExpenseData(fakeApi(), createMemoryCache());
-    expect(state).toEqual({ status: "ready", categories: CATEGORIES, tags: TAGS, currency: "EUR" });
+    expect(state).toEqual({
+      status: "ready",
+      categories: CATEGORIES,
+      tags: TAGS,
+      currency: "EUR",
+      accountName: "Family",
+    });
   });
 
   it("returns empty when the account has no categories", async () => {
@@ -172,6 +178,24 @@ describe("loadAddExpenseData", () => {
 function validDraft(): Draft {
   return { ...emptyDraft(), amountInput: "38.40", categoryId: "cat-groceries" };
 }
+
+describe("createController seeding", () => {
+  it("starts from an empty draft by default", () => {
+    const controller = createController(fakeApi(), CATEGORIES, "EUR");
+    expect(controller.getDraft()).toEqual(emptyDraft());
+  });
+
+  it("seeds the draft from an initial value — the 'returning from More' case", () => {
+    const initialDraft: Draft = {
+      amountInput: "12.50",
+      categoryId: null,
+      tagIds: ["tag-vacation"],
+      comment: "weekly shop",
+    };
+    const controller = createController(fakeApi(), CATEGORIES, "EUR", initialDraft);
+    expect(controller.getDraft()).toEqual(initialDraft);
+  });
+});
 
 describe("createController submit", () => {
   it("is a no-op (blocked) when the draft can't submit yet", async () => {
@@ -300,11 +324,23 @@ describe("createController submit", () => {
 
 // -- renderAddExpense / renderForm ----------------------------------------
 
-const READY = { categories: CATEGORIES, tags: TAGS, currency: "EUR" as const };
+const READY = { categories: CATEGORIES, tags: TAGS, currency: "EUR" as const, accountName: "Family" };
 
 describe("renderAddExpense", () => {
-  it("renders a loading skeleton", () => {
-    expect(renderAddExpense({ status: "loading" })).toContain('data-testid="loading"');
+  it("renders a loading skeleton with a live, focused amount field and 8 grid skeletons", () => {
+    const html = renderAddExpense({ status: "loading" });
+    expect(html).toContain('data-testid="loading"');
+    // The amount field is real markup here too — AC: focused before any
+    // network call resolves, "typing never waits on a fetch".
+    expect(html).toContain('data-testid="amount-input"');
+    expect(html).toContain("autofocus");
+    expect(html.match(/class="cat-cell-skeleton"/g)?.length).toBe(8);
+  });
+
+  it("carries a typed-ahead amount into the loading skeleton", () => {
+    const html = renderAddExpense({ status: "loading" }, { ...emptyDraft(), amountInput: "12.50" });
+    expect(html).toContain('data-testid="amount-input"');
+    expect(html).toContain('value="12.50"');
   });
 
   it("renders a retry affordance on error", () => {
@@ -324,13 +360,37 @@ describe("renderAddExpense", () => {
     expect(html).toContain("category first");
   });
 
-  it("renders the form focused on the amount field with category chips, no inline error yet", () => {
+  it("renders the form focused on the amount field with the category grid, no inline error yet", () => {
     const html = renderAddExpense({ status: "ready", ...READY });
     expect(html).toContain('data-testid="amount-input"');
     expect(html).toContain("autofocus");
     expect(html).toContain('data-category-id="cat-groceries"');
     expect(html).toContain('data-tag-id="tag-vacation"');
     expect(html).not.toContain('data-testid="offline"');
+  });
+
+  it("renders the currency code beside the amount, in a non-tappable element", () => {
+    const html = renderAddExpense({ status: "ready", ...READY });
+    expect(html).toContain('data-testid="currency-suffix">EUR</div>');
+  });
+
+  it("renders the account name under an Account label, in a non-tappable element", () => {
+    const html = renderAddExpense({ status: "ready", ...READY });
+    expect(html).toContain('data-testid="account-field"');
+    expect(html).toContain('data-testid="account-name">Family</div>');
+  });
+
+  it("renders the category grid as the U3.1 component, not the old chip row", () => {
+    const html = renderAddExpense({ status: "ready", ...READY });
+    expect(html).toContain('data-testid="category-picker"');
+    expect(html).toContain('data-testid="cp-more"');
+    expect(html).not.toContain('data-testid="category-chips"');
+  });
+
+  it("colours each category swatch by its assigned slot", () => {
+    const html = renderAddExpense({ status: "ready", ...READY });
+    expect(html).toContain("background:var(--category-slot-1)");
+    expect(html).toContain("background:var(--category-slot-2)");
   });
 
   it("omits the tag chip row when the account has no tags", () => {
@@ -350,9 +410,9 @@ describe("renderAddExpense", () => {
     expect(html).toContain("Enter an amount greater than 0.");
   });
 
-  it("marks the picked category chip active", () => {
+  it("marks the picked category cell selected", () => {
     const html = renderForm(READY, { ...emptyDraft(), categoryId: "cat-groceries" });
-    expect(html).toContain('data-category-id="cat-groceries" aria-pressed="true"');
+    expect(html).toMatch(/class="cp-cell selected"[^>]*data-category-id="cat-groceries"/);
   });
 
   it("renders a submit error banner when passed one", () => {

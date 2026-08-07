@@ -669,7 +669,7 @@ every unit below.
       Files: `webapp/src/components/category-picker.ts`,
       `webapp/tests/category-picker.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U3.2 Amount, account and the category grid** — the top of the screen.
+- [x] **U3.2 Amount, account and the category grid** — the top of the screen.
       AC: the amount input is focused with the numeric keypad up **before any
       network call resolves**; the currency code renders beside it in
       `--ink-secondary` and is not tappable; the account name renders under an
@@ -1416,6 +1416,67 @@ every unit below.
   surface as a test diff, but nothing tracks consolidating them into a
   shared `lib/` module once a unit legitimately touches both files — worth
   picking up opportunistically rather than staying duplicated forever.
+- D342 (2026-08-07, U3.2): three deviations from the plan line's literal
+  scope, all confirmed with the human before implementing:
+  1. **`main.ts` touched even though the unit's Files line doesn't name it.**
+     "'More' navigates to screen 06 and returning refetches the list with the
+     draft's amount, tags and comment intact" is only implementable at the
+     router layer — `main.ts` owns all screen navigation, and
+     `screens/add-expense.ts` has no way to reach Categories itself. Added a
+     module-level `categoriesReturnTo: () => void` (defaults to `showHome`,
+     same mutable-module-state shape `activeScreen`/`homePeriod` already use)
+     that Categories' `onBack` now calls instead of hardcoding `showHome()`;
+     `showAddExpense`'s new `onMore` handler points it at
+     `() => showAddExpense({ ...draft, categoryId: null })` before navigating
+     to Categories, and resets to `showHome` at Home's own "Categories" tile
+     tap so the override never leaks into an unrelated visit.
+  2. **`.amount-input`/`.currency-suffix` font-size/weight corrected in the
+     same change**, not left alone. `.amount-input` was still at the
+     pre-redesign 28px/700 (the "Hero amount" role) even though
+     `design-system.md`'s Typography table already had a dedicated "Amount
+     input (screen 02): 34px/600/−0.03em" row from an earlier unit that never
+     got wired up — corrected to match. `.currency-suffix` had no matching
+     role at all (20px isn't in the closed type scale anywhere); added one
+     Typography row, "Currency code (screen 02): 20px/500", since the screen
+     spec (`02-add-expense.md`) had already resolved that value and root
+     CLAUDE.md's rule is to extend the design system first, never invent a
+     literal in CSS.
+  3. **The amount field survives the loading→ready DOM swap.** `mount()` is
+     called twice per open (`main.ts` renders `{status:"loading"}`
+     synchronously, then awaits `loadAddExpenseData` and renders again) — the
+     AC ("focused before any network call resolves") plus the screen doc's
+     "typing never waits on a fetch" only hold end-to-end if whatever the
+     user typed in that race window isn't wiped by the second render. `mount`
+     now reads the amount input's live DOM value before replacing
+     `root.innerHTML` and seeds the next render/controller from it,
+     overriding `initialDraft.amountInput` when present.
+  Also: `createController` gained an `initialDraft: Draft = emptyDraft()`
+  param (the seeding mechanism above and for the "More" return-trip both use
+  it); `AddExpenseFormData` gained `accountName` (from
+  `UserMeResponse.account_name`, already shipped in U0.2c — no backend
+  change needed here); the category grid is composed the same way
+  `screens/home.ts` composes `period-selector.ts` — a `noop`-callback string
+  render inline for the first paint, then `mountCategoryPicker` re-renders
+  the same slot with real handlers once `wireForm` runs. The "More" carryover
+  deliberately drops `categoryId` — going to Categories exists to create a
+  new category, so forcing a fresh pick is the point, not an oversight
+  (matches `docs/ui/components/category-picker.md`'s own framing).
+  `renderCategoryChips`/the old `data-testid="category-chips"` chip row are
+  gone from this screen; tag chips are untouched (still the old inline chip
+  markup — U3.4's job).
+  Reviewed by the reviewer subagent: APPROVE, with one WARN fixed same
+  session — `.account-field` had no distinguishing spacing from the screen
+  doc's "20px above" (it was falling into the form's generic 12px flex gap
+  like every other row); added `margin-top: 8px` (12+8=20) plus Typography-
+  source comments on `.account-label`/`.account-name` (reused "Meta /
+  secondary" and "Period label" roles respectively — no new design-system
+  rows needed, unlike the Currency code case above). Two NITs not fixed,
+  flagged for later: `main.ts`'s new `categoriesReturnTo` routing state has
+  no test coverage (consistent with this file's existing "DOM glue" gap, but
+  it's control-flow, not glue — worth a test once this pattern is touched
+  again); `renderError`'s amount field doesn't yet keep what was typed on a
+  fetch failure, per the screen doc's Error row — pre-existing, predates this
+  unit, not in U3.2's own AC.
 
 ## STATE (handoff)
 - Done: **U0.1** — `PeriodPreset` added to `models/enums.py`; `resolve_period`
@@ -2196,9 +2257,25 @@ every unit below.
   D341's Follow-up note); round 2 confirmed and re-APPROVEd, no new findings.
   verify.sh green (636 backend + 523 webapp tests, typecheck/lint/build/
   secret-grep all pass).
-- Next: **U3.2** — Amount, account and the category grid, wiring this
-  component into `screens/add-expense.ts` and replacing the old inline
-  category chips (M3).
+- Done: **U3.2** — Amount, account and the category grid wired into
+  `screens/add-expense.ts` (M3), replacing the old inline category chips with
+  the U3.1 `category-picker` component. Amount field is live and focused
+  immediately (before the categories/tags/currency fetch resolves) and
+  survives the loading→ready re-render; account name (`accountName`, from
+  `GET /users/me`'s `account_name`, U0.2c) renders read-only under an
+  "Account" label; the category grid's "More" cell navigates to Categories
+  (screen 06) and back, preserving the draft's amount/tags/comment (not
+  `categoryId` — deliberate, see D342); loading state shows 8 circle
+  skeletons (`.cat-cell-skeleton`, reused from `screens/categories.ts`) in
+  the grid's final position. See D342 for the three scope decisions this
+  required: touching `main.ts` (not in the plan line's Files list) for the
+  actual navigation, correcting `.amount-input`'s stale pre-redesign type
+  size to the design system's already-documented role, and adding a
+  "Currency code" Typography row for the 20px/500 value the screen spec had
+  already resolved. verify.sh green (636 backend + 530 webapp tests,
+  typecheck/lint/build/secret-grep all pass).
+- Next: **U3.3** — Date row (the three pills, the calendar button, and
+  `spent_at` on the wire) (M3).
 - **Execution order in M0 (done)**: U0.1a → U0.3 → U0.2 → U0.2a → U0.2b →
   U0.2c → U0.4 → U0.5 → U0.6 → U0.7 → U0.8. The migration ran ahead of the
   statistics work so the period queries are written against `spent_at` once

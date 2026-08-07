@@ -169,6 +169,7 @@ System UI stack throughout — whatever Telegram renders in. No webfont.
 |---|---|---|---|---|
 | Donut centre amount | 34px | 700 | −0.035em | 1 |
 | Amount input (screen 02) | 34px | 600 | −0.03em | 1 |
+| Currency code (screen 02) | 20px | 500 | — | 1 |
 | Hero amount | 28px | 700 | −0.035em | 1 |
 | Period tab | 14px | 400 inactive / 600 active | — | 1 |
 | Period label (`Today, August 4`) | 15px | 500 | — | 1 |
