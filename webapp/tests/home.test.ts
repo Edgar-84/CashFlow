@@ -264,7 +264,7 @@ describe("loadHome", () => {
       createMemoryCache(),
       THIS_MONTH,
     );
-    expect(state).toEqual({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH });
+    expect(state).toEqual({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" });
   });
 
   it("maps a 403 to a forbidden state with tiles still reachable", async () => {
@@ -466,7 +466,7 @@ describe("applyHomeChrome", () => {
     installWebApp(webApp);
     const onAddExpense = vi.fn();
 
-    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH }, onAddExpense);
+    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" }, onAddExpense);
 
     expect(webApp.MainButton.onClick).toHaveBeenCalledWith(onAddExpense);
   });
@@ -475,7 +475,7 @@ describe("applyHomeChrome", () => {
     const webApp = fakeWebApp();
     installWebApp(webApp);
 
-    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH });
+    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" });
 
     expect(webApp.MainButton.onClick).not.toHaveBeenCalled();
   });
@@ -505,17 +505,59 @@ describe("renderHome", () => {
     expect(html).not.toContain('data-testid="add-button"');
   });
 
-  it("names the period in force when empty, never a generic 'no data'", () => {
-    const today = renderHome({ status: "empty", tiles: HOME_TILES, period: { unit: "day", offset: 0 } }, NOW);
-    expect(today).toContain("Nothing today");
+  it("names the period's unit deictically when empty, never a generic 'no data' (D405)", () => {
+    const today = renderHome(
+      { status: "empty", tiles: HOME_TILES, period: { unit: "day", offset: 0 }, currency: "EUR" },
+      NOW,
+    );
+    expect(today).toContain("There were no expenses on this day.");
 
-    const thisMonth = renderHome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH }, NOW);
-    expect(thisMonth).toContain("Nothing in August");
+    const thisMonth = renderHome(
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      NOW,
+    );
+    expect(thisMonth).toContain("There were no expenses in this month.");
     expect(thisMonth).toContain('data-tile="expenses"');
   });
 
+  it("draws a complete ring at the donut's own 200px/30px geometry, in --separator, with no segment gaps (D405)", () => {
+    const html = renderHome(
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      NOW,
+    );
+    expect(html).toContain('data-testid="donut"');
+    expect(html).toContain(`viewBox="0 0 200 200"`);
+    expect(html).toContain(`r="${74}"`);
+    expect(html).toContain(`stroke-width="${30}"`);
+    expect(html).toContain('stroke="var(--separator)"');
+    // A populated donut's segments carry stroke-dasharray to cut gaps between
+    // slices; the empty ring is a single unbroken circle, no dasharray at all.
+    expect(html).not.toContain("stroke-dasharray");
+  });
+
+  it("shows the formatted zero total for the account's currency in the ring's hole, --ink-secondary not --ink (D405)", () => {
+    const html = renderHome(
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      NOW,
+    );
+    expect(html).toContain('<div class="amt amt-zero">0.00 EUR</div>');
+  });
+
+  it("occupies the same donut slot as a populated period — switching to empty moves nothing above the ranked rows", () => {
+    const emptyHtml = renderHome(
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      NOW,
+    );
+    const readyHtml = renderHome({ status: "ready", ...readyData }, NOW);
+    expect(emptyHtml).toContain('class="donut-wrap"');
+    expect(readyHtml).toContain('class="donut-wrap"');
+  });
+
   it("keeps the yellow Add button present on an empty period (both Add affordances stay enabled — there is no disabled variant of this button)", () => {
-    const html = renderHome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH }, NOW);
+    const html = renderHome(
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      NOW,
+    );
     expect(html).toContain('data-testid="add-button"');
   });
 
@@ -694,11 +736,16 @@ describe("renderHome", () => {
     expect(html).not.toContain('data-testid="period-arrow-next"');
   });
 
-  it("names the applied custom range in the empty-state copy", () => {
+  it("reads the custom-period empty sentence, not the applied range (D405 — deictic, not period-named)", () => {
     const html = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" } },
+      {
+        status: "empty",
+        tiles: HOME_TILES,
+        period: { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" },
+        currency: "EUR",
+      },
       NOW,
     );
-    expect(html).toContain("Nothing from 9 – 17 Jul");
+    expect(html).toContain('<p class="empty-copy">There were no expenses in this period.</p>');
   });
 });

@@ -128,6 +128,12 @@ body {
   line-height: 1;
 }
 
+/* Empty ring's zero total (D405): --ink-secondary rather than --ink, the one
+   difference from a populated donut's centred amount. */
+.donut-c .amt.amt-zero {
+  color: var(--ink-secondary);
+}
+
 .donut-skeleton {
   width: 196px;
   height: 196px;
@@ -285,12 +291,20 @@ body {
 
 /* -- state copy + retry --------------------------------------------------- */
 
-.home-empty p,
 .home-error p,
 .home-readonly p {
   margin: 4px 4px 0;
   color: var(--ink-secondary);
   font-size: 14px;
+}
+
+/* Empty state's sentence (D405): sits under the ring, 12px below, centred —
+   distinct from the shared error/readonly copy above. */
+.empty-copy {
+  margin: 12px 0 0;
+  color: var(--ink-secondary);
+  font-size: 13.5px;
+  text-align: center;
 }
 
 .home-error button[data-action="retry"] {
