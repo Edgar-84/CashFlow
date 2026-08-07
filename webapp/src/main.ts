@@ -201,8 +201,8 @@ async function showHome(): Promise<void> {
         void showTags();
       }
     },
-    onSegmentTap: (target) => {
-      void showExpenses(target.categoryId ? { categoryId: target.categoryId } : {});
+    onRowTap: (target) => {
+      void showExpenses({ categoryId: target.categoryId, period: homePeriod });
     },
     onUnitChange: (unit) => {
       homePeriod = { unit, offset: 0 };
@@ -384,9 +384,10 @@ export async function showEditExpense(
 }
 
 /** Mounts Expenses (U2.3, screen 03a). BackButton always returns to Home;
- * `filter` (an optional category) comes from Home's "Expenses" tile (none) or
- * a donut-segment tap (that category) — the folded "Other" slot's `null`
- * categoryId falls back to the unfiltered list, same as the tile. */
+ * `filter` comes from Home's "Expenses" tile (none), a ranked-row tap (that
+ * category *and* the period in force — D404, the donut itself is
+ * display-only and never reaches here), or Statistics' bar tap (that
+ * category, no period). */
 async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
   const root = getRoot();
   if (!root) {

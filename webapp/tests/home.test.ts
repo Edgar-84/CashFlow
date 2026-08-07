@@ -16,7 +16,6 @@ import {
   loadHome,
   pickerValueForPeriod,
   renderHome,
-  segmentTapTarget,
   type HomeApi,
   type HomeState,
 } from "../src/screens/home";
@@ -351,22 +350,6 @@ describe("createHomeController", () => {
   });
 });
 
-describe("segmentTapTarget", () => {
-  it("resolves the tapped slot to its category", () => {
-    const data = buildHomeData({
-      categories: CATEGORIES,
-      categoryTotals: CATEGORY_TOTALS,
-      periodTotal: PERIOD_TOTAL,
-      currency: "EUR",
-      budgetProgress: [],
-      period: THIS_MONTH,
-    });
-
-    expect(segmentTapTarget(data, 0)).toEqual({ categoryId: "cat-groceries", label: "Groceries" });
-    expect(segmentTapTarget(data, 99)).toBeNull();
-  });
-});
-
 describe("pickerValueForPeriod", () => {
   it("seeds the picker with the previously applied custom range", () => {
     expect(pickerValueForPeriod({ unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" })).toEqual({
@@ -590,6 +573,17 @@ describe("renderHome", () => {
     // rule: `position: absolute`, 56px, `--accent`) — asserted here only by
     // presence of the class, not by re-deriving app.css's rule in the test.
     expect(html).toContain('class="add-btn"');
+  });
+
+  it("renders the populated donut's segments with no button semantics — no role, no tabindex, no data-action (D404: display-only)", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    const donutIndex = html.indexOf('data-testid="donut"');
+    const donutCloseIndex = html.indexOf("</svg>", donutIndex);
+    const donutMarkup = html.slice(donutIndex, donutCloseIndex);
+    expect(donutMarkup).toContain("data-category-id");
+    expect(donutMarkup).not.toContain("role=");
+    expect(donutMarkup).not.toContain("tabindex");
+    expect(donutMarkup).not.toContain("data-action");
   });
 
   it("places the yellow Add button after the donut and before the ranked rows (Focus order: donut -> Add button -> rows)", () => {

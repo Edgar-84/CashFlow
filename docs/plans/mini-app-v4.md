@@ -383,7 +383,7 @@ navigate into screens that must already accept what they will be handed.
       Files: `webapp/src/components/period-selector.ts`,
       `webapp/tests/period-selector.test.ts`, `webapp/src/styles/app.css`.
       Model: sonnet.
-- [ ] **U2.3 Donut goes display-only; ranked rows carry the period** (D404) —
+- [x] **U2.3 Donut goes display-only; ranked rows carry the period** (D404) —
       depends on U1.1.
       AC: tapping the donut — segment, hole or gap — does nothing: no
       navigation, no haptic, no state change, and the element is not focusable
@@ -1050,8 +1050,18 @@ human with a phone:
   aria-label, DOM order (jump testid right of the next arrow), and the
   offset-0/offset-−1 structural invariant (spacer/jump-cell/arrow counts
   match).
-- **Next:** `U2.3` Donut goes display-only; ranked rows carry the period
-  (D404).
+- **U2.3 done.** `segmentTapTarget` and its donut click-wiring in `mount()`
+  are gone — the donut's `<circle>` elements carry no listener, no `role`,
+  no `tabindex` (already true at the markup level; nothing to change there).
+  `HomeHandlers.onSegmentTap` is renamed `onRowTap` and its `categoryId` is
+  no longer nullable — only the ranked row calls it now, and rows never fold
+  (`buildHomeData`), unlike the donut's dropped "Other" slot concept.
+  `main.ts`'s handler passes `{ categoryId: target.categoryId, period:
+  homePeriod }` into `showExpenses`; no change needed in `screens/expenses.ts`
+  or its tests, since U1.1 already built the category+period filter and its
+  "both halves" banner test. Statistics' `onBarTap` → `showExpenses({
+  categoryId })` is untouched (no period there, out of scope).
+- **Next:** `U2.4` Pill 3 becomes a slot (D406, half one).
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.

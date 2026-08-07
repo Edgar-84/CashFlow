@@ -5,8 +5,8 @@
  *  - data: `loadHome`/`buildHomeData` — orchestrates the ApiClient calls and
  *    turns their responses into a `HomeState`. Pure aside from the awaited
  *    network calls.
- *  - interaction: `segmentTapTarget`, `applyHomeChrome` — pure functions
- *    screens/tests can call directly, no DOM involved.
+ *  - interaction: `applyHomeChrome` — pure functions screens/tests can call
+ *    directly, no DOM involved.
  *  - presentation: `renderHome` (pure, returns an HTML string) and `mount`
  *    (the thin DOM-writing glue, the one part with no meaningful unit test —
  *    same accepted gap as `lib/telegram.ts::applyTheme`, guarded by a
@@ -293,17 +293,6 @@ export function createHomeController(api: HomeApi, cache: HomeCache): HomeContro
 
 // -- interaction -------------------------------------------------------------
 
-/** Pure resolution of "which category did the tap on donut slot `index`
- * mean" — the actual navigation (once a filtered expense list exists, U2.3)
- * is the caller's job. `null` categoryId means the folded "Other" slot. */
-export function segmentTapTarget(
-  data: Pick<HomeData, "segments">,
-  index: number,
-): { categoryId: Uuid | null; label: string } | null {
-  const segment = data.segments[index];
-  return segment ? { categoryId: segment.categoryId, label: segment.label } : null;
-}
-
 /** The date-range picker's initial draft when opened from Home — the
  * previously applied custom range if one is in force ("Reopened" in the
  * component doc's States table), otherwise empty ("Choose a start date").
@@ -558,7 +547,11 @@ export function renderHome(state: HomeState, now: Date): string {
 export interface HomeHandlers {
   onRetry: () => void;
   onTileTap: (tile: HomeTile["id"]) => void;
-  onSegmentTap: (target: { categoryId: Uuid | null; label: string }) => void;
+  // Ranked-row tap only (D404) — the donut itself is display-only and never
+  // calls this. Rows never fold into an "Other" slot (buildHomeData), so
+  // categoryId is always real, unlike the donut segment concept this
+  // replaced.
+  onRowTap: (target: { categoryId: Uuid; label: string }) => void;
   onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
   onOffsetChange: (offset: number) => void; // host clamps at 0
   onApplyCustomRange: (range: { start: string; end: string }) => void; // date-range picker's Apply — host sets the period and refetches; Cancel/BackButton close the picker without calling this
@@ -642,30 +635,22 @@ export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandler
     });
   });
 
+  // The donut itself is display-only (D404) — no click wiring on its
+  // `<circle>` elements: no navigation, no haptic, no state change. They are
+  // bare SVG shapes with no `tabindex`/`role`, so they're already unfocusable
+  // and carry no button semantics at the markup level (renderDonut).
   if (state.status === "ready" || state.status === "offline") {
-    root.querySelectorAll<SVGCircleElement>("circle[data-category-id]").forEach((el, index) => {
-      el.addEventListener("click", () => {
-        const target = segmentTapTarget(state, index);
-        if (target) {
-          haptics.selection();
-          handlers.onSegmentTap(target);
-        }
-      });
-    });
-
-    // Ranked row tap "same target as its donut segment" (docs/ui/screens/01-home.md)
-    // — every row carries a real categoryId (the rows never fold), unlike the
-    // donut's nullable "Other" slot. `role="button"`/`tabindex="0"` (render
-    // side) need a manual Enter/Space handler — unlike a native <button>,
-    // a div doesn't activate on keydown by itself (design-system.md's
-    // Accessibility rule: visible focus + reachability on every interactive
-    // element; the Focus order in docs/ui/screens/01-home.md lists rows).
+    // `role="button"`/`tabindex="0"` (render side) need a manual Enter/Space
+    // handler — unlike a native <button>, a div doesn't activate on keydown
+    // by itself (design-system.md's Accessibility rule: visible focus +
+    // reachability on every interactive element; the Focus order in
+    // docs/ui/screens/01-home.md lists rows).
     root.querySelectorAll<HTMLElement>('[data-testid="ranked-row"]').forEach((el, index) => {
       const activate = () => {
         const row = state.rows[index];
         if (row) {
           haptics.selection();
-          handlers.onSegmentTap({ categoryId: row.categoryId, label: row.label });
+          handlers.onRowTap({ categoryId: row.categoryId, label: row.label });
         }
       };
       el.addEventListener("click", activate);
