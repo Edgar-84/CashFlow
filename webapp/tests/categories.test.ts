@@ -729,28 +729,36 @@ describe("renderCategoryForm", () => {
   const baseState = {
     draft: emptyCategoryFormDraft(),
     activeSiblings: [{ id: "cat-1", name: "Groceries" }],
-    usedSlots: new Set<number>([1]),
     nameInteracted: false,
     submitError: null,
     expenseCount: 0,
   };
 
-  it("renders 12 swatch cells, none checked, on an empty draft", () => {
+  // Region 3 is `components/color-picker.ts`'s quick row (U2.1) — its own
+  // anatomy/ARIA/overflow tests live in `color-picker.test.ts`; these just
+  // confirm the form wires `draft.colorSlot` into it and that the deleted
+  // 12-swatch grid (and its "In use" caption) left no trace.
+  it("renders the colour quick row — seven circles and a '+', none checked, on an empty draft", () => {
     const html = renderCategoryForm(baseState);
-    expect((html.match(/data-testid="cat-swatch"/g) ?? []).length).toBe(12);
-    expect(html).not.toContain("aria-checked=\"true\"");
+    expect((html.match(/data-testid="clp-circle"/g) ?? []).length).toBe(7);
+    expect(html).toContain('data-testid="clp-more"');
+    expect(html).not.toContain('aria-checked="true"');
+    expect(html).not.toContain("cat-swatch");
+    expect(html).not.toContain("In use");
   });
 
-  it("marks the selected slot's swatch aria-checked and gives it the checkmark", () => {
+  it("marks the selected quick-row slot aria-checked and gives it the checkmark badge", () => {
     const html = renderCategoryForm({ ...baseState, draft: { ...baseState.draft, colorSlot: 5 } });
-    expect(html).toContain('data-slot="5" role="radio" aria-checked="true"');
-    expect(html).toContain("cat-swatch-check");
+    expect(html).toContain('data-slot="5" style="background:var(--category-slot-5)"');
+    expect(html).toContain('aria-checked="true"');
+    expect(html).toContain("clp-badge");
   });
 
-  it("marks an already-used slot as 'In use' but still tappable (not disabled)", () => {
-    const html = renderCategoryForm(baseState);
-    expect(html).toContain("Blue, in use");
-    expect(html).not.toContain("disabled");
+  it("shows the overflow circle, selected, when the draft's slot is outside the quick row (8–72)", () => {
+    const html = renderCategoryForm({ ...baseState, draft: { ...baseState.draft, colorSlot: 55 } });
+    expect((html.match(/data-testid="clp-circle"/g) ?? []).length).toBe(8);
+    expect(html).toContain('data-slot="55"');
+    expect(html).toContain('aria-checked="true"');
   });
 
   it("shows no inline message before the name field has been interacted with, even when blank", () => {

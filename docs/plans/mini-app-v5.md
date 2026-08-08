@@ -264,7 +264,7 @@ and has no observable effect on its own.
       (the `columns` param only), `webapp/tests/color-picker.test.ts`(new).
       Model: sonnet.
 
-- [ ] **U2.2 Category form uses it; the 12-swatch grid is deleted** —
+- [x] **U2.2 Category form uses it; the 12-swatch grid is deleted** —
       implements `06b-category-form.md`'s revised region 3 (D502/D503/D505).
       **Deletes code and its tests together** (see Risks).
       AC: the form's Colour region is one row tall in both create and edit
@@ -475,13 +475,33 @@ Telegram client. They are the actual acceptance gate for M2 and M3.
 ## STATE (handoff)
 - **Done:** planning, plus **U0.1** (widen `color_slot` to 1–72), **U0.2**
   (notify-threshold default 80 → 70), **U1.1** (generate the ramp), **U1.2**
-  (`category-colors.ts` knows all 72) and **U2.1** (`components/color-picker.ts`).
-  M0 and M1 are complete. The five spec files in the table at the top are
+  (`category-colors.ts` knows all 72), **U2.1** (`components/color-picker.ts`)
+  and **U2.2** (the category form wires it in, the 12-swatch grid is gone).
+  M0, M1 and M2 are complete. The five spec files in the table at the top are
   written and are the source of truth; the 60 ramp hexes and their contrast
   figures are already in `design-system.md`, so U1.1 reproduces them rather
   than inventing them.
-- **Next:** U2.2 — wire `color-picker.ts` into the category form and delete
-  the 12-swatch grid.
+- **Next:** U3.1 — `screens/budget-form.ts` as a standalone screen (RISKY,
+  reviewer subagent).
+- **U2.2 note:** the sheet is mount-only, never part of `renderCategoryForm`'s
+  pure output — same shape as `screens/home.ts::openPicker`'s date-range-picker
+  sheet: `mountCategoryForm` appends a sibling root for it on `+`/`onMore`,
+  overrides BackButton to close it (component doc: "the sheet is the innermost
+  dismissible thing"), and restores the form's own dirty-check BackButton
+  handler on close — never a saved-and-restored *previous* handler, since the
+  form's handler is a pure function of `controller.getDraft`/`original` and is
+  cheap to just re-apply. `usedSlots` is gone end to end: `mountCategoryForm`
+  dropped the parameter and `main.ts::showCategoryForm` no longer computes it
+  (D502 already permitted sharing a slot; U2.2 just stopped tracking who has
+  which). The quick row itself is mounted via `mountColorPicker` against a
+  `[data-testid="cat-color-picker-slot"]` placeholder the pure render emits
+  with no-op callbacks — the exact `renderCategoryPicker`/`.category-picker-slot`
+  split `add-expense.ts` already uses for `category-picker.ts`. Confirmed the
+  U2.1→U2.2 circular import (`color-picker.ts` imports `nextGridFocusIndex`
+  from `screens/categories`; `categories.ts` now imports render/mount helpers
+  back from `color-picker.ts`) resolves fine under Vite/vitest — both sides
+  only touch the cross-module bindings inside function bodies, never at
+  top-level module-eval time.
 - **U2.1 note:** `renderColorSheet` takes no `onSelect`/`onMore` — it is a
   pure render function only. `mountColorPicker` wires the quick row alone
   ("Not yet wired into any screen" is this unit's own scope); the sheet's

@@ -672,9 +672,6 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
   const activeSiblings = cached.data.active
     .filter((r) => r.id !== categoryId)
     .map((r) => ({ id: r.id, name: r.name }));
-  const usedSlots = new Set(
-    allRows.filter((r) => r.id !== categoryId && r.colorSlot !== null).map((r) => r.colorSlot as number),
-  );
 
   const handlers: CategoryFormHandlers = {
     onClose: () => {
@@ -688,7 +685,7 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
     },
   };
 
-  mountCategoryForm(root, client, draft, activeSiblings, usedSlots, handlers, expenseCount);
+  mountCategoryForm(root, client, draft, activeSiblings, handlers, expenseCount);
 }
 
 /** Mounts Tags (U2.4, screen 07a) — Home by default (the original fix for
