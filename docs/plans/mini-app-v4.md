@@ -403,7 +403,7 @@ navigate into screens that must already accept what they will be handed.
       today, never to the chosen date; no future date is selectable.
       Files: `webapp/src/screens/add-expense.ts`,
       `webapp/tests/add-expense.test.ts`. Model: haiku-friendly.
-- [ ] **U2.5 Home hands the Day tab's date to screen 02** (D406, half two) —
+- [x] **U2.5 Home hands the Day tab's date to screen 02** (D406, half two) —
       depends on U2.4.
       AC: with the Day tab showing 3 August and today 7 August, both the yellow
       button and MainButton open screen 02 with the third pill reading `8/3` and
@@ -1075,8 +1075,32 @@ human with a phone:
   `nextDatePillFocusIndex` is untouched (generic over pill count). The
   "no future date selectable" half of the AC was already satisfied by the
   calendar's existing `maxDate: data.today` — nothing to change there either.
-- **Next:** `U2.5` Home hands the Day tab's date to screen 02 (D406, half
-  two) — depends on U2.4, now done.
+- **U2.5 done.** `HomeApi.getMe()` widened to `{ currency; today }` (`today`
+  is `UserMeResponse.today`, already shipped by D343/U3.3 — `ApiClient`
+  needed no change), threaded through `HomeData`/`buildHomeData` and the
+  `"empty"` `HomeState` variant the same way `currency` already was. New pure
+  `resolveDayDate(today, offset)` in `home.ts` shifts the family_tz `today`
+  string by calendar days (own copy of the `y/m/d` string math
+  `screens/add-expense.ts`'s date helpers already use, not imported — that
+  module's own header comment already establishes the convention). A private
+  `dayDateForHandoff(state)` returns that resolved date only when
+  `state.period.unit === "day"` and `state` actually carries `today`
+  (loading/error/forbidden don't), `undefined` otherwise; both `mount()`'s
+  yellow-button click and `applyHomeChrome`'s `MainButton.onClick` wiring
+  call it and pass the result to `onAddExpense`, so `HomeHandlers.onAddExpense`
+  and `applyHomeChrome`'s second parameter both gained an optional `date?:
+  string`. `main.ts` gained one `addExpenseFromHome(date?)` helper — `{
+  ...emptyDraft(), spentAt: date }` when a date arrives, `undefined`
+  otherwise — reused by the yellow button, MainButton (both `applyHomeChrome`
+  call sites in `refreshHome`), and `showHome`'s own handler, replacing three
+  separate no-arg closures. **No change needed in `add-expense.ts`**, despite
+  being in the unit's file list: U2.4's `datePillOptions` already resolves an
+  arbitrary incoming `spentAt` into the right pill (fixed or slot), and
+  `isDirty` already excludes `spentAt` from the dirty check — both of this
+  unit's remaining AC halves ("selects the right pill", "does not make the
+  draft dirty") fell out of U2.4 for free.
+- **Next:** `U3.1` `components/side-menu.ts` (M3) — unblocked, no dependency
+  on U2.5.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.

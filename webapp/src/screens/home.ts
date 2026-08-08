@@ -101,13 +101,17 @@ export interface HomeData {
   overBudget: HomeOverBudgetRow[];
   tiles: readonly HomeTile[];
   period: PeriodValue;
+  /** `UserMeResponse.today` (U3.3), `YYYY-MM-DD` in `family_tz` — the date
+   * the Day tab hands to screen 02 is resolved from this, never the device
+   * clock (D406 half two, `resolveDayDate` below). */
+  today: string;
 }
 
 export type HomeState =
   | { status: "loading"; period: PeriodValue }
   | { status: "error"; message: string; period: PeriodValue }
   | { status: "forbidden"; tiles: readonly HomeTile[] }
-  | { status: "empty"; tiles: readonly HomeTile[]; period: PeriodValue; currency: Currency }
+  | { status: "empty"; tiles: readonly HomeTile[]; period: PeriodValue; currency: Currency; today: string }
   | ({ status: "ready" } & HomeData)
   | ({ status: "offline"; lastSyncedAt: string } & HomeData);
 
@@ -120,6 +124,7 @@ export function buildHomeData(input: {
   currency: Currency;
   budgetProgress: BudgetProgress[];
   period: PeriodValue;
+  today: string;
 }): HomeData {
   const orderedCategories = [...input.categories].sort((a, b) =>
     a.created_at.localeCompare(b.created_at),
@@ -197,11 +202,12 @@ export function buildHomeData(input: {
     overBudget,
     tiles: HOME_TILES,
     period: input.period,
+    today: input.today,
   };
 }
 
 export interface HomeApi {
-  getMe(): Promise<{ currency: Currency }>;
+  getMe(): Promise<{ currency: Currency; today: string }>;
   listCategories(): Promise<CategoryResponse[]>;
   statisticsByCategory(query: PeriodQuery): Promise<CategoryTotal[]>;
   statisticsByPeriod(query: PeriodQuery): Promise<PeriodTotal>;
@@ -251,10 +257,11 @@ export async function loadHome(api: HomeApi, cache: HomeCache, period: PeriodVal
       currency: me.currency,
       budgetProgress,
       period,
+      today: me.today,
     });
     cache.set({ data, syncedAt: new Date().toISOString() });
     return periodTotal.total === 0
-      ? { status: "empty", tiles: data.tiles, period, currency: data.currency }
+      ? { status: "empty", tiles: data.tiles, period, currency: data.currency, today: data.today }
       : { status: "ready", ...data };
   } catch (err) {
     if (err instanceof ForbiddenError) {
@@ -302,13 +309,40 @@ export function pickerValueForPeriod(period: PeriodValue): DateRangePickerValue 
   return period.unit === "custom" ? { start: period.start, end: period.end } : {};
 }
 
+/** The Day tab's actual calendar date — `today` (`HomeData.today`,
+ * `family_tz`-anchored, never the device clock) shifted by the tab's
+ * `offset`. What screen 02 pre-selects when "add expense" fires from the Day
+ * tab (docs/ui/screens/01-home.md, "The date Home hands to screen 02", D406
+ * half two). Pure calendar-date math on the `today` string, same convention
+ * `screens/add-expense.ts`'s own date helpers already follow — this module
+ * keeps its own copy rather than importing theirs. */
+export function resolveDayDate(today: string, offset: number): string {
+  const [y, m, d] = today.split("-").map(Number);
+  const shifted = new Date(y, m - 1, d + offset);
+  const yyyy = shifted.getFullYear();
+  const mm = String(shifted.getMonth() + 1).padStart(2, "0");
+  const dd = String(shifted.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** Only the Day tab hands a date to screen 02 (D406 half two) — every other
+ * tab, and any state with no resolved `today` yet (loading/error/forbidden),
+ * returns `undefined` so screen 02 defaults to today, unchanged. */
+function dayDateForHandoff(state: HomeState): string | undefined {
+  if (state.status === "loading" || state.status === "forbidden" || state.status === "error") {
+    return undefined;
+  }
+  return state.period.unit === "day" ? resolveDayDate(state.today, state.period.offset) : undefined;
+}
+
 /** Telegram chrome for Home: MainButton = Add expense (hidden while loading
  * or for a read-only/forbidden viewer — root CLAUDE.md's PermissionChecker
  * denies the write, so the button must not promise one); BackButton hidden,
  * this is the root screen. `onAddExpense` wires the MainButton tap to
- * navigation (U2.2) — optional so callers/tests that don't care about
- * navigation can omit it without wiring a handler. */
-export function applyHomeChrome(state: HomeState, onAddExpense?: () => void): void {
+ * navigation (U2.2), carrying the Day tab's resolved date (U2.5, D406 half
+ * two) — optional so callers/tests that don't care about navigation can omit
+ * it without wiring a handler. */
+export function applyHomeChrome(state: HomeState, onAddExpense?: (date?: string) => void): void {
   setBackButtonHandler(null);
   if (state.status === "loading" || state.status === "forbidden") {
     mainButton.hide();
@@ -317,7 +351,7 @@ export function applyHomeChrome(state: HomeState, onAddExpense?: () => void): vo
   mainButton.show(ADD_EXPENSE_LABEL);
   mainButton.setEnabled(true);
   if (onAddExpense) {
-    mainButton.onClick(onAddExpense);
+    mainButton.onClick(() => onAddExpense(dayDateForHandoff(state)));
   }
 }
 
@@ -555,7 +589,7 @@ export interface HomeHandlers {
   onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
   onOffsetChange: (offset: number) => void; // host clamps at 0
   onApplyCustomRange: (range: { start: string; end: string }) => void; // date-range picker's Apply — host sets the period and refetches; Cancel/BackButton close the picker without calling this
-  onAddExpense: () => void; // yellow Add button — same target as MainButton (D318)
+  onAddExpense: (date?: string) => void; // yellow Add button — same target as MainButton (D318); carries the Day tab's resolved date (U2.5, D406 half two)
 }
 
 // Mirrors lib/period.ts's private toDateString — that module's own header
@@ -625,7 +659,7 @@ export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandler
   // every other tap here, which is `selection`.
   root.querySelector('[data-testid="add-button"]')?.addEventListener("click", () => {
     haptics.impact("medium");
-    handlers.onAddExpense();
+    handlers.onAddExpense(dayDateForHandoff(state));
   });
 
   root.querySelectorAll<HTMLElement>("[data-tile]").forEach((el) => {

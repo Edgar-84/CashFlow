@@ -3,6 +3,7 @@ import { applyTheme, getInitData } from "./lib/telegram";
 import {
   createMemoryCache as createAddExpenseCache,
   draftFromExpense,
+  emptyDraft,
   loadAddExpenseData,
   mount as mountAddExpense,
   type AddExpenseHandlers,
@@ -168,6 +169,15 @@ function getRoot(): HTMLElement | null {
   return document.getElementById("app");
 }
 
+/** Wired to both Home's yellow Add button and its MainButton (same target,
+ * D318) — `date` is the Day tab's resolved date (`home.ts::dayDateForHandoff`,
+ * D406 half two) or `undefined` from every other tab, unchanged. A date seeds
+ * `Draft.spentAt` without touching any other field, so it never makes the
+ * draft dirty (`isDirty` excludes `spentAt`). */
+function addExpenseFromHome(date?: string): void {
+  void showAddExpense(date ? { ...emptyDraft(), spentAt: date } : undefined);
+}
+
 /** Mounts Home. Its MainButton and its "Add expense" tile both route to
  * `showAddExpense` (docs/design/mini-app-ux.md §5's `H -->|MainButton| A`
  * flow) — the tile stays the fallback path once the other tiles' screens
@@ -216,9 +226,7 @@ async function showHome(): Promise<void> {
       homePeriod = { unit: "custom", offset: 0, start: range.start, end: range.end };
       void refreshHome(root, handlers);
     },
-    onAddExpense: () => {
-      void showAddExpense();
-    },
+    onAddExpense: addExpenseFromHome,
   };
 
   await refreshHome(root, handlers);
@@ -229,14 +237,14 @@ async function showHome(): Promise<void> {
  * stale-response guard is honoured, so a fast double-tap never lets an
  * earlier period's response overwrite a later one. */
 async function refreshHome(root: HTMLElement, handlers: HomeHandlers): Promise<void> {
-  applyHomeChrome({ status: "loading", period: homePeriod }, () => void showAddExpense());
+  applyHomeChrome({ status: "loading", period: homePeriod }, addExpenseFromHome);
   mountHome(root, { status: "loading", period: homePeriod }, handlers, new Date());
 
   const state = await homeController.load(homePeriod);
   if (!state) {
     return;
   }
-  applyHomeChrome(state, () => void showAddExpense());
+  applyHomeChrome(state, addExpenseFromHome);
   mountHome(root, state, handlers, new Date());
 }
 
