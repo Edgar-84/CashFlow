@@ -12,6 +12,8 @@
 
 import type { PeriodQuery } from "../lib/period";
 import type {
+  AccountResponse,
+  AccountUpdate,
   BudgetPlanCreate,
   BudgetPlanResponse,
   BudgetPlanUpdate,
@@ -186,6 +188,12 @@ export class ApiClient {
 
   getMe(): Promise<UserMeResponse> {
     return this.request<UserMeResponse>("GET", "/users/me");
+  }
+
+  // -- accounts (U3.3, Settings) ------------------------------------------
+
+  updateAccount(data: AccountUpdate): Promise<AccountResponse> {
+    return this.request<AccountResponse>("PATCH", "/accounts/me", { json: data });
   }
 
   // -- expenses ----------------------------------------------------------

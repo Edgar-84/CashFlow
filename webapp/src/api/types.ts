@@ -196,3 +196,20 @@ export interface TagTotal {
   tag_id: Uuid;
   total: number;
 }
+
+/** `models.account.AccountResponse` — `PATCH /accounts/me` only (U3.3). No
+ * `GET /accounts/me`: the account's currency for display is read off
+ * `UserMeResponse.currency` instead, already returned by `GET /users/me`. */
+export interface AccountResponse {
+  id: Uuid;
+  name: string;
+  currency: Currency;
+  owner_id: Uuid | null;
+  created_at: IsoTimestamp;
+}
+
+/** `models.account.AccountUpdate` — relabels the account's currency, never
+ * converts `expenses.amount` (D400/D401). */
+export interface AccountUpdate {
+  currency?: Currency;
+}

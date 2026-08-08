@@ -80,6 +80,12 @@ import {
   type Grouping,
   type StatisticsHandlers,
 } from "./screens/statistics";
+import {
+  createMemoryCache as createSettingsCache,
+  loadSettings,
+  mount as mountSettings,
+  type SettingsHandlers,
+} from "./screens/settings";
 import type { CategoryResponse, ExpenseResponse, Uuid } from "./api/types";
 
 const client = new ApiClient({ getInitData });
@@ -91,6 +97,7 @@ const budgetsCache = createBudgetsCache();
 const categoriesCache = createCategoriesCache();
 const tagsCache = createTagsCache();
 const statisticsCache = createStatisticsCache();
+const settingsCache = createSettingsCache();
 
 // Home's selected period. Module-level so it survives navigating to screen
 // 02 and back, and a retry (both just call `showHome`/`refreshHome` again,
@@ -116,7 +123,8 @@ type ActiveScreen =
   | "category-form"
   | "tags"
   | "tag-form"
-  | "statistics";
+  | "statistics"
+  | "settings";
 let activeScreen: ActiveScreen | null = null;
 
 /** Where Categories' BackButton goes (U3.2). Defaults to Home; Add Expense's
@@ -209,7 +217,7 @@ async function showHome(): Promise<void> {
         lastCreatedTagId = null;
         void showTags();
       } else if (item === "settings") {
-        // TODO(U3.3): screens/settings.ts does not exist yet.
+        void showSettings();
       }
     },
     onRowTap: (target) => {
@@ -850,6 +858,37 @@ async function showStatistics(monthsBack = 0, grouping: Grouping = "category"): 
   const state = await loadStatistics(client, statisticsCache, monthsBack, grouping);
   applyStatisticsChrome(handlers.onBack);
   mountStatistics(root, state, handlers);
+}
+
+/** Mounts Settings (U3.3, screen 08), reached from the side menu's seventh
+ * row. No `*ReturnTo` closure like Categories'/Tags' (D409's own additions) —
+ * every entry and exit goes through Home, per the screen doc's BackButton
+ * row and Saved state, so `onSaved` and `onBack` both just call `showHome()`;
+ * `showHome`'s own `refreshHome` always re-fetches (never cache-first), which
+ * is what relabels every amount with the new currency without reopening the
+ * app. */
+async function showSettings(): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  activeScreen = "settings";
+
+  const handlers: SettingsHandlers = {
+    onRetry: () => {
+      void showSettings();
+    },
+    onBack: () => {
+      void showHome();
+    },
+    onSaved: () => {
+      void showHome();
+    },
+  };
+
+  mountSettings(root, { status: "loading" }, client, handlers);
+  const state = await loadSettings(client, settingsCache);
+  mountSettings(root, state, client, handlers);
 }
 
 /** Boots the app onto `#app`. Guarded the same way every DOM-touching export
