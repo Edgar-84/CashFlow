@@ -493,7 +493,7 @@ screen three other units already touch, and nothing else depends on it. If it
 proves unpleasant in a real Telegram client, it can be dropped without
 unpicking anything.
 
-- [ ] **U5.1 Stacked-bar geometry + the collapsed header's markup** — pure
+- [x] **U5.1 Stacked-bar geometry + the collapsed header's markup** — pure
       render and CSS; **no scroll behaviour yet**, the header is rendered from
       an explicit `collapsed: boolean` a test can set.
       AC: given the same input `buildHomeData` gives the donut, the bar renders
@@ -1200,8 +1200,70 @@ human with a phone:
   excluded from `verify.sh`'s default run like every other test in this
   module. `tests/README.md`'s e2e-smoke table gained the matching row. No
   contract change, no new decision.
-- **Next:** M5 (U5.1/U5.2), depending on U3.2 only — the whole rest of the
-  plan is now done.
+- **U5.1 done.** `lib/donut.ts` gained `barSegments` (+ a `foldIntoOther`
+  helper extracted from `segments()` so the donut and the bar can never fold
+  past six categories differently) — linear counterpart to `segments()`:
+  widths as percentages summing to at most `available` (100 minus the
+  inter-segment gap budget), proportional to amount, a non-zero segment below
+  `minPct` clamped up with the surplus taken off the largest segment only
+  (never redistributed across all of them), a zero-amount category left at
+  exactly 0 (never clamped up, so a category with nothing this period stays
+  invisible on the bar the same way it stays a zero-length arc on the
+  donut). `screens/home.ts`'s `buildHomeData` computes `HomeData.bars` from
+  the same `donutInput`/fold as `segments`, so the two can never list
+  different categories, order or colours. `renderHome`/`mount` gain a third
+  `collapsed` param (default `false`, so every prior caller/test is
+  unaffected); when `true`, the chart card's own ☰ and yellow Add button are
+  suppressed and a new fixed `.collapsed-header` (68px: ☰ · label · total
+  over the 10px bar) renders instead — reusing `renderMenuButton()` verbatim,
+  so `mount`'s existing generic `[data-testid="menu-button"]` wiring finds
+  and wires whichever one is present with no new code, keeping "exactly one
+  ☰ in the DOM" true by construction rather than by convention. The
+  collapsed bar is `role="img"`, not focusable, no click wiring, sharing one
+  label-building helper (`describeChartLabel`, top three categories + real
+  `Math.round`ed percentages) with the donut — which did **not** carry this
+  label before this unit despite `docs/ui/screens/01-home.md`'s Accessibility
+  section requiring it; retrofitted onto `renderDonut` here since U5.1's own
+  AC ("the bar is role='img' with **the donut's label**") needs the donut to
+  actually have one to share.
+  - **Decision (not logged as a numbered D-id — an implementation detail of
+    an already-`[inferred]` mechanic, not a new design decision):** the bar's
+    width is responsive (`design-system.md`: "10px tall... 3px minimum
+    segment"), unlike the donut's fixed 200-unit viewBox, so there is no real
+    pixel width to clamp "3px" against in a pure render with no DOM
+    measurement. `home.ts` assumes a `BAR_REFERENCE_WIDTH = 351` (a plausible
+    ~375px-viewport phone content width) purely to convert the design's
+    literal "2px"/"3px" into the percentages `barSegments` works in. This is
+    inherently approximate on other viewport widths — the design doc already
+    marks the whole mechanic `[inferred]` and flags the 3px minimum itself as
+    "judgeable on a real account with a long tail" (Open questions), which is
+    exactly what CP5 (after U5.2) is for.
+  - **Spec correction, same change:** `docs/ui/screens/01-home.md` region 6's
+    padding was `8px 12px`, which doesn't reconcile with its own "68px header
+    / 44px row / 10px bar" numbers under `border-box` (8+8+44+10 = 70, not
+    68) — a real CSS bug caught by review, not just a documentation nit,
+    since the header would have silently overflowed its own stated height on
+    a real device. Corrected to `7px 12px` in the spec and `app.css` in the
+    same commit (7+7+44+10 = 68), per CLAUDE.md's "any change to visual
+    behaviour updates its spec in the same change."
+  - `lib/donut.ts::barSegments`'s clamp-overage fix originally took the
+    entire surplus from the single largest segment. Review found this isn't
+    airtight when the largest segment's own room (`raw - minPct`) is smaller
+    than the total overage (reachable with several simultaneously-clamped
+    small segments) — hardened to cascade largest-first, moving to the next
+    segment only if the current one floors out before the overage is
+    absorbed, still never spreading it evenly across every segment. Covered
+    by a new multi-segment cascade test in `donut.test.ts`.
+  - **Scoped out, deliberately:** no click wiring for the collapsed header's
+    period label (would open the date-range picker) — this unit's own AC is
+    "pure render and CSS... no scroll behaviour yet," and the label isn't
+    reachable in a real session until U5.2 makes the header actually appear.
+    No `position: fixed` appear/disappear transition, no
+    `IntersectionObserver` — both explicitly U5.2.
+- **Next:** U5.2 (Scroll-driven collapse), the last unit in this plan,
+  depending on U5.1 (just landed) and U3.2 (☰ must exist before it can move,
+  already done). CP5 is the real acceptance gate for M5 as a whole, on a real
+  device after U5.2 lands.
 - **Gotchas for the next session:**
   - `GET /expenses`'s period offset is `period_offset`, **not** `offset` — the
     latter paginates and the bot depends on it (D402).
@@ -1210,10 +1272,14 @@ human with a phone:
     applies: `spent_at` is a bare date, so it must **never** be run through a
     `timeZone`-aware `Intl`/`Date` conversion (D416) — parse it with
     `parseCalendarDate`-style local y/m/d construction only.
-  - Five units touch `screens/home.ts` (U2.1, U2.3, U3.2, U5.1, U5.2) and two
-    touch `screens/add-expense.ts` (U1.3/U1.4, U2.4). `/clear` between them.
-  - M5 is last and depends on nothing. If it goes badly on a real device
-    (CP5), drop it — the rest of V4 does not lean on it.
+  - Five units touch `screens/home.ts` (U2.1, U2.3, U3.2, U5.1, U5.2) — U5.1
+    just landed, so U5.2 is the last of the five. `/clear` before starting it.
+  - U5.2 wires the actual scroll trigger onto U5.1's markup: an
+    `IntersectionObserver` sentinel at the donut's bottom edge flips the
+    `collapsed` flag `renderHome`/`mount` already accept, `position: fixed`
+    (already on `.collapsed-header` in `app.css`) handles the rest. If it
+    goes badly on a real device (CP5), the whole of M5 (both units) is
+    revertible — the rest of V4 does not lean on it.
   - Several units **delete** code and must delete its tests with it — see
     Risks.
   - There is no migration in this plan and no stop-and-ask gate.

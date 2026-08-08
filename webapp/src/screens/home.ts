@@ -15,9 +15,10 @@
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
-import { segments as donutSegments } from "../lib/donut";
+import { barSegments as donutBarSegments, segments as donutSegments } from "../lib/donut";
 import { formatAmount } from "../lib/money";
 import {
+  describe as describePeriod,
   MAX_RANGE_DAYS,
   toQuery,
   type PeriodQuery,
@@ -62,6 +63,19 @@ const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 // silently drift from the geometry module's.
 const MAX_DONUT_SLOTS = 6;
 
+// design-system.md: "Collapsed stacked bar (01) | 10px tall, 999px radius,
+// 2px segment gaps, 3px minimum segment". Unlike the donut's fixed 200-unit
+// viewBox, the bar's width is responsive (`width: 100%` of the collapsed
+// header), so there is no real pixel width to clamp against until the DOM
+// actually lays it out — out of reach for this unit's pure render/geometry
+// (no scroll wiring, no measurement). BAR_REFERENCE_WIDTH stands in for that:
+// a plausible phone content width (~375px viewport, 12px padding each side
+// inside `.collapsed-header`) used only to turn the design's literal "2px"/
+// "3px" into the percentages `lib/donut.ts::barSegments` works in.
+const BAR_REFERENCE_WIDTH = 351;
+const BAR_GAP_PCT = (2 / BAR_REFERENCE_WIDTH) * 100;
+const BAR_MIN_SEGMENT_PCT = (3 / BAR_REFERENCE_WIDTH) * 100;
+
 export interface HomeSegment {
   categoryId: Uuid | null;
   label: string;
@@ -69,6 +83,13 @@ export interface HomeSegment {
   dash: number;
   gap: number;
   offset: number;
+}
+
+export interface HomeBarSegment {
+  categoryId: Uuid | null;
+  label: string;
+  colorVar: string;
+  widthPct: number;
 }
 
 export interface HomeRankedRow {
@@ -89,6 +110,11 @@ export interface HomeData {
   totalMinor: number;
   currency: Currency;
   segments: HomeSegment[];
+  /** Collapsed-header stacked bar (D414/U5.1) — same segments, order and
+   * colours as `segments`, only the geometry differs (`barSegments` widths
+   * vs `segments` dash/gap/offset). Computed alongside `segments` from the
+   * same `donutInput`/fold so the two can never disagree. */
+  bars: HomeBarSegment[];
   rows: HomeRankedRow[];
   overBudget: HomeOverBudgetRow[];
   period: PeriodValue;
@@ -155,6 +181,25 @@ export function buildHomeData(input: {
     };
   });
 
+  // Collapsed stacked bar (D414/U5.1): same `donutInput`/`realCount` fold as
+  // the donut above, so the two geometries can never list different
+  // categories in a different order or colour.
+  const rawBars = donutBarSegments(donutInput, {
+    gapPct: BAR_GAP_PCT,
+    minPct: BAR_MIN_SEGMENT_PCT,
+    maxSlots: MAX_DONUT_SLOTS,
+  });
+  const bars: HomeBarSegment[] = rawBars.map((seg, index) => {
+    const category = index < realCount ? orderedCategories[index] : undefined;
+    const slot = category ? (colorBySlot.get(category.id) ?? null) : null;
+    return {
+      categoryId: category ? category.id : null,
+      label: category ? category.name : "Other",
+      colorVar: category ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
+      widthPct: seg.widthPct,
+    };
+  });
+
   // docs/ui/screens/01-home.md: "all categories with a non-zero total,
   // ranked descending" — every one of them, not a top-N legend (the old
   // <=1-row suppression is gone too; a single category still renders its
@@ -193,6 +238,7 @@ export function buildHomeData(input: {
     totalMinor: input.periodTotal.total,
     currency: input.currency,
     segments,
+    bars,
     rows,
     overBudget,
     period: input.period,
@@ -463,14 +509,25 @@ function renderEmptyDonut(currency: Currency): string {
   </div>`;
 }
 
-function renderEmpty(period: PeriodValue, currency: Currency, now: Date): string {
+function renderEmpty(period: PeriodValue, currency: Currency, now: Date, collapsed: boolean): string {
   return `<div class="home-empty" data-testid="empty">
+    ${
+      collapsed
+        ? renderCollapsedHeader(
+            period,
+            now,
+            0,
+            currency,
+            renderCollapsedBar([], describeEmptyPeriod(period)),
+          )
+        : ""
+    }
     <div class="card chart-card">
       ${renderPeriodControl(period, now, false)}
       ${renderEmptyDonut(currency)}
       <p class="empty-copy">${escapeHtml(describeEmptyPeriod(period))}</p>
-      ${renderMenuButton()}
-      ${renderAddButton()}
+      ${collapsed ? "" : renderMenuButton()}
+      ${collapsed ? "" : renderAddButton()}
     </div>
   </div>`;
 }
@@ -486,6 +543,20 @@ function renderReadOnly(): string {
   </div>`;
 }
 
+// Accessibility section: "The donut is role="img" with a label listing the
+// top three categories and their shares." Shared with the collapsed bar
+// below (D414/U5.1's own AC: the bar carries "the donut's label — real
+// percentages, not clamped widths") so the two can only ever say the same
+// thing. Only called where `rows` is non-empty (the "ready"/"offline"
+// states) — an empty period's own label is `describeEmptyPeriod`'s sentence
+// instead (renderEmpty below), matching the empty ring's rule.
+function describeChartLabel(rows: HomeRankedRow[]): string {
+  return rows
+    .slice(0, 3)
+    .map((row) => `${row.label} ${Math.round(row.sharePct)}%`)
+    .join(", ");
+}
+
 function renderDonut(data: HomeData): string {
   const arcs = data.segments
     .map(
@@ -496,12 +567,60 @@ function renderDonut(data: HomeData): string {
     )
     .join("");
   return `<div class="donut-wrap">
-    <svg class="donut" viewBox="0 0 200 200" role="img" data-testid="donut">
+    <svg class="donut" viewBox="0 0 200 200" role="img" aria-label="${escapeHtml(describeChartLabel(data.rows))}" data-testid="donut">
       <g transform="rotate(-90 100 100)">${arcs}</g>
     </svg>
     <div class="donut-c">
       <div class="amt">${escapeHtml(formatAmount(data.totalMinor))} ${escapeHtml(data.currency)}</div>
     </div>
+  </div>`;
+}
+
+// docs/ui/design-system.md: "Collapsed stacked bar (01) | 10px tall, 999px
+// radius, 2px segment gaps, 3px minimum segment." Display-only like the
+// donut it stands in for (D404) — role="img", not focusable, no click
+// wiring (`mount` below never queries `.collapsed-bar-seg`).
+function renderCollapsedBar(bars: HomeBarSegment[], label: string): string {
+  if (bars.length === 0) {
+    // Mirrors renderEmptyDonut's unbroken ring (D405): one whole
+    // `--separator` segment, no gaps, for an empty period.
+    return `<div class="collapsed-bar" role="img" aria-label="${escapeHtml(label)}" data-testid="collapsed-bar">
+      <span class="collapsed-bar-seg" style="flex:1 1 auto;background:var(--separator)"></span>
+    </div>`;
+  }
+  const segs = bars
+    .map(
+      (seg) =>
+        `<span class="collapsed-bar-seg" data-category-id="${seg.categoryId ?? "other"}" ` +
+        `style="flex:0 0 ${seg.widthPct}%;background:${seg.colorVar}"></span>`,
+    )
+    .join("");
+  return `<div class="collapsed-bar" role="img" aria-label="${escapeHtml(label)}" data-testid="collapsed-bar">${segs}</div>`;
+}
+
+// Region 6 (D414/U5.1): the fixed 68px summary the donut collapses into once
+// scrolled past — a 44px row (☰ · label · total) over the 10px bar. Rendered
+// purely from the explicit `collapsed` flag this unit's own AC calls for;
+// the real scroll trigger (`IntersectionObserver`, the `position: fixed`
+// appear/disappear transition) is U5.2. Reuses `renderMenuButton()`
+// verbatim, so this is the only ☰ markup whenever `collapsed` is true — the
+// chart card's own is suppressed in that case (renderReady/renderEmpty
+// below) — and `mount`'s existing generic `[data-testid="menu-button"]`
+// wiring finds and wires whichever one is present with no new code.
+function renderCollapsedHeader(
+  period: PeriodValue,
+  now: Date,
+  totalMinor: number,
+  currency: Currency,
+  bar: string,
+): string {
+  return `<div class="collapsed-header" data-testid="collapsed-header">
+    <div class="collapsed-row">
+      ${renderMenuButton()}
+      <span class="collapsed-label" data-testid="collapsed-label">${escapeHtml(describePeriod(period, now))}</span>
+      <span class="collapsed-total">${escapeHtml(formatAmount(totalMinor))} ${escapeHtml(currency)}</span>
+    </div>
+    ${bar}
   </div>`;
 }
 
@@ -546,21 +665,42 @@ function renderOfflineBanner(lastSyncedAt: string | undefined): string {
   return `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(lastSyncedAt)}</div>`;
 }
 
-function renderReady(data: HomeData, lastSyncedAt: string | undefined, now: Date, disabled: boolean): string {
+function renderReady(
+  data: HomeData,
+  lastSyncedAt: string | undefined,
+  now: Date,
+  disabled: boolean,
+  collapsed: boolean,
+): string {
   return `<div class="home-ready" data-testid="ready">
+    ${
+      collapsed
+        ? renderCollapsedHeader(
+            data.period,
+            now,
+            data.totalMinor,
+            data.currency,
+            renderCollapsedBar(data.bars, describeChartLabel(data.rows)),
+          )
+        : ""
+    }
     ${renderOfflineBanner(lastSyncedAt)}
     <div class="card chart-card">
       ${renderPeriodControl(data.period, now, disabled)}
       ${renderDonut(data)}
-      ${renderMenuButton()}
-      ${renderAddButton()}
+      ${collapsed ? "" : renderMenuButton()}
+      ${collapsed ? "" : renderAddButton()}
     </div>
     ${renderOverBudgetStrip(data.overBudget, data.currency)}
     ${renderRankedRows(data.rows)}
   </div>`;
 }
 
-export function renderHome(state: HomeState, now: Date): string {
+// `collapsed` (D414/U5.1): whether the donut has scrolled above the
+// viewport — a test can set it directly, since there is no scroll wiring
+// yet (U5.2). Defaults to `false` so every existing caller/test renders
+// exactly as before.
+export function renderHome(state: HomeState, now: Date, collapsed = false): string {
   switch (state.status) {
     case "loading":
       return renderSkeleton(state.period, now);
@@ -569,14 +709,14 @@ export function renderHome(state: HomeState, now: Date): string {
     case "forbidden":
       return renderReadOnly();
     case "empty":
-      return renderEmpty(state.period, state.currency, now);
+      return renderEmpty(state.period, state.currency, now, collapsed);
     case "ready":
-      return renderReady(state, undefined, now, false);
+      return renderReady(state, undefined, now, false, collapsed);
     case "offline":
       // Offline freezes the control at the cached period (webapp/CLAUDE.md's
       // offline state + the component doc's Disabled variant) — `disabled`
       // here both dims the control and short-circuits its taps.
-      return renderReady(state, state.lastSyncedAt, now, true);
+      return renderReady(state, state.lastSyncedAt, now, true, collapsed);
   }
 }
 
@@ -735,11 +875,17 @@ function openSideMenu(root: HTMLElement, trigger: HTMLElement, state: HomeState,
   });
 }
 
-export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandlers, now: Date): void {
+export function mount(
+  root: HTMLElement,
+  state: HomeState,
+  handlers: HomeHandlers,
+  now: Date,
+  collapsed = false,
+): void {
   if (typeof document === "undefined") {
     return;
   }
-  root.innerHTML = renderHome(state, now);
+  root.innerHTML = renderHome(state, now, collapsed);
 
   root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
 

@@ -446,6 +446,7 @@ describe("applyHomeChrome", () => {
       totalMinor: 0,
       currency: "EUR",
       segments: [],
+      bars: [],
       rows: [],
       overBudget: [],
       period: THIS_MONTH,
@@ -680,13 +681,27 @@ describe("renderHome", () => {
 
   it("renders the populated donut's segments with no button semantics — no role, no tabindex, no data-action (D404: display-only)", () => {
     const html = renderHome({ status: "ready", ...readyData }, NOW);
-    const donutIndex = html.indexOf('data-testid="donut"');
-    const donutCloseIndex = html.indexOf("</svg>", donutIndex);
-    const donutMarkup = html.slice(donutIndex, donutCloseIndex);
+    const svgOpenEnd = html.indexOf(">", html.indexOf('<svg class="donut"')) + 1;
+    const donutCloseIndex = html.indexOf("</svg>", svgOpenEnd);
+    // Sliced from *after* the opening `<svg ...>` tag, not from
+    // `data-testid="donut"` — the tag itself legitimately carries
+    // `role="img"` (Accessibility section), so this only asserts the inner
+    // `<circle>` elements (D404: display-only, no button semantics), and
+    // stays correct regardless of the tag's own attribute order.
+    const donutMarkup = html.slice(svgOpenEnd, donutCloseIndex);
     expect(donutMarkup).toContain("data-category-id");
     expect(donutMarkup).not.toContain("role=");
     expect(donutMarkup).not.toContain("tabindex");
     expect(donutMarkup).not.toContain("data-action");
+  });
+
+  it("gives the donut role=img with a label naming the top three categories and their real shares (Accessibility section)", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    const svgStart = html.indexOf('<svg class="donut"');
+    const svgOpenEnd = html.indexOf(">", svgStart) + 1;
+    const svgOpenTag = html.slice(svgStart, svgOpenEnd);
+    expect(svgOpenTag).toContain('role="img"');
+    expect(svgOpenTag).toContain('aria-label="Groceries 57%, Transport 23%, Café 20%"');
   });
 
   it("places the yellow Add button after the donut and before the ranked rows (Focus order: donut -> Add button -> rows)", () => {
@@ -855,5 +870,152 @@ describe("renderHome", () => {
       NOW,
     );
     expect(html).toContain('<p class="empty-copy">There were no expenses in this period.</p>');
+  });
+
+  describe("collapsed header (D414/U5.1)", () => {
+    it("does not render the collapsed header when collapsed is omitted or false, unchanged from before this unit", () => {
+      const omitted = renderHome({ status: "ready", ...readyData }, NOW);
+      const explicitFalse = renderHome({ status: "ready", ...readyData }, NOW, false);
+      for (const html of [omitted, explicitFalse]) {
+        expect(html).not.toContain('data-testid="collapsed-header"');
+        expect(html.match(/data-testid="menu-button"/g)).toHaveLength(1);
+        expect(html).toContain('data-testid="add-button"');
+      }
+    });
+
+    it("renders the fixed 68px header instead of the chart card's own ☰ and Add button when collapsed", () => {
+      const html = renderHome({ status: "ready", ...readyData }, NOW, true);
+      expect(html).toContain('data-testid="collapsed-header"');
+      // Exactly one ☰ in the DOM at a time (screen doc's Accessibility
+      // section) — the chart card's own is suppressed, only the header's
+      // remains.
+      expect(html.match(/data-testid="menu-button"/g)).toHaveLength(1);
+      expect(html).not.toContain('data-testid="add-button"');
+    });
+
+    it("carries the period label and the period's total in the collapsed row", () => {
+      const html = renderHome({ status: "ready", ...readyData }, NOW, true);
+      expect(html).toContain('data-testid="collapsed-label"');
+      expect(html).toContain("August");
+      expect(html).toContain(`${formatAmount(readyData.totalMinor)} EUR`);
+    });
+
+    it("renders the bar's segments in the same order, count and colours as the donut's", () => {
+      const html = renderHome({ status: "ready", ...readyData }, NOW, true);
+      const donutIds = [...html.matchAll(/<circle data-category-id="([^"]+)"/g)].map((m) => m[1]);
+      const barIds = [...html.matchAll(/class="collapsed-bar-seg" data-category-id="([^"]+)"/g)].map(
+        (m) => m[1],
+      );
+      expect(barIds).toEqual(donutIds);
+      expect(barIds).toEqual(["cat-groceries", "cat-transport", "cat-cafe"]);
+    });
+
+    it("gives the largest category the widest segment, proportional to its amount", () => {
+      const html = renderHome({ status: "ready", ...readyData }, NOW, true);
+      const widths = new Map(
+        [...html.matchAll(/data-category-id="([^"]+)" style="flex:0 0 ([\d.]+)%/g)].map((m) => [
+          m[1],
+          Number(m[2]),
+        ]),
+      );
+      // Groceries (41260) is the biggest of the three (16820, 14390) in readyData.
+      expect(widths.get("cat-groceries")!).toBeGreaterThan(widths.get("cat-transport")!);
+      expect(widths.get("cat-groceries")!).toBeGreaterThan(widths.get("cat-cafe")!);
+    });
+
+    it("folds more than six categories into a trailing Other segment, matching the donut's own fold", () => {
+      const categories = Array.from({ length: 8 }, (_, i) =>
+        category(`cat-${i}`, `Cat ${i}`, `2026-01-0${i + 1}T00:00:00Z`),
+      );
+      const totals: CategoryTotal[] = categories.map((c) => ({ category_id: c.id, total: 100 }));
+      const data = buildHomeData({
+        categories,
+        categoryTotals: totals,
+        periodTotal: { ...PERIOD_TOTAL, total: 800 },
+        currency: "EUR",
+        budgetProgress: [],
+        period: THIS_MONTH,
+        today: TODAY,
+        accountName: ACCOUNT_NAME,
+      });
+      const html = renderHome({ status: "ready", ...data }, NOW, true);
+      expect(html.match(/class="collapsed-bar-seg"/g)).toHaveLength(7);
+      expect(html).toContain('data-category-id="other"');
+    });
+
+    it("clamps a tiny category's segment up rather than letting it vanish, and never overflows the bar", () => {
+      const categories = [category("cat-big", "Big", "2026-01-01T00:00:00Z"), category("cat-tiny", "Tiny", "2026-01-02T00:00:00Z")];
+      const totals: CategoryTotal[] = [
+        { category_id: "cat-big", total: 99000 },
+        { category_id: "cat-tiny", total: 100 },
+      ];
+      const data = buildHomeData({
+        categories,
+        categoryTotals: totals,
+        periodTotal: { ...PERIOD_TOTAL, total: 99100 },
+        currency: "EUR",
+        budgetProgress: [],
+        period: THIS_MONTH,
+        today: TODAY,
+        accountName: ACCOUNT_NAME,
+      });
+      const html = renderHome({ status: "ready", ...data }, NOW, true);
+      const widths = new Map(
+        [...html.matchAll(/data-category-id="([^"]+)" style="flex:0 0 ([\d.]+)%/g)].map((m) => [
+          m[1],
+          Number(m[2]),
+        ]),
+      );
+      // Tiny's real share (100/99100 ≈ 0.1%) is clamped well above it.
+      const tinyRealShare = (100 / 99100) * 100;
+      expect(widths.get("cat-tiny")!).toBeGreaterThan(tinyRealShare * 2);
+      // The clamp never pushes the bar past 100%.
+      expect(widths.get("cat-big")! + widths.get("cat-tiny")!).toBeLessThanOrEqual(100);
+    });
+
+    it("renders one unbroken --separator segment for an empty, collapsed period, mirroring the empty ring", () => {
+      const html = renderHome(
+        { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
+        NOW,
+        true,
+      );
+      expect(html).toContain('data-testid="collapsed-header"');
+      const barIndex = html.indexOf('data-testid="collapsed-bar"');
+      const barCloseIndex = html.indexOf("</div>", barIndex);
+      const barMarkup = html.slice(barIndex, barCloseIndex);
+      expect(barMarkup).toContain("var(--separator)");
+      expect(barMarkup.match(/collapsed-bar-seg/g)).toHaveLength(1);
+    });
+
+    it("gives the bar role=img with the donut's own label (top three categories, real percentages) and no button semantics", () => {
+      const html = renderHome({ status: "ready", ...readyData }, NOW, true);
+      const barStart = html.indexOf('<div class="collapsed-bar"');
+      const barEnd = html.indexOf("</div>", barStart) + "</div>".length;
+      const barMarkup = html.slice(barStart, barEnd);
+      expect(barMarkup).toContain('role="img"');
+      // Real shares, e.g. Groceries at 57% (41260/72470), not any clamped width.
+      expect(barMarkup).toContain("Groceries 57%");
+      expect(barMarkup).not.toContain("tabindex");
+      expect(barMarkup).not.toContain('role="button"');
+    });
+
+    it("suppresses the collapsed header for the loading, error and forbidden states even if collapsed is set", () => {
+      expect(renderHome({ status: "loading", period: THIS_MONTH }, NOW, true)).not.toContain(
+        'data-testid="collapsed-header"',
+      );
+      expect(
+        renderHome({ status: "error", message: "oops", period: THIS_MONTH }, NOW, true),
+      ).not.toContain('data-testid="collapsed-header"');
+      expect(renderHome({ status: "forbidden" }, NOW, true)).not.toContain('data-testid="collapsed-header"');
+    });
+
+    it("renders every colour through a CSS custom property, never a literal hex, so light/dark both resolve from tokens.css", () => {
+      const html = renderHome({ status: "ready", ...readyData }, NOW, true);
+      const barStart = html.indexOf('<div class="collapsed-bar"');
+      const barEnd = html.indexOf("</div>", barStart) + "</div>".length;
+      const barMarkup = html.slice(barStart, barEnd);
+      expect(barMarkup).not.toMatch(/#[0-9a-fA-F]{3,6}/);
+      expect(barMarkup).toMatch(/var\(--category-slot-\d\)/);
+    });
   });
 });
