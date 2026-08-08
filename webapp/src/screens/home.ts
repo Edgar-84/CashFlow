@@ -1,5 +1,6 @@
 /** Screen 01 — Home (docs/design/mini-app-ux.md §4). The donut answers
- * "where did it go?" before a number is read; six tiles are the whole app.
+ * "where did it go?" before a number is read; navigation lives behind the ☰
+ * button (D409, `../components/side-menu.ts`) rather than a tile row (V4).
  *
  * Split in three layers, each independently testable:
  *  - data: `loadHome`/`buildHomeData` — orchestrates the ApiClient calls and
@@ -29,6 +30,7 @@ import {
   type DateRangePickerValue,
 } from "../components/date-range-picker";
 import { mount as mountPeriodSelector, renderPeriodSelector } from "../components/period-selector";
+import { mount as mountSideMenu, type MenuItem, type SideMenuProps } from "../components/side-menu";
 import { ForbiddenError } from "../api/client";
 import type {
   BudgetPlanResponse,
@@ -45,6 +47,10 @@ import type {
 // name must never drift apart, since both fire the same handler (D318).
 const ADD_EXPENSE_LABEL = "Add expense";
 
+// Copy table's `menu.aria` — the ☰ button's accessible name (D409). The
+// glyph itself is `aria-hidden`, so this is the button's only name.
+const MENU_LABEL = "Menu";
+
 // U1.6/design-system.md: stroke thickened 26 -> 30px, radius trimmed to keep
 // the outer edge (radius + strokeWidth/2) unchanged at 89 of the 200-unit
 // viewBox — the ring gets thicker inward, the donut's outer diameter doesn't.
@@ -55,20 +61,6 @@ const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 // explicitly to segments() below so this module's fold-boundary math can't
 // silently drift from the geometry module's.
 const MAX_DONUT_SLOTS = 6;
-
-export interface HomeTile {
-  id: "add-expense" | "expenses" | "budgets" | "statistics" | "categories" | "tags";
-  label: string;
-}
-
-export const HOME_TILES: readonly HomeTile[] = [
-  { id: "add-expense", label: "Add expense" },
-  { id: "expenses", label: "Expenses" },
-  { id: "budgets", label: "Budgets" },
-  { id: "statistics", label: "Statistics" },
-  { id: "categories", label: "Categories" },
-  { id: "tags", label: "Tags" },
-];
 
 export interface HomeSegment {
   categoryId: Uuid | null;
@@ -99,19 +91,21 @@ export interface HomeData {
   segments: HomeSegment[];
   rows: HomeRankedRow[];
   overBudget: HomeOverBudgetRow[];
-  tiles: readonly HomeTile[];
   period: PeriodValue;
   /** `UserMeResponse.today` (U3.3), `YYYY-MM-DD` in `family_tz` — the date
    * the Day tab hands to screen 02 is resolved from this, never the device
    * clock (D406 half two, `resolveDayDate` below). */
   today: string;
+  /** `UserMeResponse.account_name` — the side menu's header (D409); the menu
+   * never fetches its own copy of it (`../components/side-menu.md`). */
+  accountName: string;
 }
 
 export type HomeState =
   | { status: "loading"; period: PeriodValue }
   | { status: "error"; message: string; period: PeriodValue }
-  | { status: "forbidden"; tiles: readonly HomeTile[] }
-  | { status: "empty"; tiles: readonly HomeTile[]; period: PeriodValue; currency: Currency; today: string }
+  | { status: "forbidden" }
+  | { status: "empty"; period: PeriodValue; currency: Currency; today: string; accountName: string }
   | ({ status: "ready" } & HomeData)
   | ({ status: "offline"; lastSyncedAt: string } & HomeData);
 
@@ -125,6 +119,7 @@ export function buildHomeData(input: {
   budgetProgress: BudgetProgress[];
   period: PeriodValue;
   today: string;
+  accountName: string;
 }): HomeData {
   const orderedCategories = [...input.categories].sort((a, b) =>
     a.created_at.localeCompare(b.created_at),
@@ -200,14 +195,14 @@ export function buildHomeData(input: {
     segments,
     rows,
     overBudget,
-    tiles: HOME_TILES,
     period: input.period,
     today: input.today,
+    accountName: input.accountName,
   };
 }
 
 export interface HomeApi {
-  getMe(): Promise<{ currency: Currency; today: string }>;
+  getMe(): Promise<{ currency: Currency; today: string; account_name: string }>;
   listCategories(): Promise<CategoryResponse[]>;
   statisticsByCategory(query: PeriodQuery): Promise<CategoryTotal[]>;
   statisticsByPeriod(query: PeriodQuery): Promise<PeriodTotal>;
@@ -258,14 +253,15 @@ export async function loadHome(api: HomeApi, cache: HomeCache, period: PeriodVal
       budgetProgress,
       period,
       today: me.today,
+      accountName: me.account_name,
     });
     cache.set({ data, syncedAt: new Date().toISOString() });
     return periodTotal.total === 0
-      ? { status: "empty", tiles: data.tiles, period, currency: data.currency, today: data.today }
+      ? { status: "empty", period, currency: data.currency, today: data.today, accountName: data.accountName }
       : { status: "ready", ...data };
   } catch (err) {
     if (err instanceof ForbiddenError) {
-      return { status: "forbidden", tiles: HOME_TILES };
+      return { status: "forbidden" };
     }
     const cached = cache.get();
     if (cached) {
@@ -379,14 +375,15 @@ function renderAddButton(): string {
   return `<button type="button" class="add-btn" data-testid="add-button" aria-label="${escapeHtml(ADD_EXPENSE_LABEL)}"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg></button>`;
 }
 
-function renderTiles(tiles: readonly HomeTile[], opts: { readOnly: boolean } = { readOnly: false }): string {
-  const items = tiles
-    .map((tile) => {
-      const disabled = opts.readOnly && tile.id === "add-expense";
-      return `<button type="button" class="tile" data-tile="${tile.id}"${disabled ? " disabled" : ""}>${escapeHtml(tile.label)}</button>`;
-    })
-    .join("");
-  return `<div class="tiles" data-testid="tiles">${items}</div>`;
+// docs/ui/components/side-menu.md's Sizing: 44×44, a 20px glyph, `--ink` with
+// no fill — chrome, not a primary action, so `--accent` stays the yellow Add
+// button's one use (D318). The glyph is off `menu-button.jpg`: three bars of
+// equal length and square ends at ~2.5px stroke in the 20px box, drawn inline
+// here — the module that renders the *button* (home.ts), not
+// `components/side-menu.ts` itself, per that doc's Sizing section. `mount`
+// wires its click to `openSideMenu` below.
+function renderMenuButton(): string {
+  return `<button type="button" class="menu-btn" data-testid="menu-button" aria-label="${escapeHtml(MENU_LABEL)}"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><line x1="2" y1="5" x2="18" y2="5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="2" y1="10" x2="18" y2="10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="2" y1="15" x2="18" y2="15" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg></button>`;
 }
 
 // No-op stand-ins for the callbacks `PeriodSelectorProps` requires — the pure
@@ -407,6 +404,11 @@ function renderPeriodControl(period: PeriodValue, now: Date, disabled: boolean):
   })}</div>`;
 }
 
+// Neither the screen doc's States table nor this unit's AC puts a ☰ on
+// `loading`/`error` (only empty/403/offline/ready name it) — `error`'s retry
+// button is flush left in normal flow, exactly where an absolutely
+// positioned ☰ would also sit, and unlike the yellow Add button (bottom-
+// right, clear of it) an in-card ☰ there would overlap the button text.
 function renderSkeleton(period: PeriodValue, now: Date): string {
   return `<div class="home-skeleton" data-testid="loading">
     <div class="card chart-card">
@@ -414,7 +416,6 @@ function renderSkeleton(period: PeriodValue, now: Date): string {
       <div class="donut-skeleton"></div>
     </div>
     <div class="ranked-rows-skeleton"><div class="card"></div><div class="card"></div><div class="card"></div></div>
-    ${renderTiles(HOME_TILES)}
   </div>`;
 }
 
@@ -462,22 +463,26 @@ function renderEmptyDonut(currency: Currency): string {
   </div>`;
 }
 
-function renderEmpty(tiles: readonly HomeTile[], period: PeriodValue, currency: Currency, now: Date): string {
+function renderEmpty(period: PeriodValue, currency: Currency, now: Date): string {
   return `<div class="home-empty" data-testid="empty">
     <div class="card chart-card">
       ${renderPeriodControl(period, now, false)}
       ${renderEmptyDonut(currency)}
       <p class="empty-copy">${escapeHtml(describeEmptyPeriod(period))}</p>
+      ${renderMenuButton()}
       ${renderAddButton()}
     </div>
-    ${renderTiles(tiles)}
   </div>`;
 }
 
-function renderReadOnly(tiles: readonly HomeTile[]): string {
+// No chart card here (D404/screen doc's 403 state pre-dates this unit and is
+// unchanged by it) — the ☰ still has to be reachable, so it renders as a
+// plain flex item rather than the card-anchored, absolutely positioned
+// button the other states use (`.chart-card .menu-btn` in app.css).
+function renderReadOnly(): string {
   return `<div class="home-readonly" data-testid="forbidden">
+    ${renderMenuButton()}
     <p>You have read-only access to this account.</p>
-    ${renderTiles(tiles, { readOnly: true })}
   </div>`;
 }
 
@@ -547,11 +552,11 @@ function renderReady(data: HomeData, lastSyncedAt: string | undefined, now: Date
     <div class="card chart-card">
       ${renderPeriodControl(data.period, now, disabled)}
       ${renderDonut(data)}
+      ${renderMenuButton()}
       ${renderAddButton()}
     </div>
     ${renderOverBudgetStrip(data.overBudget, data.currency)}
     ${renderRankedRows(data.rows)}
-    ${renderTiles(data.tiles)}
   </div>`;
 }
 
@@ -562,9 +567,9 @@ export function renderHome(state: HomeState, now: Date): string {
     case "error":
       return renderError(state.message, state.period, now);
     case "forbidden":
-      return renderReadOnly(state.tiles);
+      return renderReadOnly();
     case "empty":
-      return renderEmpty(state.tiles, state.period, state.currency, now);
+      return renderEmpty(state.period, state.currency, now);
     case "ready":
       return renderReady(state, undefined, now, false);
     case "offline":
@@ -580,7 +585,6 @@ export function renderHome(state: HomeState, now: Date): string {
 
 export interface HomeHandlers {
   onRetry: () => void;
-  onTileTap: (tile: HomeTile["id"]) => void;
   // Ranked-row tap only (D404) — the donut itself is display-only and never
   // calls this. Rows never fold into an "Other" slot (buildHomeData), so
   // categoryId is always real, unlike the donut segment concept this
@@ -590,6 +594,7 @@ export interface HomeHandlers {
   onOffsetChange: (offset: number) => void; // host clamps at 0
   onApplyCustomRange: (range: { start: string; end: string }) => void; // date-range picker's Apply — host sets the period and refetches; Cancel/BackButton close the picker without calling this
   onAddExpense: (date?: string) => void; // yellow Add button — same target as MainButton (D318); carries the Day tab's resolved date (U2.5, D406 half two)
+  onMenuSelect: (item: MenuItem) => void; // side menu row tap (D409) — host navigates; the menu is already closing by the time this fires
 }
 
 // Mirrors lib/period.ts's private toDateString — that module's own header
@@ -646,6 +651,90 @@ function openPicker(
   renderPicker(pickerValueForPeriod(period));
 }
 
+// `SideMenuProps.accountName`/`.currency` come from `HomeData` on the states
+// that have loaded it; `loading`/`error`/`forbidden` have none yet, so the
+// header renders without them (component doc: "the band renders without
+// it") rather than this screen inventing placeholder copy. `readOnly` mirrors
+// the forbidden state only — every other state's viewer can write.
+function menuPropsFor(
+  state: HomeState,
+): Pick<SideMenuProps, "accountName" | "currency" | "lastSyncedAt" | "readOnly"> {
+  switch (state.status) {
+    case "empty":
+    case "ready":
+      return { accountName: state.accountName, currency: state.currency, readOnly: false };
+    case "offline":
+      return {
+        accountName: state.accountName,
+        currency: state.currency,
+        lastSyncedAt: state.lastSyncedAt,
+        readOnly: false,
+      };
+    case "forbidden":
+      return { accountName: null, currency: null, readOnly: true };
+    case "loading":
+    case "error":
+      return { accountName: null, currency: null, readOnly: false };
+  }
+}
+
+// D419: `components/side-menu.ts`'s `renderSideMenu` implements only the
+// entrance animation — this codebase re-renders by replacing `innerHTML`
+// wholesale on every state change, so a closing transition needs the panel
+// to outlive that replace. Same shape as `openPicker` above (a sibling child
+// of `root`, torn down for free by the next full re-render), plus a
+// hand-driven 160ms reverse transition (app.css's `side-menu-closing`
+// classes) before the node is actually removed — skipped entirely under
+// `prefers-reduced-motion` (screen doc's Accessibility section: "disables...
+// the menu's slide").
+function openSideMenu(root: HTMLElement, trigger: HTMLElement, state: HomeState, handlers: HomeHandlers): void {
+  const menuRoot = document.createElement("div");
+  root.appendChild(menuRoot);
+
+  let closed = false;
+  const close = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    setBackButtonHandler(null);
+    // Closing returns focus to the ☰ button (component doc's Accessibility
+    // section) — harmless when a row tap is about to replace `root` wholesale
+    // anyway, since that teardown makes this a no-op.
+    trigger.focus();
+
+    const reduceMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const panel = menuRoot.querySelector<HTMLElement>(".side-menu-panel");
+    const scrim = menuRoot.querySelector<HTMLElement>(".side-menu-scrim");
+    if (reduceMotion || !panel || !scrim) {
+      menuRoot.remove();
+      return;
+    }
+    panel.classList.add("side-menu-closing");
+    scrim.classList.add("side-menu-closing");
+    setTimeout(() => menuRoot.remove(), 160);
+  };
+  // BackButton closes the menu, never navigates away from Home (screen doc's
+  // Telegram section: "the only BackButton behaviour on screen 01").
+  setBackButtonHandler(close);
+
+  mountSideMenu(menuRoot, {
+    ...menuPropsFor(state),
+    open: true,
+    onClose: close,
+    // `onSelect` never closes the menu itself (component doc's Inputs) — the
+    // host closes it as part of navigating. `close()` runs first so a row tap
+    // starts navigation immediately (component doc's Closing state), not
+    // after any animation.
+    onSelect: (item) => {
+      close();
+      handlers.onMenuSelect(item);
+    },
+  });
+}
+
 export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandlers, now: Date): void {
   if (typeof document === "undefined") {
     return;
@@ -662,12 +751,16 @@ export function mount(root: HTMLElement, state: HomeState, handlers: HomeHandler
     handlers.onAddExpense(dayDateForHandoff(state));
   });
 
-  root.querySelectorAll<HTMLElement>("[data-tile]").forEach((el) => {
-    el.addEventListener("click", () => {
-      haptics.selection();
-      handlers.onTileTap(el.dataset.tile as HomeTile["id"]);
+  // docs/ui/screens/01-home.md's Telegram section: "impact('light') on the
+  // menu button (V4)" — its own haptic weight, distinct from both the yellow
+  // Add button's `medium` and every `selection` tap elsewhere on the screen.
+  const menuBtn = root.querySelector<HTMLElement>('[data-testid="menu-button"]');
+  if (menuBtn) {
+    menuBtn.addEventListener("click", () => {
+      haptics.impact("light");
+      openSideMenu(root, menuBtn, state, handlers);
     });
-  });
+  }
 
   // The donut itself is display-only (D404) — no click wiring on its
   // `<circle>` elements: no navigation, no haptic, no state change. They are

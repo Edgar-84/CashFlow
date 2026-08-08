@@ -124,14 +124,14 @@ let activeScreen: ActiveScreen | null = null;
  * itself instead, with the draft it was carrying, so a category created
  * mid-composer returns the user to their in-progress expense rather than
  * bouncing them to Home. Reset to Home at every *other* entry into
- * Categories (Home's tile tap) so a stale "return to Add Expense" target
+ * Categories (the side menu's row tap) so a stale "return to Add Expense" target
  * never leaks into an unrelated visit. */
 let categoriesReturnTo: () => void = () => void showHome();
 
 /** Where Tags' BackButton goes (U3.4) — same shape as `categoriesReturnTo`.
  * Add Expense's "+ Add tag" chip (`showAddExpense`'s `onAddTag` handler,
  * below) points it back to itself with the draft it was carrying; every
- * other entry into Tags (Home's tile tap) resets it to Home so a stale
+ * other entry into Tags (the side menu's row tap) resets it to Home so a stale
  * "return to Add Expense" target never leaks into an unrelated visit. */
 let tagsReturnTo: () => void = () => void showHome();
 
@@ -139,9 +139,9 @@ let tagsReturnTo: () => void = () => void showHome();
  * `tagsReturnTo`'s Add-Expense closure to pre-select it on return (screen
  * doc: "a tag created there returns pre-selected"). Set in `showTagForm`'s
  * `onSaved` only when that form was opened in create mode. Reset at *every*
- * entry into Tags — Home's tile tap, and `onAddTag` itself — not just the
+ * entry into Tags — the side menu's row tap, and `onAddTag` itself — not just the
  * non-Add-Expense one: without also resetting on the Add-Expense leg, a tag
- * created on some earlier, unrelated Tags visit (reached via the Home tile,
+ * created on some earlier, unrelated Tags visit (reached via the side menu,
  * whose own BackButton runs the default `tagsReturnTo` and so never
  * consumes this var) would still be sitting here and would wrongly attach
  * itself to a *later*, unconnected draft. Only one id is ever held — if a
@@ -178,10 +178,9 @@ function addExpenseFromHome(date?: string): void {
   void showAddExpense(date ? { ...emptyDraft(), spentAt: date } : undefined);
 }
 
-/** Mounts Home. Its MainButton and its "Add expense" tile both route to
- * `showAddExpense` (docs/design/mini-app-ux.md §5's `H -->|MainButton| A`
- * flow) — the tile stays the fallback path once the other tiles' screens
- * exist and use the same dispatch pattern. */
+/** Mounts Home. Its MainButton and the side menu's "Add expense" row both
+ * route to `showAddExpense` (docs/design/mini-app-ux.md §5's
+ * `H -->|MainButton| A` flow, D409's drawer replacing the old tile row). */
 async function showHome(): Promise<void> {
   const root = getRoot();
   if (!root) {
@@ -193,22 +192,24 @@ async function showHome(): Promise<void> {
     onRetry: () => {
       void refreshHome(root, handlers);
     },
-    onTileTap: (tile) => {
-      if (tile === "add-expense") {
+    onMenuSelect: (item) => {
+      if (item === "add-expense") {
         void showAddExpense();
-      } else if (tile === "expenses") {
+      } else if (item === "expenses") {
         void showExpenses();
-      } else if (tile === "budgets") {
+      } else if (item === "budgets") {
         void showBudgets();
-      } else if (tile === "statistics") {
+      } else if (item === "statistics") {
         void showStatistics();
-      } else if (tile === "categories") {
+      } else if (item === "categories") {
         categoriesReturnTo = () => void showHome();
         void showCategories();
-      } else if (tile === "tags") {
+      } else if (item === "tags") {
         tagsReturnTo = () => void showHome();
         lastCreatedTagId = null;
         void showTags();
+      } else if (item === "settings") {
+        // TODO(U3.3): screens/settings.ts does not exist yet.
       }
     },
     onRowTap: (target) => {
@@ -281,9 +282,9 @@ async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
     onAddTag: (draft) => {
       // Unlike `onMore` above, `tagIds` is *not* dropped — the AC is that a
       // tag created on screen 07 comes back pre-selected, appended to
-      // whatever was already picked. Reset here, not just at Home's tile
+      // whatever was already picked. Reset here, not just at the side menu's
       // entry: without this, a tag created on some earlier, unrelated Tags
-      // visit (reached via the Home tile, then never consumed because that
+      // visit (reached via the side menu, then never consumed because that
       // visit's own BackButton ran the default `tagsReturnTo` rather than
       // this closure) would still be sitting in `lastCreatedTagId` and would
       // wrongly attach itself to *this* draft even though nothing was
@@ -392,7 +393,7 @@ export async function showEditExpense(
 }
 
 /** Mounts Expenses (U2.3, screen 03a). BackButton always returns to Home;
- * `filter` comes from Home's "Expenses" tile (none), a ranked-row tap (that
+ * `filter` comes from the side menu's "Expenses" row (none), a ranked-row tap (that
  * category *and* the period in force — D404, the donut itself is
  * display-only and never reaches here), or Statistics' bar tap (that
  * category, no period). */
@@ -459,7 +460,7 @@ async function showExpenseDetail(id: Uuid, onBack: () => void): Promise<void> {
   mountExpenseDetail(root, state, client, handlers);
 }
 
-/** Mounts Budgets (U2.4, screen 04), reached from Home's "Budgets" tile.
+/** Mounts Budgets (U2.4, screen 04), reached from the side menu's "Budgets" row.
  * BackButton always returns to Home, same shape as Expenses/Detail. */
 async function showBudgets(): Promise<void> {
   const root = getRoot();
@@ -486,7 +487,7 @@ async function showBudgets(): Promise<void> {
 
 /** Mounts Categories (U2.1, screen 06). BackButton returns to `categoriesReturnTo`
  * — Home by default (same shape as Budgets/Expenses, the original fix for the
- * previously dead "Categories" tile), or back to Add Expense with its draft
+ * previously dead "Categories" row), or back to Add Expense with its draft
  * when reached via that screen's "More" cell (U3.2). */
 function buildCategoriesHandlers(): CategoriesHandlers {
   return {
@@ -653,7 +654,7 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
 }
 
 /** Mounts Tags (U2.4, screen 07a) — Home by default (the original fix for
- * the previously dead "Tags" tile), or back to Add Expense with its draft
+ * the previously dead "Tags" row), or back to Add Expense with its draft
  * when reached via that screen's "+ Add tag" chip (U3.4), same
  * `tagsReturnTo` shape as Categories' `categoriesReturnTo`. Row and "Add
  * tag" taps navigate to 07b (U2.5). */
@@ -814,8 +815,8 @@ async function showTagForm(tagId: Uuid | null): Promise<void> {
   mountTagForm(root, client, draft, handlers, expenseCount);
 }
 
-/** Mounts Statistics (U2.5, screen 05), reached from Home's "Statistics"
- * tile. `monthsBack`/`grouping` are carried in the closure across preset
+/** Mounts Statistics (U2.5, screen 05), reached from the side menu's
+ * "Statistics" row. `monthsBack`/`grouping` are carried in the closure across preset
  * taps and retries, same shape as `showExpenses`'s `filter` closure — a
  * preset tap re-fetches (`loadStatistics`), a grouping toggle does not (that
  * re-render happens entirely inside `screens/statistics.ts::mount`). A

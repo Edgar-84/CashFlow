@@ -12,7 +12,6 @@ import {
   buildHomeData,
   createHomeController,
   createMemoryCache,
-  HOME_TILES,
   loadHome,
   pickerValueForPeriod,
   renderHome,
@@ -27,6 +26,7 @@ import type { TelegramWebApp } from "../src/lib/telegram";
 const THIS_MONTH: PeriodValue = { unit: "month", offset: 0 };
 const NOW = new Date(2026, 7, 4); // August 4, 2026 (local) — matches PERIOD_TOTAL/describe's own fixtures
 const TODAY = "2026-08-04"; // family_tz `today` matching NOW, U2.5's HomeData.today
+const ACCOUNT_NAME = "The Smiths"; // UserMeResponse.account_name (U3.2's HomeData.accountName)
 
 function category(id: string, name: string, created_at: string): CategoryResponse {
   return { id, name, account_id: "acc-1", created_at };
@@ -88,6 +88,7 @@ describe("buildHomeData", () => {
       budgetProgress: [progress()],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
 
     expect(data.totalMinor).toBe(72470);
@@ -105,7 +106,6 @@ describe("buildHomeData", () => {
     expect(data.overBudget).toEqual([
       { categoryId: "cat-cafe", label: "Café", overMinor: 2390 },
     ]);
-    expect(data.tiles).toBe(HOME_TILES);
     expect(data.period).toBe(THIS_MONTH);
   });
 
@@ -127,6 +127,7 @@ describe("buildHomeData", () => {
       budgetProgress: [],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
 
     expect(data.rows.map((r) => r.categoryId)).toEqual([
@@ -155,6 +156,7 @@ describe("buildHomeData", () => {
       budgetProgress: [],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
 
     expect(data.rows.map((r) => r.categoryId)).not.toContain("cat-unused");
@@ -174,6 +176,7 @@ describe("buildHomeData", () => {
       budgetProgress: [],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
 
     expect(data.segments).toHaveLength(7);
@@ -190,6 +193,7 @@ describe("buildHomeData", () => {
       budgetProgress: [],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
 
     const appended = category("cat-health", "Health", "2026-01-05T00:00:00Z");
@@ -201,6 +205,7 @@ describe("buildHomeData", () => {
       budgetProgress: [],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
 
     for (const id of ["cat-groceries", "cat-transport", "cat-cafe"]) {
@@ -227,6 +232,7 @@ describe("buildHomeData", () => {
         budgetProgress: [progress()],
         period,
         today: TODAY,
+        accountName: ACCOUNT_NAME,
       });
       expect(data.overBudget).toEqual([]);
     }
@@ -235,7 +241,7 @@ describe("buildHomeData", () => {
 
 function fakeApi(overrides: Partial<HomeApi> = {}): HomeApi {
   return {
-    getMe: vi.fn().mockResolvedValue({ currency: "EUR", today: TODAY }),
+    getMe: vi.fn().mockResolvedValue({ currency: "EUR", today: TODAY, account_name: ACCOUNT_NAME }),
     listCategories: vi.fn().mockResolvedValue(CATEGORIES),
     statisticsByCategory: vi.fn().mockResolvedValue(CATEGORY_TOTALS),
     statisticsByPeriod: vi.fn().mockResolvedValue(PERIOD_TOTAL),
@@ -262,7 +268,7 @@ describe("loadHome", () => {
     expect(api.statisticsByPeriod).toHaveBeenCalledWith({ period: "week", offset: -2 });
   });
 
-  it("returns empty when the period total is zero, tiles still included", async () => {
+  it("returns empty when the period total is zero, carrying the account name for the side menu", async () => {
     const state = await loadHome(
       fakeApi({
         statisticsByCategory: vi.fn().mockResolvedValue([]),
@@ -272,16 +278,16 @@ describe("loadHome", () => {
       createMemoryCache(),
       THIS_MONTH,
     );
-    expect(state).toEqual({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY });
+    expect(state).toEqual({ status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME });
   });
 
-  it("maps a 403 to a forbidden state with tiles still reachable", async () => {
+  it("maps a 403 to a forbidden state", async () => {
     const state = await loadHome(
       fakeApi({ statisticsByCategory: vi.fn().mockRejectedValue(new ForbiddenError()) }),
       createMemoryCache(),
       THIS_MONTH,
     );
-    expect(state).toEqual({ status: "forbidden", tiles: HOME_TILES });
+    expect(state).toEqual({ status: "forbidden" });
   });
 
   it("returns an error with no cached data to fall back on, carrying the attempted period", async () => {
@@ -442,9 +448,9 @@ describe("applyHomeChrome", () => {
       segments: [],
       rows: [],
       overBudget: [],
-      tiles: HOME_TILES,
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     };
     applyHomeChrome(ready);
 
@@ -458,7 +464,7 @@ describe("applyHomeChrome", () => {
     const webApp = fakeWebApp();
     installWebApp(webApp);
 
-    applyHomeChrome({ status: "forbidden", tiles: HOME_TILES });
+    applyHomeChrome({ status: "forbidden" });
 
     expect(webApp.MainButton.hide).toHaveBeenCalledOnce();
     expect(webApp.MainButton.show).not.toHaveBeenCalled();
@@ -478,7 +484,7 @@ describe("applyHomeChrome", () => {
     installWebApp(webApp);
     const onAddExpense = vi.fn();
 
-    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY }, onAddExpense);
+    applyHomeChrome({ status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME }, onAddExpense);
     (webApp.MainButton.onClick as Mock).mock.calls[0][0]();
 
     expect(onAddExpense).toHaveBeenCalledOnce();
@@ -490,7 +496,7 @@ describe("applyHomeChrome", () => {
     const onAddExpense = vi.fn();
 
     applyHomeChrome(
-      { status: "empty", tiles: HOME_TILES, period: { unit: "day", offset: -1 }, currency: "EUR", today: TODAY },
+      { status: "empty", period: { unit: "day", offset: -1 }, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
       onAddExpense,
     );
     (webApp.MainButton.onClick as Mock).mock.calls[0][0]();
@@ -504,7 +510,7 @@ describe("applyHomeChrome", () => {
     const onAddExpense = vi.fn();
 
     applyHomeChrome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
+      { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
       onAddExpense,
     );
     (webApp.MainButton.onClick as Mock).mock.calls[0][0]();
@@ -516,7 +522,7 @@ describe("applyHomeChrome", () => {
     const webApp = fakeWebApp();
     installWebApp(webApp);
 
-    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY });
+    applyHomeChrome({ status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME });
 
     expect(webApp.MainButton.onClick).not.toHaveBeenCalled();
   });
@@ -531,15 +537,55 @@ describe("renderHome", () => {
     budgetProgress: [progress()],
     period: THIS_MONTH,
     today: TODAY,
+    accountName: ACCOUNT_NAME,
   });
 
-  it("renders a loading skeleton with the period control live and tiles already in the final layout", () => {
+  it("renders a loading skeleton with the period control live and in the final layout", () => {
     const html = renderHome({ status: "loading", period: THIS_MONTH }, NOW);
     expect(html).toContain('data-testid="loading"');
-    expect(html).toContain('data-testid="tiles"');
     expect(html).toContain('data-testid="period-selector"');
     expect(html).toContain('data-testid="period-tab-month"');
     expect(html).not.toContain("period-selector disabled");
+  });
+
+  it("(U3.2/D409) renders no ☰ while loading or on error — neither state's chart card has one, and error's retry button sits exactly where an absolutely positioned ☰ would overlap it", () => {
+    expect(renderHome({ status: "loading", period: THIS_MONTH }, NOW)).not.toContain('data-testid="menu-button"');
+    expect(
+      renderHome({ status: "error", message: "The server is unreachable right now.", period: THIS_MONTH }, NOW),
+    ).not.toContain('data-testid="menu-button"');
+  });
+
+  it("(U3.2/D409) renders no navigation tiles anywhere on the page, in any state", () => {
+    const states: HomeState[] = [
+      { status: "loading", period: THIS_MONTH },
+      { status: "error", message: "oops", period: THIS_MONTH },
+      { status: "forbidden" },
+      { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
+      { status: "ready", ...readyData },
+      { status: "offline", lastSyncedAt: "2026-08-02T09:00:00.000Z", ...readyData },
+    ];
+    for (const state of states) {
+      const html = renderHome(state, NOW);
+      expect(html).not.toContain('data-testid="tiles"');
+      expect(html).not.toContain("data-tile=");
+      expect(html).not.toContain('class="tile"');
+    }
+  });
+
+  it("(U3.2/D409) sits a 44px ☰ at the bottom-left of the chart card, before the yellow Add button in DOM order", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    expect(html).toContain('data-testid="menu-button"');
+    expect(html).toContain('aria-label="Menu"');
+    const cardOpenIndex = html.indexOf('class="card chart-card"');
+    const menuButtonIndex = html.indexOf('data-testid="menu-button"');
+    const addButtonIndex = html.indexOf('data-testid="add-button"');
+    expect(menuButtonIndex).toBeGreaterThan(cardOpenIndex);
+    expect(menuButtonIndex).toBeLessThan(addButtonIndex);
+  });
+
+  it("(U3.2/D409) keeps the ☰ visible for a read-only (403) viewer, alongside the disabled/hidden Add affordances", () => {
+    const html = renderHome({ status: "forbidden" }, NOW);
+    expect(html).toContain('data-testid="menu-button"');
   });
 
   it("hides the yellow Add button while loading, matching MainButton (applyHomeChrome hides it too)", () => {
@@ -549,22 +595,21 @@ describe("renderHome", () => {
 
   it("names the period's unit deictically when empty, never a generic 'no data' (D405)", () => {
     const today = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: { unit: "day", offset: 0 }, currency: "EUR", today: TODAY },
+      { status: "empty", period: { unit: "day", offset: 0 }, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
       NOW,
     );
     expect(today).toContain("There were no expenses on this day.");
 
     const thisMonth = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
+      { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
       NOW,
     );
     expect(thisMonth).toContain("There were no expenses in this month.");
-    expect(thisMonth).toContain('data-tile="expenses"');
   });
 
   it("draws a complete ring at the donut's own 200px/30px geometry, in --separator, with no segment gaps (D405)", () => {
     const html = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
+      { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
       NOW,
     );
     expect(html).toContain('data-testid="donut"');
@@ -579,7 +624,7 @@ describe("renderHome", () => {
 
   it("shows the formatted zero total for the account's currency in the ring's hole, --ink-secondary not --ink (D405)", () => {
     const html = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
+      { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
       NOW,
     );
     expect(html).toContain('<div class="amt amt-zero">0.00 EUR</div>');
@@ -587,7 +632,7 @@ describe("renderHome", () => {
 
   it("occupies the same donut slot as a populated period — switching to empty moves nothing above the ranked rows", () => {
     const emptyHtml = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
+      { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
       NOW,
     );
     const readyHtml = renderHome({ status: "ready", ...readyData }, NOW);
@@ -597,7 +642,7 @@ describe("renderHome", () => {
 
   it("keeps the yellow Add button present on an empty period (both Add affordances stay enabled — there is no disabled variant of this button)", () => {
     const html = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
+      { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
       NOW,
     );
     expect(html).toContain('data-testid="add-button"');
@@ -614,8 +659,7 @@ describe("renderHome", () => {
   });
 
   it("renders read-only with no broken Add-expense button on 403, and hides both the yellow Add button and MainButton's markup", () => {
-    const html = renderHome({ status: "forbidden", tiles: HOME_TILES }, NOW);
-    expect(html).toContain('data-tile="add-expense" disabled');
+    const html = renderHome({ status: "forbidden" }, NOW);
     expect(html).not.toContain('data-action="retry"');
     expect(html).not.toContain('data-testid="add-button"');
   });
@@ -679,6 +723,7 @@ describe("renderHome", () => {
       budgetProgress: [],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
     const html = renderHome({ status: "ready", ...single }, NOW);
     expect(html.match(/data-testid="ranked-row"/g)).toHaveLength(1);
@@ -718,6 +763,7 @@ describe("renderHome", () => {
       budgetProgress: [],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
     const html = renderHome({ status: "ready", ...data }, NOW);
     expect(html).toContain(longName);
@@ -737,6 +783,7 @@ describe("renderHome", () => {
       budgetProgress: [],
       period: THIS_MONTH,
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
     const html = renderHome({ status: "ready", ...data }, NOW);
     expect(html.match(/data-testid="ranked-row"/g)).toHaveLength(8);
@@ -766,6 +813,7 @@ describe("renderHome", () => {
       budgetProgress: [progress()],
       period: { unit: "day", offset: 0 },
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
     const html = renderHome({ status: "ready", ...dayData }, NOW);
     expect(html).not.toContain('data-testid="over-budget"');
@@ -786,6 +834,7 @@ describe("renderHome", () => {
       budgetProgress: [progress()],
       period: { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" },
       today: TODAY,
+      accountName: ACCOUNT_NAME,
     });
     const html = renderHome({ status: "ready", ...customData }, NOW);
     expect(html).toContain("9 – 17 Jul");
@@ -798,10 +847,10 @@ describe("renderHome", () => {
     const html = renderHome(
       {
         status: "empty",
-        tiles: HOME_TILES,
         period: { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" },
         currency: "EUR",
         today: TODAY,
+        accountName: ACCOUNT_NAME,
       },
       NOW,
     );

@@ -439,7 +439,7 @@ navigate into screens that must already accept what they will be handed.
       (account name + currency) and the last-synced footer taken from that
       reference, and **no row icons** — the reference has one per row and this
       app has no icon set (D413).
-- [ ] **U3.2 Home adopts the ☰ button and drops the tile row** (D409) —
+- [x] **U3.2 Home adopts the ☰ button and drops the tile row** (D409) —
       depends on U3.1.
       AC: no navigation tiles render anywhere on the page and `HOME_TILES` /
       `renderTiles` are deleted; a 44px ☰ sits at the bottom-left **inside the
@@ -809,6 +809,16 @@ human with a phone:
   entrance animation only (mirrors `date-range-picker.ts`, which has no exit
   animation either); the closing transition is U3.2's job when it wires the
   drawer's open/close state machine into Home.
+- 2026-08-08: **D420 — the ☰ is not rendered on Home's `loading`/`error`
+  states.** Neither is named in `01-home.md`'s States table (only
+  empty/403/offline/ready say the menu button stays visible), and a real
+  browser check during U3.2 found a concrete reason not to: `error`'s retry
+  button is flush left in normal flow at almost the same vertical band as the
+  card's bottom-anchored buttons, so an absolutely positioned ☰ there paints
+  on top of and visually overlaps "Try again"'s text (a positioned element
+  always paints above a static one regardless of DOM order). Scoping the ☰ to
+  the states that actually ask for it sidesteps the collision instead of
+  reserving space for it.
 
 ## STATE (handoff)
 - **Plan written 2026-08-07.** No unit implemented yet. The nine spec files
@@ -1122,8 +1132,30 @@ human with a phone:
   block to `app.css`. See D419 for the panel-width source and the closing
   animation deferred to U3.2. No changes to `home.ts`/`main.ts` — screen
   wiring is U3.2's job.
-- **Next:** `U3.2` Home adopts the ☰ button and drops the tile row (M3) —
-  depends on U3.1, now unblocked.
+- **U3.2 done.** `HOME_TILES`/`HomeTile`/`renderTiles` are deleted; `HomeData`
+  gained `accountName` (from `UserMeResponse.account_name`, widening
+  `HomeApi.getMe()`'s return type) so the side menu's header never needs its
+  own fetch. A new `renderMenuButton()` (44×44, 20px inline hamburger glyph,
+  `--ink`, no fill) renders inside `.chart-card` on `ready`/`offline`/`empty`
+  and standalone (no card there) on `forbidden` — **not** on `loading`/
+  `error` (D420: neither is in the screen doc's States table for it, and
+  `error`'s retry button collides with it there — caught in a real-browser
+  check, see D420). `openSideMenu` (home.ts) is the host half of D419's
+  closing transition: a sibling DOM node (`openPicker`'s pattern) that adds
+  `side-menu-closing` classes and waits 160ms before removing itself, skipped
+  under `prefers-reduced-motion`; BackButton opens/closes the same as
+  `openPicker`'s picker. `HomeHandlers.onTileTap` is replaced by
+  `onMenuSelect: (item: MenuItem) => void`; `main.ts`'s dispatch table is
+  unchanged apart from the rename, plus a new `"settings"` branch that is a
+  `// TODO(U3.3)` no-op (screens/settings.ts doesn't exist yet). `app.css`
+  lost the `.tiles`/`.tile` rules and `#app`'s now-obsolete 112px bottom
+  reservation for the fixed tile row; gained `.menu-btn` (static by default,
+  absolute inside `.chart-card`, `bottom: 18px` not a literal 12px — vertical
+  centring on the 56px Add button wins over the spec text's own "12px inset"
+  wording) and the `side-menu-closing`/`side-menu-slide-out`/
+  `side-menu-scrim-fade-out` rules the host-driven close needs.
+- **Next:** `U3.3` Screen 08 — Settings (M3) — depends on U0.4, already done;
+  unblocked.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.
