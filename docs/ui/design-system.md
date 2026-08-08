@@ -62,9 +62,18 @@ life. The slot comes from `categories.color_slot` (D301/D308); a `NULL` slot
 falls back to position in the account's list sorted `created_at ASC` (D206's
 rule, surviving only as the fallback).
 
-**The user picks the slot** on screen 06 — that is why the palette is twelve
-wide rather than six. Slots 1–6 are the shipped set and must not move; 7–12 are
-new.
+**The user picks the slot** on screen 06 — that is why the palette is wider than
+six. It has two halves, and the split is deliberate:
+
+- **Slots 1–12, the named set.** Colourblind-validated, one hand-picked hex per
+  theme, each with a plain English name. These are the seven offered in the
+  picker's quick row (`components/color-picker.md`) and the only slots the
+  server ever auto-assigns. Slots 1–6 are the original shipped set and must not
+  move; 7–12 were added in V3.
+- **Slots 13–72, the ramp.** Generated, one hex for both themes, named
+  positionally (`Olive 3`). Reachable only by an explicit user pick behind the
+  picker's `+`. Added in V5 (D500) so the palette matches the reference sheets
+  the user supplied.
 
 | Slot | Name | Light | Dark | Source |
 |---|---|---|---|---|
@@ -86,19 +95,129 @@ Name is what the colour picker (screen 06b) shows and speaks for each swatch
 confirmed by the user for U2.2 prep) for slots 1–6 (never named before this)
 and 7–12 alike.
 
+### Category palette — the ramp (slots 13–72)
+
+Ten hue families × six lightness steps, generated in OKLCH and **identical in
+both themes** (D501). One hex per slot, not two: the ramp already spans the
+lightness range end to end, so a per-theme variant would only re-say what the
+step number already says — and sixty hand-tuned pairs is sixty chances to
+drift. The rendering rule that makes one hex safe in both themes is the
+hairline ring in `components/color-picker.md` (a pale slot on the white card
+and a dark slot on the dark card are both otherwise invisible at 32px).
+
+**Generation is reproducible, not by eye.** `scripts/gen_palette.py` (added in
+U1.1) emits both the table below and the `tokens.css` block from these exact
+parameters:
+
+| Parameter | Value |
+|---|---|
+| Lightness ladder (step 1 → 6) | `L` `0.44 · 0.54 · 0.63 · 0.72 · 0.81 · 0.89` |
+| Chroma ladder (step 1 → 6) | `C` `0.115 · 0.135 · 0.135 · 0.115 · 0.085 · 0.050` |
+| Family hues | Olive `110` · Green `148` · Teal `190` · Blue `250` · Violet `296` · Magenta `332` · Red `25` · Orange `55` · Brown `50` · Slate `240` |
+| Per-family chroma multiplier | `1.0`, except Brown `0.45` and Slate `0.16` (they are the desaturated families by intent), then reduced per family to the largest value at which **no step clips the sRGB gamut** — Olive `0.842`, Teal `0.665`, Orange `0.955` |
+
+Clipping is solved by lowering chroma, never by clamping: a clamped channel
+silently collapses two adjacent steps onto the same rendered colour, which is
+exactly the kind of "two slots that look identical" bug the slot system exists
+to prevent.
+
+| Slot | Name | Hex | vs `#FFFFFF` | vs `#1C2123` | Source |
+|---|---|---|---|---|---|
+| `--category-slot-13` | Olive 1 | `#565600` | 7.70 | 2.11 | [generated] |
+| `--category-slot-14` | Olive 2 | `#73740d` | 4.96 | 3.28 | [generated] |
+| `--category-slot-15` | Olive 3 | `#8e8f33` | 3.43 | 4.75 | [generated] |
+| `--category-slot-16` | Olive 4 | `#a8aa60` | 2.45 | 6.65 | [generated] |
+| `--category-slot-17` | Olive 5 | `#c3c690` | 1.78 | 9.14 | [generated] |
+| `--category-slot-18` | Olive 6 | `#dcdebe` | 1.38 | 11.80 | [generated] |
+| `--category-slot-19` | Green 1 | `#16632a` | 7.36 | 2.21 | [generated] |
+| `--category-slot-20` | Green 2 | `#27833e` | 4.77 | 3.41 | [generated] |
+| `--category-slot-21` | Green 3 | `#469f58` | 3.30 | 4.93 | [generated] |
+| `--category-slot-22` | Green 4 | `#70b87b` | 2.38 | 6.84 | [generated] |
+| `--category-slot-23` | Green 5 | `#9cd1a2` | 1.74 | 9.34 | [generated] |
+| `--category-slot-24` | Green 6 | `#c5e4c9` | 1.37 | 11.86 | [generated] |
+| `--category-slot-25` | Teal 1 | `#00605c` | 7.43 | 2.19 | [generated] |
+| `--category-slot-26` | Teal 2 | `#117f7a` | 4.84 | 3.36 | [generated] |
+| `--category-slot-27` | Teal 3 | `#399a95` | 3.37 | 4.83 | [generated] |
+| `--category-slot-28` | Teal 4 | `#68b4af` | 2.40 | 6.77 | [generated] |
+| `--category-slot-29` | Teal 5 | `#97cdc9` | 1.77 | 9.21 | [generated] |
+| `--category-slot-30` | Teal 6 | `#c3e2df` | 1.38 | 11.82 | [generated] |
+| `--category-slot-31` | Blue 1 | `#10558f` | 7.73 | 2.11 | [generated] |
+| `--category-slot-32` | Blue 2 | `#2172b9` | 5.03 | 3.23 | [generated] |
+| `--category-slot-33` | Blue 3 | `#408dd7` | 3.49 | 4.65 | [generated] |
+| `--category-slot-34` | Blue 4 | `#6aaaea` | 2.46 | 6.62 | [generated] |
+| `--category-slot-35` | Blue 5 | `#97c6f6` | 1.79 | 9.08 | [generated] |
+| `--category-slot-36` | Blue 6 | `#c3defb` | 1.39 | 11.74 | [generated] |
+| `--category-slot-37` | Violet 1 | `#59428a` | 8.17 | 1.99 | [generated] |
+| `--category-slot-38` | Violet 2 | `#775bb3` | 5.34 | 3.05 | [generated] |
+| `--category-slot-39` | Violet 3 | `#9176d1` | 3.67 | 4.43 | [generated] |
+| `--category-slot-40` | Violet 4 | `#ab95e4` | 2.58 | 6.31 | [generated] |
+| `--category-slot-41` | Violet 5 | `#c5b6f2` | 1.85 | 8.79 | [generated] |
+| `--category-slot-42` | Violet 6 | `#ddd5f9` | 1.40 | 11.59 | [generated] |
+| `--category-slot-43` | Magenta 1 | `#76376e` | 8.26 | 1.97 | [generated] |
+| `--category-slot-44` | Magenta 2 | `#9a4d91` | 5.46 | 2.98 | [generated] |
+| `--category-slot-45` | Magenta 3 | `#b868ad` | 3.74 | 4.35 | [generated] |
+| `--category-slot-46` | Magenta 4 | `#cf89c5` | 2.61 | 6.22 | [generated] |
+| `--category-slot-47` | Magenta 5 | `#e2adda` | 1.87 | 8.69 | [generated] |
+| `--category-slot-48` | Magenta 6 | `#efcfea` | 1.42 | 11.45 | [generated] |
+| `--category-slot-49` | Red 1 | `#873431` | 8.18 | 1.99 | [generated] |
+| `--category-slot-50` | Red 2 | `#b04945` | 5.41 | 3.01 | [generated] |
+| `--category-slot-51` | Red 3 | `#ce655f` | 3.72 | 4.38 | [generated] |
+| `--category-slot-52` | Red 4 | `#e48780` | 2.60 | 6.25 | [generated] |
+| `--category-slot-53` | Red 5 | `#f3aca5` | 1.87 | 8.72 | [generated] |
+| `--category-slot-54` | Red 6 | `#facfca` | 1.41 | 11.50 | [generated] |
+| `--category-slot-55` | Orange 1 | `#7f3e00` | 8.10 | 2.01 | [generated] |
+| `--category-slot-56` | Orange 2 | `#a6560d` | 5.31 | 3.07 | [generated] |
+| `--category-slot-57` | Orange 3 | `#c47132` | 3.65 | 4.46 | [generated] |
+| `--category-slot-58` | Orange 4 | `#da915f` | 2.56 | 6.35 | [generated] |
+| `--category-slot-59` | Orange 5 | `#ebb48f` | 1.83 | 8.87 | [generated] |
+| `--category-slot-60` | Orange 6 | `#f5d3bd` | 1.41 | 11.57 | [generated] |
+| `--category-slot-61` | Brown 1 | `#6a4a38` | 7.93 | 2.05 | [generated] |
+| `--category-slot-62` | Brown 2 | `#8c644f` | 5.18 | 3.14 | [generated] |
+| `--category-slot-63` | Brown 3 | `#a87f68` | 3.56 | 4.57 | [generated] |
+| `--category-slot-64` | Brown 4 | `#c09c88` | 2.51 | 6.47 | [generated] |
+| `--category-slot-65` | Brown 5 | `#d6baab` | 1.83 | 8.88 | [generated] |
+| `--category-slot-66` | Brown 6 | `#e8d7ce` | 1.40 | 11.65 | [generated] |
+| `--category-slot-67` | Slate 1 | `#4a545c` | 7.74 | 2.10 | [generated] |
+| `--category-slot-68` | Slate 2 | `#64717a` | 5.02 | 3.24 | [generated] |
+| `--category-slot-69` | Slate 3 | `#7e8b95` | 3.49 | 4.66 | [generated] |
+| `--category-slot-70` | Slate 4 | `#9ba6af` | 2.48 | 6.56 | [generated] |
+| `--category-slot-71` | Slate 5 | `#b9c2c9` | 1.81 | 9.00 | [generated] |
+| `--category-slot-72` | Slate 6 | `#d6dbe0` | 1.39 | 11.67 | [generated] |
+
+**Known and accepted, stated rather than hidden.** Steps 5–6 sit under 2:1
+against the light card, and steps 1–2 under 3.5:1 against the dark card. That
+is inherent to a ramp that spans the full lightness range against two fixed
+surfaces, and it is the price of letting the user pick a pale colour at all.
+Three things make it safe, and all three are load-bearing:
+1. identity is **never** colour alone — a dot always ships with the category
+   name (Accessibility, below);
+2. every swatch and dot carries the hairline `--separator` ring, so a low-
+   contrast fill still has a visible edge;
+3. the ramp is opt-in — auto-assignment never reaches past slot 6, so a user
+   who never opens the `+` never sees a low-contrast dot.
+
 Rules that survive the palette growing:
 
 - **Two categories may share a slot.** Once the user picks, collisions are
-  their choice, not a bug. The picker marks an already-used slot as taken but
-  does not forbid it (screen 06). This is exactly why identity is never carried
-  by colour alone — every surface pairs the colour with the name.
+  their choice, not a bug. Whether the picker still *marks* a slot as taken is
+  a separate question, and the answer changed in V5: it does not (D502) — the
+  picker shows colours, not an inventory. Sharing was always allowed; V5 only
+  stops narrating it. This is exactly why identity is never carried by colour
+  alone — every surface pairs the colour with the name.
 - `--status-red` is reserved for over-budget and is **never** a category slot.
   It always ships with an icon and a word, so the state survives greyscale and
-  colourblind readers.
+  colourblind readers. `#e34948` is deliberately not reproduced by any ramp
+  slot; `Red 2` `#b04945` is the nearest and is visibly darker.
 - More than **six** categories in one donut: fold the tail into "Other" and keep
   the full list in the ranked rows below. The donut's six-slice fold limit is
-  about readability of the chart and is unrelated to the twelve-slot palette.
-- Never generate a hue. Twelve is the closed set.
+  about readability of the chart and is unrelated to the palette's size.
+- **Auto-assignment never leaves slots 1–6.** The server's
+  `_next_free_color_slot` pool and the client's `null`-slot position fallback
+  both stay capped at 6, unchanged by this section. Slots 7–72 are reachable
+  only by an explicit human pick.
+- Never generate a hue **at runtime**. Seventy-two is the closed set; the
+  generator is a build-time authoring tool whose output is checked in, not a
+  function the app calls.
 
 **Validated (2026-08-05, U2.2 prep).** Slots 7–12 were re-picked and run through
 `dataviz`'s `validate_palette.js` against the app's real card surfaces
@@ -148,6 +267,10 @@ reference screenshots at ~0.73 image-px-to-CSS-px and are approximate.
 |---|---|---|
 | Add button (screen 01) | 56px diameter, `+` glyph 24px, 2.5px stroke | `~60px [ref]` → snapped [inferred] |
 | Category swatch, picker grid (02) | 64px diameter | `~68px [ref]` |
+| Colour circle, quick row and full grid (06b) | 32px diameter, 1px `--separator` ring | `~34px [ref: refs/color-picker/]` → snapped [inferred] |
+| Colour quick row (06b) | one row, 7 circles + the `+`, 44px tall hit targets, `space-between`, min 8px gap | [inferred] — 8 × 32px + 7 gaps fits a 320px-wide card |
+| Colour `+` button (06b) | 32px circle filled `--separator`, 16px `+` glyph in `--ink-secondary` | [inferred] — the "More" cell's treatment at circle size |
+| Colour sheet grid (06b) | 6 columns, 16px column gap, 16px row gap | `6 cols [ref]`, gaps `~18px [ref]` → snapped [inferred] |
 | Category swatch, ranked row (01) | 36px diameter | `~37px [ref]` |
 | Donut outer diameter | 200px | `~234px [ref]`, kept at V2's value — see below |
 | Donut stroke | 30px | `~45px [ref]` → thickened from V2's 26px [inferred] |
@@ -247,7 +370,7 @@ SVG in the module that uses them**, 24px box, 2px stroke, `currentColor`:
 
 | Icon | Where | Shape |
 |---|---|---|
-| `+` | Add button (01), Add tag (02), More (02) | two 2.5px strokes, 24px box |
+| `+` | Add button (01), Add tag (02), More (02), open the full colour sheet (06b) | two 2.5px strokes, 24px box — 2px strokes in a 16px box at the colour picker's circle size |
 | `‹` `›` | Period arrows (01, 05) | chevron, 2px stroke, 20px box |
 | Calendar | Date row (02), Period tab (01) | rounded square + two ticks |
 | Warning | Over-budget strip | triangle + bar + dot, in `--status-red` |
@@ -276,6 +399,7 @@ sprite sheet — rather than a library.
 | Side menu slide out | 160ms | `ease-in`, the reverse |
 | Scrim fade | matches the panel it accompanies | `linear`, opacity 0 → 1 |
 | Collapsed chart header in | 160ms | `ease-out`, `translateY(-100%)` → `0` plus opacity. **Out is instant (U5.2)** — the header is torn down as part of a full re-render, leaving nothing to animate an exit on; revisit only if a real device (CP5) shows this as a flicker |
+| Bottom sheet slide up | 200ms | `ease-out`, `translateY(100%)` → `0`. The date-range picker's existing `drp-slide-up`; the colour sheet (06b) reuses it rather than declaring a second identical keyframe |
 
 `prefers-reduced-motion: reduce` disables the skeleton pulse, **the side menu's
 slide and the collapsed header's**: under that setting each appears and

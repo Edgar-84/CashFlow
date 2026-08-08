@@ -18,8 +18,13 @@ from written intent:
   swatches with the user choosing the slot.
 - `docs/plans/mini-app-v3.md` U2.2 unit description and STATE note — the
   already-approved acceptance criteria this spec must satisfy.
-- `../components/category-picker.md` — the swatch/circle/name pattern this
-  screen's colour picker extends from 6 to 12 swatches.
+- `../components/color-picker.md` — **the colour picker, as of V5.** It owns
+  region 3 entirely: the seven-circle quick row, the `+`, and the 72-slot
+  sheet behind it. This file states where that component sits and what the
+  form does with its output; it no longer describes swatches itself.
+- `../components/category-picker.md` — the swatch/circle/name pattern the V3
+  picker extended from 6 to 12 swatches. Historical: V5 replaced that grid
+  (see Delta and the V5 addendum).
 - `../screens/02-add-expense.md` — the section-label + underlined-field
   pattern (`Comment` field) this screen's `Name` field reuses.
 - `../screens/06-categories.md` — the active/archived cell data (`name`,
@@ -29,14 +34,17 @@ from written intent:
 - **Taking:** `category-picker.md`'s 64px filled-circle swatch and 4-column
   grid geometry (12px column gap, 16px row gap); `02-add-expense.md`'s
   section-label-plus-underlined-field pattern for the `Name` field.
-- **Changing:** the picker grows from 6 swatches (one row) to **12** (three
-  rows of 4, D317); selection is marked with a **checkmark badge** on the
-  swatch rather than `category-picker.md`'s shape-change (circle → rounded
-  square) — that convention is for *choosing a category to file an expense
-  under* (screen 02), this is for *choosing that category's own colour*, and
-  the plan is explicit the current slot must be "marked with a check, not by
-  colour alone"; an already-used slot gets a small "In use" caption instead
-  of being disabled (D317: "marks a slot as taken but does not forbid it").
+- **Changing:** ~~the picker grows from 6 swatches (one row) to **12** (three
+  rows of 4, D317)~~ — **superseded in V5**: region 3 is now the quick
+  row + sheet of `../components/color-picker.md` over a 72-slot palette, and
+  the "In use" caption is gone (D502). Selection is still marked with a
+  **checkmark badge** rather than `category-picker.md`'s shape-change (circle
+  → rounded square) — that convention is for *choosing a category to file an
+  expense under* (screen 02), this is for *choosing that category's own
+  colour*, and the current slot must be "marked with a check, not by colour
+  alone". An already-used slot is still never disabled (D317's "marks a slot
+  as taken but does not forbid it" — V5 keeps the permission and drops the
+  marking).
 - **Explicitly not taking:** any in-page screen title — no screen in this app
   has one (`06-categories.md`'s own "no title bar" convention); this form
   relies on the `Name` field's empty vs pre-filled state to signal create vs
@@ -51,7 +59,7 @@ the scroll area — matches `02-add-expense.md`'s pattern exactly.
 |---|---|---|
 | 1 | **Name** | label "Name" 12px `--ink-secondary`; single-line field, `--separator` underline, 15px `--ink` value, no counter (`02-add-expense.md`'s Comment-field pattern). `28px` top padding |
 | 2 | Name error / duplicate warning | one line, appears directly under the field, `4px` above it collapses to 0 height when neither is showing (no layout jump when it appears — see Edge cases) |
-| 3 | **Colour** | label "Colour" 12px `--ink-secondary`, `20px` above; 4-column grid of 12 swatches, 12px column gap, 16px row gap (`category-picker.md` values) |
+| 3 | **Colour** | label "Colour" 12px `--ink-secondary`, `20px` above; then the quick row from `../components/color-picker.md` — one line of seven 32px circles plus a grey `+`, `12px` under the label. **One line tall, always** (V5, D505): the region no longer grows with the palette, which is what lets the palette reach 72 without pushing region 5 off the fold |
 | 4 | Submit error banner | only after a failed Save; `.submit-error`-style line, `12px` above where MainButton sits |
 | 5 | **Delete action** (edit mode only, U2.3) | "Delete category" / "Hide category" text trigger, Row title role (13.5px/600), `--status-red`, spaced by the same `20px` gap as every other region in this form; opens the delete-or-hide flow — see `06c-category-delete.md` |
 
@@ -65,34 +73,28 @@ with a MainButton, e.g. `02-add-expense.md` region 6).
   "changed" name from the original (see dirty-check in Telegram §MainButton).
 
 ### Colour picker (region 3)
-Each of the 12 cells:
-1. **Swatch** — 64px circle, filled `--category-slot-{n}` (n = 1–12, both
-   themes from `tokens.css`).
-2. **Checkmark badge** — only on the currently-selected slot: an 18px white
-   (`--card`) circle at the swatch's bottom-right corner, 2px `--card` ring
-   separating it from the fill (so it reads against any slot colour, not
-   relying on the swatch's own contrast), with a 10px check glyph in `--ink`
-   centred inside. `[inferred]` — a fixed-contrast badge rather than a
-   check drawn directly in the swatch fill, chosen because several slots
-   (e.g. `--category-slot-9`, `--category-slot-11`) are dark enough that a
-   plain white check would still read, but this guarantees it regardless of
-   which slot a future palette revision uses.
-3. **Name** — `design-system.md`'s Category palette `Name` column (Blue,
-   Orange, Aqua, Yellow, Pink, Green, Teal, Violet, Olive, Cyan, Moss,
-   Magenta for slots 1–12; confirmed 2026-08-05), 12px `--ink`, centred, `8px`
-   under the swatch.
-4. **"In use" caption** — 11px `--ink-secondary`, centred, `4px` under the
-   name, only when ≥1 *other* category (any status) already has this slot.
-   Own current slot in edit mode never shows this caption for itself.
+**Specified in `../components/color-picker.md`** — anatomy, sizing, states,
+accessible names and acceptance criteria all live there, so the two views of
+one selection (row and sheet) cannot drift apart by being written down twice.
 
-No swatch is ever disabled — every one of the 12 remains tappable regardless
-of the "In use" caption (D317).
+What this screen is responsible for:
+- placing the quick row under the "Colour" label and passing it the draft's
+  current `colorSlot` (`null` in an untouched create draft);
+- treating `onSelect(slot)` as a draft change like any other — it makes the
+  form dirty, it does **not** save;
+- owning the sheet's open/closed flag, and closing it on select.
+
+The 12-cell named grid (64px swatch + colour name + "In use" caption) that
+U2.2 shipped is **removed**, not hidden. Its checkmark badge survives
+unchanged as the component's Selected state — that is the one part of the old
+picker the new one inherits verbatim.
 
 ## Components used
-`../components/category-picker.md` is **not** reused directly — this picker's
-selection model (persistent choice + checkmark, taken-not-disabled) differs
-from that component's (ephemeral choice + shape change, taken concept absent).
-It is its own render function, parallel in geometry only.
+- `../components/color-picker.md` — region 3, entirely.
+- `../components/category-picker.md` is **not** used here. Its selection model
+  (ephemeral choice + shape change) differs from choosing a category's own
+  permanent colour, and V5 removed even the geometric parallel the V3 picker
+  had with it.
 
 ## Telegram
 - **Theme:** every colour from `tokens.css`, both themes. The checkmark badge
@@ -138,7 +140,10 @@ and focused immediately" precedent.
 |---|---|---|
 | `Name` field | type | updates the draft; clears the inline empty-name error the moment the trimmed value is non-empty again |
 | `Name` field | blur, value matches another category's trimmed name (case-insensitive `[inferred]`) | shows the duplicate-name warning (region 2); **does not block** Save |
-| Swatch | tap | selects that slot in the draft (single-select, replacing any prior selection); moves the checkmark badge; no haptic |
+| Quick-row circle | tap | selects that slot in the draft (single-select, replacing any prior selection); moves the checkmark badge; no haptic |
+| `+` | tap | opens the colour sheet; changes nothing in the draft |
+| Sheet circle | tap | selects that slot **and** closes the sheet (D503); the quick row shows it selected, as an 8th circle when it is not one of slots 1–7 |
+| Sheet scrim / BackButton while the sheet is open | tap | closes the sheet, selection unchanged. BackButton closes the sheet rather than leaving the screen — the sheet is the innermost dismissible thing |
 | MainButton ("Save") | tap, name blank/whitespace-only | **blocked**: inline error appears (region 2), MainButton stays visually enabled but the tap is a no-op that surfaces the error rather than submitting — this is the "rejected inline, never as a popup" AC |
 | MainButton ("Save") | tap, valid | `POST /categories` (create mode, no `id` in the draft) or `PATCH /categories/{id}` (edit mode); see States |
 | BackButton | tap, draft clean | navigates to `06-categories.md` immediately |
@@ -153,7 +158,7 @@ and focused immediately" precedent.
 | `name.error.empty` | "Give this category a name." | inline, region 2; never a popup |
 | `name.warning.duplicate` | "Another category is already named \"{name}\"." | inline, region 2; non-blocking |
 | `colour.label` | "Colour" | section label |
-| `swatch.inUse` | "In use" | caption under an already-taken swatch |
+| ~~`swatch.inUse`~~ | ~~"In use"~~ | **removed in V5 (D502)** — the picker no longer distinguishes taken from free |
 | `error.save` | "Couldn't save this category." | generic Save failure, mirrors `error.load`'s pattern elsewhere |
 | `error.readonly` | "You have read-only access to this account." | existing string, reused verbatim (Home, 06a) |
 | `error.retry` | "Try again" | reused verbatim; re-attempts the same Save |
@@ -162,8 +167,8 @@ and focused immediately" precedent.
 
 | Call | Params | Notes |
 |---|---|---|
-| `POST /categories` | `{ name, color_slot }` | create mode. `models/category.py::CategoryCreate.color_slot` currently validates `1–6` (U0.6, D325) — **must widen to `1–12` in this unit** (plan STATE note); otherwise picking any of the new slots 422s. |
-| `PATCH /categories/{id}` | `{ name?, color_slot? }` | edit mode. `CategoryUpdate.color_slot` has the same `1–6` constraint needing the same widening. |
+| `POST /categories` | `{ name, color_slot }` | create mode. `models/category.py::CategoryCreate.color_slot` validates `1–12` today (widened from `1–6` in U2.2) — **must widen again to `1–72` for V5** (D500); otherwise picking any ramp slot 422s. |
+| `PATCH /categories/{id}` | `{ name?, color_slot? }` | edit mode. `CategoryUpdate.color_slot` has the same bound needing the same widening. |
 | — | — | No `GET` on open: the draft's initial `{ name, color_slot, id }` and the sibling names used for the duplicate check both come from `06-categories.md`'s already-loaded list, passed through navigation state. |
 
 `webapp/src/api/client.ts` has no `createCategory`/`updateCategory` methods
@@ -173,20 +178,18 @@ type: `CategoryCreate`/`CategoryUpdate` mirrors are new, `CategoryResponse`
 already exists.
 
 ## Accessibility
-- The picker is a `radiogroup`; each swatch is a `radio` with `aria-checked`
-  reflecting the checkmark badge — unlike `category-picker.md`, this really
-  is a persistent single-select, so the ARIA role fits directly here.
-- Each swatch's accessible name is its colour-family name plus, when
-  applicable, "in use" — e.g. "Blue, in use" — so a screen-reader user gets
-  the same information the sighted caption conveys.
+- The picker's ARIA (`radiogroup`, per-circle `radio` + `aria-checked`, and the
+  slot-name accessible labels that are now the **only** text carrier) is
+  specified in `../components/color-picker.md`, not repeated here.
 - The `Name` field has a real `<label for>`, not just placeholder text —
   placeholder text alone is not an accessible label.
 - Inline errors/warnings are announced (`aria-live="polite"` on region 2) so
   a screen-reader user hears the rejection without needing to re-read the
   field.
-- Focus order: BackButton (native) → `Name` field → colour grid (row by row,
-  arrow keys move within it and wrap, matching `category-picker.md`) →
-  MainButton (native, outside DOM focus order — Telegram chrome).
+- Focus order: BackButton (native) → `Name` field → quick row (arrow keys move
+  along it and wrap) → `+` → MainButton (native, outside DOM focus order —
+  Telegram chrome). While the sheet is open, focus is trapped inside it and
+  returns to the `+` on close.
 - `prefers-reduced-motion`: n/a — this screen has no transitions beyond the
   checkmark badge appearing/disappearing, which is instant either way.
 
@@ -220,9 +223,13 @@ already exists.
 - [ ] MainButton is disabled on open in both modes and becomes enabled the
       moment the name or the selected slot differs from the original; it
       returns to disabled immediately after a successful Save.
-- [ ] Tapping any of the 12 swatches — including one already used by another
-      category — selects it and moves the checkmark; a used slot shows its
-      "In use" caption but is never disabled or skipped.
+- [ ] Region 3 is one row tall: seven colour circles and a grey `+`, no names
+      and no "In use" captions anywhere on the screen.
+- [ ] Tapping any of the seven selects it and moves the checkmark, with no
+      sheet and no request; tapping the `+` opens the 72-circle sheet, and
+      tapping a circle there selects it and closes the sheet in one action.
+- [ ] A category already using a given slot is offered exactly like any other
+      — nothing is marked, disabled, or skipped.
 - [ ] Submitting a blank or whitespace-only name shows the inline error
       (never a Telegram popup) and does not call the API.
 - [ ] Entering a name matching an existing category shows the inline
@@ -260,6 +267,21 @@ already exists.
       cases; reserved-height vs shift-on-appear is a real visual choice, not
       just an implementation detail. Not blocking — either is easy to change
       after seeing it on a real device.
+
+## Addendum (V5, 2026-08-08)
+Region 3 was rewritten. The 12-swatch named grid is replaced by
+`../components/color-picker.md` (7-circle quick row + a `+` opening a 72-slot
+sheet), the palette grows to 72 (`design-system.md`, D500/D501), and the "In
+use" caption is removed (D502). Regions 1, 2, 4 and 5 are untouched, as are
+the MainButton dirty rule, the Save flow, and every State in this file — the
+draft simply carries a wider range of `colorSlot` values than before.
+
+Two earlier "Resolved" entries below are narrowed rather than reversed:
+- *"Colour-family names confirmed"* still holds for slots 1–12. Slots 13–72
+  are named positionally (`Olive 3`) and those names now appear **only** as
+  accessible names, never as visible text.
+- *"Colour pick is optional in create mode"* is unchanged — `null` is still a
+  valid `colorSlot`, and the quick row simply shows nothing selected.
 
 ## Addendum (U2.3, 2026-08-06)
 Region 5 (Delete action) and its full behaviour — the confirmation popup, the
