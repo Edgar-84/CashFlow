@@ -22,6 +22,24 @@ check defaults/validation. No DB, no network.
 | `test_enums_have_expected_members` | `Role`/`Resource`/`Action` enum membership matches spec; `Currency` has exactly 15 codes (D211) | [`models/enums.py`](../models/enums.py) |
 | `test_domain_errors_are_typed_and_distinct` | `NotFoundError`/`PermissionDeniedError`/`LimitExceededWarning` are distinct `DomainError` subclasses | [`models/errors.py`](../models/errors.py) |
 
+## Category palette ramp generator (`test_gen_palette.py`) → [`scripts/gen_palette.py`](../scripts/gen_palette.py)
+Hermetic — no DB, no network. Proves `scripts/gen_palette.py` reproduces the
+checked-in spec exactly rather than inventing it (mini-app-v5 U1.1, D500/D501).
+
+| Test | Checks |
+|---|---|
+| `test_generates_exactly_60_ramp_slots_13_to_72` | `generate_ramp()` yields slots 13-72 in order, `Olive 1` through `Slate 6` |
+| `test_tokens_css_block_matches_checked_in_file_byte_for_byte` | The generated `--category-slot-13..72` CSS lines equal the checked-in block in `webapp/src/styles/tokens.css` byte-for-byte |
+| `test_slots_1_to_12_are_untouched_in_both_theme_blocks` | Slots 1-12 are present in both the `:root` and `:root[data-theme="dark"]` blocks; slots 13-72 exist only in `:root` (D501: one hex, not a per-theme pair) |
+| `test_markdown_table_matches_design_system_ramp_table_byte_for_byte` | The generated markdown table (incl. contrast columns) equals `design-system.md`'s ramp table byte-for-byte |
+| `test_no_generated_hex_clips_the_srgb_gamut` | All 60 colours generate without the script's internal gamut check raising |
+| `test_in_gamut_check_actually_rejects_an_out_of_gamut_color` | The gamut predicate itself rejects out-of-range linear RGB, proving the check isn't vacuous |
+| `test_a_clipping_parameter_set_is_rejected_by_the_generator` | A deliberately over-saturated OKLCH input raises `ValueError` instead of silently clamping |
+| `test_red_2_is_not_status_red` | `Red 2` (`#b04945`) differs from `--status-red` in `tokens.css` |
+| `test_contrast_ratio_matches_design_system_figures` | WCAG contrast ratios for `Olive 1` and `Slate 6` match the documented figures to 2 decimal places |
+| `test_contrast_ratio_is_symmetric_and_matches_wcag_reference_pair` | `contrast_ratio(a, b) == contrast_ratio(b, a)` |
+| `test_first_slot_constant_matches_named_set_boundary` | `FIRST_SLOT == 13`, immediately after the 12 named slots |
+
 ## App / health tests (`test_health.py`)
 Hermetic — FastAPI app via `ASGITransport`, DB pool mocked (see `conftest.py`'s
 `client` fixture).
