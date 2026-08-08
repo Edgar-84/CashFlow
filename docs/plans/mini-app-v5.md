@@ -320,7 +320,7 @@ session, and either can be reverted without the other.
       reviewer subagent.
       Model: sonnet.
 
-- [ ] **U3.2 Budgets navigates to it; the inline form is deleted** —
+- [x] **U3.2 Budgets navigates to it; the inline form is deleted** —
       implements `docs/ui/screens/04-budgets.md`'s Delta and Interactions
       (D506/D511). Deletes `BudgetEditMode`, the controller's form state,
       `renderBudgetForm`, `fetchProgress`'s `spentKnown: false` fallback and
@@ -484,22 +484,37 @@ Telegram client. They are the actual acceptance gate for M2 and M3.
 - **Done:** planning, plus **U0.1** (widen `color_slot` to 1–72), **U0.2**
   (notify-threshold default 80 → 70), **U1.1** (generate the ramp), **U1.2**
   (`category-colors.ts` knows all 72), **U2.1** (`components/color-picker.ts`),
-  **U2.2** (the category form wires it in, the 12-swatch grid is gone) and
-  **U3.1** (`screens/budget-form.ts` as a standalone screen). M0, M1 and M2
-  are complete. The five spec files in the table at the top are written and
-  are the source of truth; the 60 ramp hexes and their contrast figures are
-  already in `design-system.md`, so U1.1 reproduces them rather than
-  inventing them.
-- **Next:** U3.2 — wire `04-budgets.md` to navigate to `budget-form.ts` and
-  delete the inline form (`BudgetEditMode`, `renderBudgetForm`, `fetchProgress`'s
-  `spentKnown` fallback) and its tests.
+  **U2.2** (the category form wires it in, the 12-swatch grid is gone),
+  **U3.1** (`screens/budget-form.ts` as a standalone screen) and **U3.2**
+  (`screens/budgets.ts` navigates to it, the inline form is deleted). M0, M1,
+  M2 and M3 are complete. The five spec files in the table at the top are
+  written and are the source of truth; the 60 ramp hexes and their contrast
+  figures are already in `design-system.md`, so U1.1 reproduces them rather
+  than inventing them.
+- **Next:** U4.1 — the e2e smoke test through `initData` (a ramp slot, a
+  defaulted threshold).
+- **U3.2 note:** deleting the inline form's mutation path left two fields
+  dead and they were removed with it, beyond what the AC named directly:
+  `BudgetRow.spentKnown` (only existed to flag `fetchProgress`'s failure
+  fallback, which no longer exists) and `BudgetsData.categoryOrder` (only
+  existed for the controller's create/delete re-sort, and a full reload
+  already restores creation order via `buildBudgetsData`). `mount()` also
+  dropped its now-unused `api` parameter — the screen performs no writes of
+  its own any more, only navigation. `applyBudgetsChrome`'s
+  `onMainButtonTap` callback now receives the full `UnbudgetedRow` plus
+  `currency` instead of a bare category id, so `main.ts` can build the
+  destination screen's mode without a second lookup. Two pure helpers,
+  `budgetFormModeFromRow`/`budgetFormModeFromUnbudgeted` in `main.ts`, carry
+  the row→mode mapping so this routing decision has direct test coverage
+  under Node — same reasoning as `withCreatedTagPreselected`.
 - **U3.1 note:** `amountFieldError`/`thresholdFieldError`/`budgetFormValid`/
-  `DEFAULT_NOTIFY_THRESHOLD` are **new copies** in `budget-form.ts`, not yet
-  removed from `budgets.ts` — the unit's own Files list doesn't touch
-  `budgets.ts`/`budgets.test.ts`, and the inline form they validate is still
-  live until U3.2 deletes it. The "move" the contract describes completes
-  across both units: U3.1 adds the destination, U3.2 removes the source. See
-  **D512** for the one contract gap found (`currency` missing from
+  `DEFAULT_NOTIFY_THRESHOLD` were added as **new copies** in `budget-form.ts`
+  by U3.1 — that unit's own Files list didn't touch `budgets.ts`/
+  `budgets.test.ts`, so the inline form they validate stayed live until U3.2
+  deleted it (done, see the U3.2 note above). The "move" the contract
+  describes completed across both units: U3.1 added the destination, U3.2
+  removed the source. See **D512** for the one contract gap found (`currency`
+  missing from
   `BudgetFormMode`). `mount()` is untested under Node like every other
   screen's mount (`webapp/vitest.config.ts` runs `environment: "node"`, no
   `document`) — the D508 regression (AC: "assert the button's `disabled`
