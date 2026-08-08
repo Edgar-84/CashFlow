@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { boot, withArchivedCategory, withCreatedTagPreselected } from "../src/main";
+import { boot, budgetFormModeFromRow, budgetFormModeFromUnbudgeted, withArchivedCategory, withCreatedTagPreselected } from "../src/main";
 import type { AddExpenseLoadState } from "../src/screens/add-expense";
+import type { BudgetRow, UnbudgetedRow } from "../src/screens/budgets";
 import type { CategoryResponse, ExpenseResponse } from "../src/api/types";
 
 describe("boot", () => {
@@ -20,6 +21,51 @@ describe("withCreatedTagPreselected", () => {
 
   it("doesn't duplicate a tag that's already selected (e.g. a rename, not a create)", () => {
     expect(withCreatedTagPreselected(["tag-vacation"], "tag-vacation")).toEqual(["tag-vacation"]);
+  });
+});
+
+// -- budgetFormModeFromRow / budgetFormModeFromUnbudgeted (U3.2, Budgets ->
+//    the standalone budget form screen, D506/D512) --------------------------
+
+describe("budgetFormModeFromRow", () => {
+  it("builds an edit mode carrying the plan's current values and the screen's already-loaded currency", () => {
+    const row: BudgetRow = {
+      planId: "plan-groceries",
+      categoryId: "cat-groceries",
+      label: "Groceries",
+      colorVar: "var(--category-slot-1)",
+      amountMinor: 20000,
+      spentMinor: 10000,
+      remainingMinor: 10000,
+      fillPct: 50,
+      notifyThreshold: 80,
+      isOverThreshold: false,
+      isExceeded: false,
+    };
+    expect(budgetFormModeFromRow(row, "EUR")).toEqual({
+      kind: "edit",
+      planId: "plan-groceries",
+      categoryId: "cat-groceries",
+      categoryLabel: "Groceries",
+      colorVar: "var(--category-slot-1)",
+      currency: "EUR",
+      amountMinor: 20000,
+      spentMinor: 10000,
+      notifyThreshold: 80,
+    });
+  });
+});
+
+describe("budgetFormModeFromUnbudgeted", () => {
+  it("builds a create mode for the tapped category and the screen's already-loaded currency", () => {
+    const row: UnbudgetedRow = { categoryId: "cat-transport", label: "Transport", colorVar: "var(--category-slot-2)" };
+    expect(budgetFormModeFromUnbudgeted(row, "USD")).toEqual({
+      kind: "create",
+      categoryId: "cat-transport",
+      categoryLabel: "Transport",
+      colorVar: "var(--category-slot-2)",
+      currency: "USD",
+    });
   });
 });
 

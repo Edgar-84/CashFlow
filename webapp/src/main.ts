@@ -15,8 +15,15 @@ import {
   createMemoryCache as createBudgetsCache,
   loadBudgets,
   mount as mountBudgets,
+  type BudgetRow,
   type BudgetsHandlers,
+  type UnbudgetedRow,
 } from "./screens/budgets";
+import {
+  mount as mountBudgetForm,
+  type BudgetFormHandlers,
+  type BudgetFormMode,
+} from "./screens/budget-form";
 import {
   applyCategoriesChrome,
   applyCategoryDeleteOutcome,
@@ -87,7 +94,7 @@ import {
   mount as mountSettings,
   type SettingsHandlers,
 } from "./screens/settings";
-import type { CategoryResponse, ExpenseResponse, Uuid } from "./api/types";
+import type { CategoryResponse, Currency, ExpenseResponse, Uuid } from "./api/types";
 
 const client = new ApiClient({ getInitData });
 const homeCache = createHomeCache();
@@ -120,6 +127,7 @@ type ActiveScreen =
   | "expenses"
   | "expense-detail"
   | "budgets"
+  | "budget-form"
   | "categories"
   | "category-form"
   | "tags"
@@ -498,8 +506,33 @@ async function showExpenseDetail(id: Uuid, onBack: () => void): Promise<void> {
   mountExpenseDetail(root, state, client, handlers);
 }
 
+/** Pure routing decisions for U3.2 (`04-budgets.md` → `04b-budget-form.md`,
+ * D506/D512) — pulled out and exported for direct test coverage under Node,
+ * same reasoning as `withCreatedTagPreselected` above. `currency` comes from
+ * `BudgetsData.currency`, already loaded by `loadBudgets`; neither screen
+ * fetches it again. */
+export function budgetFormModeFromRow(row: BudgetRow, currency: Currency): BudgetFormMode {
+  return {
+    kind: "edit",
+    planId: row.planId,
+    categoryId: row.categoryId,
+    categoryLabel: row.label,
+    colorVar: row.colorVar,
+    currency,
+    amountMinor: row.amountMinor,
+    spentMinor: row.spentMinor,
+    notifyThreshold: row.notifyThreshold,
+  };
+}
+
+export function budgetFormModeFromUnbudgeted(row: UnbudgetedRow, currency: Currency): BudgetFormMode {
+  return { kind: "create", categoryId: row.categoryId, categoryLabel: row.label, colorVar: row.colorVar, currency };
+}
+
 /** Mounts Budgets (U2.4, screen 04), reached from the side menu's "Budgets" row.
- * BackButton always returns to Home, same shape as Expenses/Detail. */
+ * BackButton always returns to Home, same shape as Expenses/Detail. Tapping a
+ * budgeted row, an unbudgeted category, or MainButton navigates to
+ * `screens/budget-form.ts` (U3.2, D506) instead of opening an inline form. */
 async function showBudgets(): Promise<void> {
   const root = getRoot();
   if (!root) {
@@ -514,13 +547,48 @@ async function showBudgets(): Promise<void> {
     onBack: () => {
       void showHome();
     },
+    onOpenBudget: (row, currency) => {
+      void showBudgetForm(budgetFormModeFromRow(row, currency));
+    },
+    onOpenUnbudgeted: (row, currency) => {
+      void showBudgetForm(budgetFormModeFromUnbudgeted(row, currency));
+    },
   };
 
   applyBudgetsChrome({ status: "loading" }, handlers.onBack);
-  mountBudgets(root, { status: "loading" }, client, handlers);
+  mountBudgets(root, { status: "loading" }, handlers);
   const state = await loadBudgets(client, budgetsCache);
-  applyBudgetsChrome(state, handlers.onBack);
-  mountBudgets(root, state, client, handlers);
+  applyBudgetsChrome(state, handlers.onBack, handlers.onOpenUnbudgeted);
+  mountBudgets(root, state, handlers);
+}
+
+/** Mounts the budget form (U3.1's `screens/budget-form.ts`, screen 04b),
+ * reached from Budgets' row/invitation/MainButton taps above. Per D511, all
+ * three outcomes — a successful save, a successful delete, and cancelling
+ * out (Cancel or BackButton) — return to a fully reloaded Budgets, the same
+ * re-fetch-on-return shape `06-categories.md` uses after 06b: this screen
+ * fetches nothing on open and performs no in-place patch, so there is
+ * nothing cheaper to fall back to on cancel. */
+async function showBudgetForm(mode: BudgetFormMode): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  setActiveScreen("budget-form");
+
+  const handlers: BudgetFormHandlers = {
+    onSaved: () => {
+      void showBudgets();
+    },
+    onCancelled: () => {
+      void showBudgets();
+    },
+    onDeleted: () => {
+      void showBudgets();
+    },
+  };
+
+  mountBudgetForm(root, mode, client, handlers);
 }
 
 /** Mounts Categories (U2.1, screen 06). BackButton returns to `categoriesReturnTo`

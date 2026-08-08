@@ -1,19 +1,14 @@
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
-import { ApiError, ForbiddenError, NotFoundError, RetryableError } from "../src/api/client";
+import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { BudgetPlanResponse, BudgetProgress, CategoryResponse } from "../src/api/types";
 import {
-  amountFieldError,
   applyBudgetsChrome,
-  budgetFormValid,
   buildBudgetsData,
-  createBudgetsController,
   createMemoryCache,
-  DEFAULT_NOTIFY_THRESHOLD,
   loadBudgets,
   nextUnbudgeted,
   renderBudgets,
   renderBudgetsView,
-  thresholdFieldError,
   type BudgetsApi,
   type BudgetsCache,
 } from "../src/screens/budgets";
@@ -119,9 +114,6 @@ function fakeApi(overrides: Partial<BudgetsApi> = {}): BudgetsApi {
     listCategories: vi.fn().mockResolvedValue(CATEGORIES),
     listBudgetPlans: vi.fn().mockResolvedValue([plan()]),
     getBudgetPlanProgress: vi.fn().mockResolvedValue(progress()),
-    createBudgetPlan: vi.fn(),
-    updateBudgetPlan: vi.fn(),
-    deleteBudgetPlan: vi.fn(),
     ...overrides,
   };
 }
@@ -193,286 +185,6 @@ describe("nextUnbudgeted", () => {
   });
 });
 
-// -- amountFieldError / thresholdFieldError / budgetFormValid ----------------
-
-describe("amountFieldError", () => {
-  it("is null while untouched and for a valid amount", () => {
-    expect(amountFieldError("")).toBeNull();
-    expect(amountFieldError("50.00")).toBeNull();
-  });
-
-  it("flags a non-positive or unparsable amount", () => {
-    expect(amountFieldError("0")).not.toBeNull();
-    expect(amountFieldError("abc")).not.toBeNull();
-  });
-});
-
-describe("thresholdFieldError", () => {
-  it("is null while untouched and for 0-100", () => {
-    expect(thresholdFieldError("")).toBeNull();
-    expect(thresholdFieldError("0")).toBeNull();
-    expect(thresholdFieldError("80")).toBeNull();
-    expect(thresholdFieldError("100")).toBeNull();
-  });
-
-  it("flags out-of-range or non-integer input", () => {
-    expect(thresholdFieldError("101")).not.toBeNull();
-    expect(thresholdFieldError("-1")).not.toBeNull();
-    expect(thresholdFieldError("abc")).not.toBeNull();
-    expect(thresholdFieldError("50.5")).not.toBeNull();
-  });
-});
-
-describe("budgetFormValid", () => {
-  it("requires both a valid amount and a valid, non-empty threshold", () => {
-    expect(budgetFormValid("50.00", "80")).toBe(true);
-    expect(budgetFormValid("0", "80")).toBe(false);
-    expect(budgetFormValid("50.00", "")).toBe(false);
-    expect(budgetFormValid("50.00", "101")).toBe(false);
-  });
-});
-
-// -- createBudgetsController ---------------------------------------------------
-
-describe("createBudgetsController", () => {
-  it("startCreate populates the draft from the unbudgeted category and defaults the threshold", () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const controller = createBudgetsController(fakeApi(), data);
-    controller.startCreate("cat-transport");
-    const state = controller.getState();
-    expect(state.edit).toEqual({
-      kind: "create",
-      categoryId: "cat-transport",
-      categoryLabel: "Transport",
-      colorVar: "var(--category-slot-2)",
-    });
-    expect(state.amountDraft).toBe("");
-    expect(state.thresholdDraft).toBe(String(DEFAULT_NOTIFY_THRESHOLD));
-  });
-
-  it("startEdit populates the draft from the existing plan's amount/threshold", () => {
-    const data = buildBudgetsData({
-      categories: CATEGORIES,
-      plans: [plan({ amount: 12345, notify_threshold: 65 })],
-      progress: [progress({ amount: 12345, notify_threshold: 65 })],
-      currency: "EUR",
-    });
-    const controller = createBudgetsController(fakeApi(), data);
-    controller.startEdit("plan-groceries");
-    const state = controller.getState();
-    expect(state.edit).toEqual({ kind: "edit", planId: "plan-groceries" });
-    expect(state.amountDraft).toBe("123.45");
-    expect(state.thresholdDraft).toBe("65");
-  });
-
-  it("cancelEdit closes the form and clears any save error", () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const controller = createBudgetsController(fakeApi(), data);
-    controller.startCreate("cat-groceries");
-    controller.cancelEdit();
-    expect(controller.getState().edit).toEqual({ kind: "closed" });
-  });
-
-  it("save() on create moves the category from unbudgeted to budgeted and resets the form", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const api = fakeApi({
-      createBudgetPlan: vi.fn().mockResolvedValue(plan({ category_id: "cat-transport", amount: 5000, notify_threshold: 70 })),
-      getBudgetPlanProgress: vi.fn().mockResolvedValue(
-        progress({ category_id: "cat-transport", amount: 5000, spent: 0, remaining: 5000, fill_pct: 0, notify_threshold: 70 }),
-      ),
-    });
-    const controller = createBudgetsController(api, data);
-    controller.startCreate("cat-transport");
-    controller.setAmountDraft("50.00");
-    controller.setThresholdDraft("70");
-    const outcome = await controller.save();
-    expect(outcome).toEqual({ status: "success" });
-    expect(api.createBudgetPlan).toHaveBeenCalledWith({ category_id: "cat-transport", amount: 5000, notify_threshold: 70 });
-    const state = controller.getState();
-    expect(state.edit).toEqual({ kind: "closed" });
-    expect(state.data.unbudgeted).toEqual([
-      { categoryId: "cat-groceries", label: "Groceries", colorVar: "var(--category-slot-1)" },
-    ]);
-    expect(state.data.budgeted).toHaveLength(1);
-    expect(state.data.budgeted[0]).toMatchObject({ categoryId: "cat-transport", label: "Transport", amountMinor: 5000 });
-  });
-
-  it("save() on edit replaces the row in place, keeping its label/colour", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [plan()], progress: [progress()], currency: "EUR" });
-    const api = fakeApi({
-      updateBudgetPlan: vi.fn().mockResolvedValue(plan({ amount: 30000, notify_threshold: 90 })),
-      getBudgetPlanProgress: vi.fn().mockResolvedValue(progress({ amount: 30000, spent: 10000, notify_threshold: 90 })),
-    });
-    const controller = createBudgetsController(api, data);
-    controller.startEdit("plan-groceries");
-    controller.setAmountDraft("300.00");
-    controller.setThresholdDraft("90");
-    const outcome = await controller.save();
-    expect(outcome).toEqual({ status: "success" });
-    expect(api.updateBudgetPlan).toHaveBeenCalledWith("plan-groceries", { amount: 30000, notify_threshold: 90 });
-    const state = controller.getState();
-    expect(state.data.budgeted[0]).toMatchObject({ label: "Groceries", colorVar: "var(--category-slot-1)", amountMinor: 30000 });
-  });
-
-  it("save() re-inserts the new row into budgeted in category creation order, not appended at the end", async () => {
-    const THREE: CategoryResponse[] = [
-      category("cat-a", "A", "2026-01-01T00:00:00Z"),
-      category("cat-b", "B", "2026-01-02T00:00:00Z"),
-      category("cat-c", "C", "2026-01-03T00:00:00Z"),
-    ];
-    const cPlan = plan({ id: "plan-c", category_id: "cat-c", amount: 9000, notify_threshold: 80 });
-    const data = buildBudgetsData({
-      categories: THREE,
-      plans: [cPlan],
-      progress: [progress({ budget_plan_id: "plan-c", category_id: "cat-c", amount: 9000 })],
-      currency: "EUR",
-    });
-    const api = fakeApi({
-      createBudgetPlan: vi.fn().mockResolvedValue(plan({ id: "plan-a", category_id: "cat-a", amount: 5000, notify_threshold: 80 })),
-      getBudgetPlanProgress: vi.fn().mockResolvedValue(progress({ budget_plan_id: "plan-a", category_id: "cat-a", amount: 5000 })),
-    });
-    const controller = createBudgetsController(api, data);
-    controller.startCreate("cat-a");
-    controller.setAmountDraft("50.00");
-    await controller.save();
-    const state = controller.getState();
-    expect(state.data.budgeted.map((r) => r.categoryId)).toEqual(["cat-a", "cat-c"]);
-  });
-
-  it("save() commits the plan with a zero-spend fallback when the follow-up progress fetch fails", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const api = fakeApi({
-      createBudgetPlan: vi.fn().mockResolvedValue(plan({ category_id: "cat-transport", amount: 5000, notify_threshold: 70 })),
-      getBudgetPlanProgress: vi.fn().mockRejectedValue(new RetryableError()),
-    });
-    const controller = createBudgetsController(api, data);
-    controller.startCreate("cat-transport");
-    controller.setAmountDraft("50.00");
-    const outcome = await controller.save();
-    expect(outcome).toEqual({ status: "success" });
-    const state = controller.getState();
-    expect(state.data.unbudgeted.map((r) => r.categoryId)).toEqual(["cat-groceries"]);
-    expect(state.data.budgeted[0]).toMatchObject({
-      categoryId: "cat-transport",
-      amountMinor: 5000,
-      spentMinor: 0,
-      fillPct: null,
-      spentKnown: false,
-    });
-  });
-
-  it("save() marks a real amount<=0 'no limit' plan as spentKnown (distinct from the fallback's unknown spend)", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const api = fakeApi({
-      createBudgetPlan: vi.fn().mockResolvedValue(plan({ category_id: "cat-transport", amount: 5000, notify_threshold: 70 })),
-      getBudgetPlanProgress: vi.fn().mockResolvedValue(
-        progress({ category_id: "cat-transport", amount: 5000, spent: 0, remaining: 5000, fill_pct: null, notify_threshold: 70 }),
-      ),
-    });
-    const controller = createBudgetsController(api, data);
-    controller.startCreate("cat-transport");
-    controller.setAmountDraft("50.00");
-    await controller.save();
-    const state = controller.getState();
-    expect(state.data.budgeted[0]).toMatchObject({ fillPct: null, spentKnown: true });
-  });
-
-  it("save() is blocked (no API call) with an invalid amount or threshold", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const api = fakeApi();
-    const controller = createBudgetsController(api, data);
-    controller.startCreate("cat-groceries");
-    controller.setAmountDraft("0");
-    controller.setThresholdDraft("80");
-    const outcome = await controller.save();
-    expect(outcome).toEqual({ status: "blocked" });
-    expect(api.createBudgetPlan).not.toHaveBeenCalled();
-  });
-
-  it("save() maps a 409 to the duplicate-plan message and keeps the form open", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const api = fakeApi({ createBudgetPlan: vi.fn().mockRejectedValue(new ApiError("Conflict", 409)) });
-    const controller = createBudgetsController(api, data);
-    controller.startCreate("cat-groceries");
-    controller.setAmountDraft("50.00");
-    const outcome = await controller.save();
-    expect(outcome).toEqual({ status: "error", message: "A budget plan already exists for this category and period." });
-    expect(controller.getState().edit.kind).toBe("create");
-  });
-
-  it("save() maps a 403 to a human forbidden message", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const api = fakeApi({ createBudgetPlan: vi.fn().mockRejectedValue(new ForbiddenError()) });
-    const controller = createBudgetsController(api, data);
-    controller.startCreate("cat-groceries");
-    controller.setAmountDraft("50.00");
-    const outcome = await controller.save();
-    expect(outcome).toEqual({ status: "error", message: "You don't have permission to do that." });
-  });
-
-  it("save() maps a 404 (stale category) to a human message", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const api = fakeApi({ createBudgetPlan: vi.fn().mockRejectedValue(new NotFoundError()) });
-    const controller = createBudgetsController(api, data);
-    controller.startCreate("cat-groceries");
-    controller.setAmountDraft("50.00");
-    const outcome = await controller.save();
-    expect(outcome).toEqual({ status: "error", message: "That category no longer exists." });
-  });
-
-  it("deleteBudget() moves the row back to unbudgeted on success", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [plan()], progress: [progress()], currency: "EUR" });
-    const api = fakeApi({ deleteBudgetPlan: vi.fn().mockResolvedValue(undefined) });
-    const controller = createBudgetsController(api, data);
-    const outcome = await controller.deleteBudget("plan-groceries");
-    expect(outcome).toEqual({ status: "success" });
-    const state = controller.getState();
-    expect(state.data.budgeted).toEqual([]);
-    expect(state.data.unbudgeted).toContainEqual({ categoryId: "cat-groceries", label: "Groceries", colorVar: "var(--category-slot-1)" });
-  });
-
-  it("deleteBudget() re-inserts the freed category into unbudgeted in creation order, not appended at the end", async () => {
-    const THREE: CategoryResponse[] = [
-      category("cat-a", "A", "2026-01-01T00:00:00Z"),
-      category("cat-b", "B", "2026-01-02T00:00:00Z"),
-      category("cat-c", "C", "2026-01-03T00:00:00Z"),
-    ];
-    const aPlan = plan({ id: "plan-a", category_id: "cat-a" });
-    const bPlan = plan({ id: "plan-b", category_id: "cat-b" });
-    const data = buildBudgetsData({
-      categories: THREE,
-      plans: [aPlan, bPlan],
-      progress: [
-        progress({ budget_plan_id: "plan-a", category_id: "cat-a" }),
-        progress({ budget_plan_id: "plan-b", category_id: "cat-b" }),
-      ],
-      currency: "EUR",
-    });
-    const api = fakeApi({ deleteBudgetPlan: vi.fn().mockResolvedValue(undefined) });
-    const controller = createBudgetsController(api, data);
-    await controller.deleteBudget("plan-a");
-    expect(controller.getState().data.unbudgeted.map((r) => r.categoryId)).toEqual(["cat-a", "cat-c"]);
-  });
-
-  it("deleteBudget() closes an open edit form for the deleted plan", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [plan()], progress: [progress()], currency: "EUR" });
-    const api = fakeApi({ deleteBudgetPlan: vi.fn().mockResolvedValue(undefined) });
-    const controller = createBudgetsController(api, data);
-    controller.startEdit("plan-groceries");
-    await controller.deleteBudget("plan-groceries");
-    expect(controller.getState().edit).toEqual({ kind: "closed" });
-  });
-
-  it("deleteBudget() surfaces a 403/404 as a human message and keeps the row", async () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [plan()], progress: [progress()], currency: "EUR" });
-    const api = fakeApi({ deleteBudgetPlan: vi.fn().mockRejectedValue(new ForbiddenError()) });
-    const controller = createBudgetsController(api, data);
-    const outcome = await controller.deleteBudget("plan-groceries");
-    expect(outcome).toEqual({ status: "error", message: "You don't have permission to do that." });
-    expect(controller.getState().data.budgeted).toHaveLength(1);
-  });
-});
-
 // -- renderBudgets / renderBudgetsView -----------------------------------------
 
 describe("renderBudgets", () => {
@@ -513,20 +225,6 @@ describe("renderBudgets", () => {
     expect(html).toContain('style="left:80%"');
   });
 
-  it("renders 'Spend unknown' instead of 'No limit set' for a row whose spend fetch fell back (spentKnown: false)", () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [plan()], progress: [progress()], currency: "EUR" });
-    const unknownRow = { ...data.budgeted[0], fillPct: null, spentKnown: false };
-    const html = renderBudgetsView({
-      data: { ...data, budgeted: [unknownRow] },
-      edit: { kind: "closed" },
-      amountDraft: "",
-      thresholdDraft: "80",
-      saveError: null,
-    });
-    expect(html).toContain("Spend unknown");
-    expect(html).not.toContain("No limit set");
-  });
-
   it("renders the exceeded state with an icon, text, and the status-red class (not colour alone)", () => {
     const data = buildBudgetsData({
       categories: CATEGORIES,
@@ -559,31 +257,13 @@ describe("renderBudgets", () => {
     expect(html).toContain("2026-08-02T09:00:00Z");
   });
 
-  it("renders the create form with the category name and a disabled Save until valid, no Delete button", () => {
-    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
-    const html = renderBudgetsView({
-      data,
-      edit: { kind: "create", categoryId: "cat-groceries", categoryLabel: "Groceries", colorVar: "var(--category-slot-1)" },
-      amountDraft: "",
-      thresholdDraft: "80",
-      saveError: null,
-    });
-    expect(html).toContain("Set budget for Groceries");
-    expect(html).toContain('data-action="save-budget" disabled');
-    expect(html).not.toContain('data-action="delete-budget"');
-  });
-
-  it("renders the edit form with a Delete button and the save error", () => {
+  it("never renders a form inside the Budgets screen — no budget-form/amountDraft/spentKnown leaks out of the deleted inline form", () => {
     const data = buildBudgetsData({ categories: CATEGORIES, plans: [plan()], progress: [progress()], currency: "EUR" });
-    const html = renderBudgetsView({
-      data,
-      edit: { kind: "edit", planId: "plan-groceries" },
-      amountDraft: "200.00",
-      thresholdDraft: "80",
-      saveError: "A budget plan already exists for this category and period.",
-    });
-    expect(html).toContain('data-action="delete-budget"');
-    expect(html).toContain("already exists");
+    const html = renderBudgetsView(data);
+    expect(html).not.toContain("budget-form");
+    expect(html).not.toContain('data-action="save-budget"');
+    expect(html).not.toContain('data-action="cancel-budget"');
+    expect(html).not.toContain('data-action="delete-budget"');
   });
 });
 
@@ -659,7 +339,7 @@ describe("applyBudgetsChrome", () => {
     expect(webApp.MainButton.hide).toHaveBeenCalled();
   });
 
-  it("invokes onMainButtonTap with the next unbudgeted category id when MainButton is tapped", () => {
+  it("invokes onMainButtonTap with the next unbudgeted row and the screen's currency when MainButton is tapped", () => {
     const webApp = fakeWebApp();
     installWebApp(webApp);
     const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
@@ -667,6 +347,9 @@ describe("applyBudgetsChrome", () => {
     applyBudgetsChrome({ status: "ready", ...data }, vi.fn(), onTap);
     const handler = (webApp.MainButton.onClick as Mock).mock.calls[0][0] as () => void;
     handler();
-    expect(onTap).toHaveBeenCalledWith("cat-groceries");
+    expect(onTap).toHaveBeenCalledWith(
+      { categoryId: "cat-groceries", label: "Groceries", colorVar: "var(--category-slot-1)" },
+      "EUR",
+    );
   });
 });
