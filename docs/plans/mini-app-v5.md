@@ -241,7 +241,7 @@ and has no observable effect on its own.
 
 ### M2 — The colour picker
 
-- [ ] **U2.1 `components/color-picker.ts`** — implements
+- [x] **U2.1 `components/color-picker.ts`** — implements
       `docs/ui/components/color-picker.md` as a standalone component with its
       own tests. Not yet wired into any screen. Includes the
       `nextGridFocusIndex(…, columns)` parameter (see Contracts).
@@ -474,12 +474,31 @@ Telegram client. They are the actual acceptance gate for M2 and M3.
 
 ## STATE (handoff)
 - **Done:** planning, plus **U0.1** (widen `color_slot` to 1–72), **U0.2**
-  (notify-threshold default 80 → 70), **U1.1** (generate the ramp) and **U1.2**
-  (`category-colors.ts` knows all 72). M0 and M1 are complete. The five spec
-  files in the table at the top are written and are the source of truth; the
-  60 ramp hexes and their contrast figures are already in `design-system.md`,
-  so U1.1 reproduces them rather than inventing them.
-- **Next:** M2 starts with U2.1 (`components/color-picker.ts`).
+  (notify-threshold default 80 → 70), **U1.1** (generate the ramp), **U1.2**
+  (`category-colors.ts` knows all 72) and **U2.1** (`components/color-picker.ts`).
+  M0 and M1 are complete. The five spec files in the table at the top are
+  written and are the source of truth; the 60 ramp hexes and their contrast
+  figures are already in `design-system.md`, so U1.1 reproduces them rather
+  than inventing them.
+- **Next:** U2.2 — wire `color-picker.ts` into the category form and delete
+  the 12-swatch grid.
+- **U2.1 note:** `renderColorSheet` takes no `onSelect`/`onMore` — it is a
+  pure render function only. `mountColorPicker` wires the quick row alone
+  ("Not yet wired into any screen" is this unit's own scope); the sheet's
+  open/closed flag and its circles' click/keyboard wiring are U2.2's job, the
+  same way `screens/categories.ts` already wires its own `cat-swatch` grid
+  manually today — the component owns neither (component doc's Inputs table).
+  U2.2 should wire the sheet's arrow keys with
+  `nextGridFocusIndex(cellCount, from, key, 6)` — `color-picker.ts` re-exports
+  `SHEET_COLUMNS` (`= 6`) for that call so the column count isn't a second
+  magic number. The sheet markup literally reuses `class="drp-root"` /
+  `"drp-scrim"` / `"drp-sheet"` / `"drp-title"` from `date-range-picker.ts`'s
+  CSS — no new keyframe, no new scrim rule; a future host only needs its own
+  `data-testid` to query the sheet root it renders.
+  `nextGridFocusIndex` (`screens/categories.ts`) gained a `columns = GRID_COLUMNS`
+  parameter; its four pre-existing calls (06a's grid, the V3 swatch grid ×2
+  call sites, `category-picker.ts`'s own separate local copy — untouched)
+  keep the default and stay green.
 - **U1.2 note:** `categorySlotName`'s ramp half is computed positionally
   (family list + `Math.floor`/`%` against `RAMP_FIRST_SLOT`/`RAMP_STEP_COUNT`),
   not a 60-entry lookup table — the family order
