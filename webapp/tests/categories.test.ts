@@ -453,6 +453,20 @@ describe("nextGridFocusIndex", () => {
     expect(nextGridFocusIndex(5, 2, "Tab")).toBe(2);
     expect(nextGridFocusIndex(0, 0, "ArrowRight")).toBe(0);
   });
+
+  // U2.1: the `columns` parameter `components/color-picker.ts` needs — the
+  // sheet's 6-column grid and the quick row's single-row wrap. Default-arg
+  // calls above (all 4 existing GRID_COLUMNS callers) stay green untouched.
+  it("wraps down/up by a caller-supplied column count, not just the default 4", () => {
+    expect(nextGridFocusIndex(72, 0, "ArrowDown", 6)).toBe(6);
+    expect(nextGridFocusIndex(72, 6, "ArrowUp", 6)).toBe(0);
+    expect(nextGridFocusIndex(72, 66, "ArrowDown", 6)).toBe(0); // last row wraps to the top
+  });
+
+  it("makes ArrowUp/ArrowDown a no-op for a single row when columns equals the cell count", () => {
+    expect(nextGridFocusIndex(8, 3, "ArrowDown", 8)).toBe(3);
+    expect(nextGridFocusIndex(9, 5, "ArrowUp", 9)).toBe(5);
+  });
 });
 
 // -- applyCategoriesChrome ----------------------------------------------------

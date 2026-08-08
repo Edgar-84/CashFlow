@@ -380,9 +380,13 @@ export const GRID_COLUMNS = 4;
  * `category-picker.md`'s "wrapping by row" rule). Left/Right wrap linearly
  * across the whole cell list (end of the grid wraps to its start); Up/Down
  * jump a full row and wrap to the opposite edge, clamped into range for a
- * ragged last row (fewer than `GRID_COLUMNS` cells) so an out-of-bounds jump
- * never returns an invalid index. Returns `from` unchanged for any other key. */
-export function nextGridFocusIndex(cellCount: number, from: number, key: string): number {
+ * ragged last row (fewer than `columns` cells) so an out-of-bounds jump
+ * never returns an invalid index. Returns `from` unchanged for any other key.
+ * `columns` defaults to this screen's own `GRID_COLUMNS` so 06a's grid and
+ * the (soon-removed) V3 swatch grid are untouched; `components/color-picker.ts`
+ * (U2.1) is the first other caller — its sheet passes 6, its quick row passes
+ * its own length (a single row, so Up/Down are a no-op there by construction). */
+export function nextGridFocusIndex(cellCount: number, from: number, key: string, columns = GRID_COLUMNS): number {
   if (cellCount === 0) {
     return from;
   }
@@ -392,11 +396,11 @@ export function nextGridFocusIndex(cellCount: number, from: number, key: string)
     case "ArrowLeft":
       return (from - 1 + cellCount) % cellCount;
     case "ArrowDown": {
-      const next = from + GRID_COLUMNS;
+      const next = from + columns;
       return next < cellCount ? next : next % cellCount;
     }
     case "ArrowUp": {
-      const prev = from - GRID_COLUMNS;
+      const prev = from - columns;
       return prev >= 0 ? prev : (prev + cellCount) % cellCount;
     }
     default:
