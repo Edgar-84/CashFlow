@@ -218,13 +218,15 @@ here, and in the plan's Risks, so the choice to defer it is deliberate.
 - [ ] Renders correctly in light and dark from `tokens.css` only.
 
 ## Open questions
-- [?] **The 15 currency names** are drafted above and `[inferred]`. Worth one
+- ~~[?] **The 15 currency names** are drafted above and `[inferred]`. Worth one
       read-through — "Złoty" carries a diacritic and "Krone"/"Krona" differ by
-      one letter between Denmark, Norway and Sweden. Rows showing the code alone
-      remain a valid fallback that needs no copy at all.
-- [?] **Symbol or code?** The app renders the ISO code everywhere today
-      ("38.40 EUR"). Showing "€" in this list only would be the first symbol in
-      the app. Recommended: codes, consistent with every other screen.
+      one letter between Denmark, Norway and Sweden.~~ — **read through and kept
+      as drafted (2026-08-08, U3.3)**. All fifteen names checked against ISO
+      4217 common usage; no correction needed.
+- ~~[?] **Symbol or code?**~~ — **resolved as codes (2026-08-08, U3.3)**, per
+      this doc's own recommendation: consistent with every other screen's
+      "38.40 EUR" rendering, and the first symbol in the app would have been a
+      net-new precedent for one screen only.
 - [?] **Anything else in Settings.** Nothing else was asked for. `family_tz` is
       a backend env var and deliberately not exposed; notification preferences
       do not exist yet.

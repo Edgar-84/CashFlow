@@ -454,7 +454,7 @@ navigate into screens that must already accept what they will be handed.
       Files: `webapp/src/screens/home.ts`, `webapp/src/main.ts`,
       `webapp/src/styles/app.css`, `webapp/tests/home.test.ts`.
       Model: sonnet.
-- [ ] **U3.3 Screen 08 — Settings** — implements
+- [x] **U3.3 Screen 08 — Settings** — implements
       `docs/ui/screens/08-settings.md` on top of U0.4.
       AC: **every acceptance criterion in that spec**, notably — 15 currencies
       in the enum's order, each with code and name; only the account's current
@@ -1154,11 +1154,31 @@ human with a phone:
   centring on the 56px Add button wins over the spec text's own "12px inset"
   wording) and the `side-menu-closing`/`side-menu-slide-out`/
   `side-menu-scrim-fade-out` rules the host-driven close needs.
-- **Next:** `U3.3` Screen 08 — Settings (M3) — depends on U0.4, already done;
-  unblocked.
-- **Nothing is blocked on input any more.** U3.3's currency names are drafted
-  in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
-  implementation time.
+- **U3.3 done.** New `screens/settings.ts`: `CURRENCY_ORDER`/`CURRENCY_NAMES`
+  are a client-side constant (not fetched — `08-settings.md`'s copy table,
+  reviewed and kept as drafted, no correction needed), `loadSettings` is one
+  `GET /users/me` call (already returns `currency`+`role`, no new backend
+  call), and `createSettingsController` owns the draft selection plus the
+  `PATCH /accounts/me` round trip with the same double-submit guard shape as
+  `tags.ts::createTagFormController`. Unlike every other screen's MainButton,
+  Save goes through Telegram's confirm popup first (`settingsConfirmMessage`)
+  before the PATCH — folded into one string, same constraint every other
+  confirm flow already works within (`showConfirm` has no separate title or
+  custom button text). No top-level `forbidden` status: `GET /users/me` never
+  403s for any role, so the 403/non-admin state is a `ready`/`offline`
+  sub-case (`role !== "admin"`) rendered inline with the current currency
+  still visible, per the screen doc. `api/types.ts` gained `AccountResponse`/
+  `AccountUpdate` (mirroring `models/account.py`); `api/client.ts` gained
+  `updateAccount`. `main.ts`'s `"settings"` menu branch (U3.2's `// TODO`)
+  now calls `showSettings`; both its `onBack` and `onSaved` just call
+  `showHome()` — `refreshHome` always re-fetches live (cache is only a
+  failure fallback), which is what relabels every amount with the new
+  currency without reopening the app, no cache invalidation needed.
+  `app.css` gained a `.settings-*` block, entirely from existing
+  design-system.md values (48px row per its Sizing table, 10px/600/0.11em
+  eyebrow reusing `.cat-archived-header`'s type ramp) — no new tokens.
+- **Next:** `U4.1` e2e smoke (M4) — depends on U0.3/U0.4, both done;
+  unblocked. M5 (U5.1/U5.2) still follows it, depending on U3.2 only.
 - **Gotchas for the next session:**
   - `GET /expenses`'s period offset is `period_offset`, **not** `offset` — the
     latter paginates and the bot depends on it (D402).
