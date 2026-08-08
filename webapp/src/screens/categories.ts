@@ -25,10 +25,11 @@
  * `monthTotalFor` below.
  */
 
-import { assignCategoryColors, categorySlotCssVar, categorySlotName } from "../lib/category-colors";
+import { assignCategoryColors, categorySlotCssVar } from "../lib/category-colors";
 import { formatAmount } from "../lib/money";
 import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ApiError, ForbiddenError } from "../api/client";
+import { mountColorPicker, renderColorQuickRow, renderColorSheet, SHEET_COLUMNS } from "../components/color-picker";
 import type { CategoryResponse, CategoryTotal, Currency, Uuid } from "../api/types";
 
 // -- data ---------------------------------------------------------------
@@ -665,22 +666,11 @@ export function wireCategoryFormBackButton(
 
 // -- form presentation --------------------------------------------------
 
-const CHECK_SVG =
-  '<svg width="10" height="8" viewBox="0 0 10 8" aria-hidden="true" focusable="false">' +
-  '<path d="M1 4l2.5 2.5L9 1" stroke="currentColor" stroke-width="1.6" fill="none" ' +
-  'stroke-linecap="round" stroke-linejoin="round" /></svg>';
-
-function renderSwatchCell(slot: number, draft: CategoryFormDraft, usedSlots: Set<number>): string {
-  const selected = draft.colorSlot === slot;
-  const inUse = usedSlots.has(slot);
-  const name = categorySlotName(slot);
-  const ariaLabel = inUse ? `${name}, in use` : name;
-  return `<button type="button" class="cat-swatch-cell" data-testid="cat-swatch" data-slot="${slot}" role="radio" aria-checked="${selected}" aria-label="${escapeHtml(ariaLabel)}">
-    <span class="cat-swatch" style="background:var(--category-slot-${slot})" aria-hidden="true">${selected ? `<span class="cat-swatch-check">${CHECK_SVG}</span>` : ""}</span>
-    <span class="cat-swatch-name" aria-hidden="true">${escapeHtml(name)}</span>
-    <span class="cat-swatch-inuse" aria-hidden="true">${inUse ? "In use" : ""}</span>
-  </button>`;
-}
+// No-op stand-ins for the callbacks `ColorPickerProps` requires — the pure
+// render never invokes them, only `mountColorPicker`/the sheet's own wiring
+// (in `mountCategoryForm`, below) attach the real handlers, same convention
+// as `add-expense.ts`'s own `noop` for `renderCategoryPicker`.
+const noop = () => {};
 
 function renderNameField(draft: CategoryFormDraft, message: { text: string; kind: "error" | "warning" } | null): string {
   return `<div>
@@ -697,12 +687,6 @@ export interface CategoryFormViewState {
   /** Active categories only, excluding this one — the duplicate-name check's
    * scope (2026-08-05, HUMAN). */
   activeSiblings: { id: Uuid; name: string }[];
-  /** Raw explicit `color_slot`s from any *other* category, active or
-   * archived — an archived category still shows its colour in the archived
-   * row list, so its slot still reads as "taken" here. Never includes a
-   * position-fallback slot (only an explicit choice counts as "taken").
-   * `[inferred]`, not one of the confirmed open questions. */
-  usedSlots: Set<number>;
   /** Only after the Name field has been blurred, or a blocked Save attempt —
    * never shown immediately on open (docs/ui/screens/06b-category-form.md). */
   nameInteracted: boolean;
@@ -725,13 +709,13 @@ export function renderCategoryForm(state: CategoryFormViewState): string {
         ? { text: warning, kind: "warning" as const }
         : null;
 
-  const swatches = Array.from({ length: 12 }, (_, i) => renderSwatchCell(i + 1, draft, state.usedSlots)).join("");
+  const colorPicker = renderColorQuickRow({ selectedSlot: draft.colorSlot, onSelect: noop, onMore: noop });
 
   return `<div class="cat-form" data-testid="cat-form">
     ${renderNameField(draft, message)}
     <div class="cat-form-section">
       <p class="cat-form-label">Colour</p>
-      <div class="cat-swatch-grid" role="radiogroup" aria-label="Colour" data-testid="cat-swatch-grid">${swatches}</div>
+      <div class="cat-color-picker-slot" data-testid="cat-color-picker-slot">${colorPicker}</div>
     </div>
     ${state.submitError ? `<p class="submit-error" data-testid="cat-form-submit-error">${escapeHtml(state.submitError)}</p>` : ""}
     ${draft.id ? renderDeleteTrigger(state.expenseCount) : ""}
@@ -762,7 +746,6 @@ export function mountCategoryForm(
   api: CategoryFormApi,
   original: CategoryFormDraft,
   activeSiblings: { id: Uuid; name: string }[],
-  usedSlots: Set<number>,
   handlers: CategoryFormHandlers,
   expenseCount = 0,
 ): void {
@@ -778,7 +761,6 @@ export function mountCategoryForm(
     root.innerHTML = renderCategoryForm({
       draft: controller.getDraft(),
       activeSiblings,
-      usedSlots,
       nameInteracted,
       submitError,
       expenseCount,
@@ -786,6 +768,68 @@ export function mountCategoryForm(
     wire();
     applyCategoryFormChrome(controller.getDraft(), original);
   };
+
+  // Restores this form's own dirty-check BackButton handler — the "normal"
+  // state, both on first mount and every time the colour sheet (below)
+  // closes and hands the handler back.
+  function applyFormBackButton(): void {
+    wireCategoryFormBackButton(controller.getDraft, original, handlers.onClose);
+  }
+
+  // The sheet is mount-only, like `date-range-picker.ts`'s own sheet (see
+  // `screens/home.ts::openPicker`) — `renderCategoryForm` never includes it,
+  // so a colour pick never has to survive a full form re-render. Appended as
+  // a sibling of the form root rather than replacing anything, so the next
+  // `render()` (e.g. after selecting a colour) tears it down for free.
+  function openColorSheet(): void {
+    const sheetRoot = document.createElement("div");
+    root.appendChild(sheetRoot);
+
+    const close = (): void => {
+      sheetRoot.remove();
+      applyFormBackButton();
+    };
+    // BackButton closes the sheet, not the screen (component doc's
+    // Accessibility section: "the sheet is the innermost dismissible thing").
+    setBackButtonHandler(close);
+
+    sheetRoot.innerHTML = renderColorSheet(controller.getDraft().colorSlot);
+
+    sheetRoot.querySelector('[data-testid="clp-scrim"]')?.addEventListener("click", close);
+
+    const grid = sheetRoot.querySelector<HTMLElement>('[data-testid="clp-grid"]');
+    const circles = grid ? Array.from(grid.querySelectorAll<HTMLElement>(".clp-circle")) : [];
+    for (const circle of circles) {
+      circle.addEventListener("click", () => {
+        haptics.selection();
+        const slot = Number(circle.dataset.slot);
+        controller.setColorSlot(slot);
+        close();
+        render();
+      });
+    }
+
+    // Same 6-column wrap as the component's own quick row keyboard handling
+    // (`components/color-picker.ts`), sharing `nextGridFocusIndex`.
+    grid?.addEventListener("keydown", (e) => {
+      const from = circles.indexOf(document.activeElement as HTMLElement);
+      if (from === -1) {
+        return;
+      }
+      const nextIndex = nextGridFocusIndex(circles.length, from, e.key, SHEET_COLUMNS);
+      if (nextIndex === from) {
+        return;
+      }
+      e.preventDefault();
+      circles[nextIndex]?.focus();
+    });
+
+    sheetRoot.querySelector<HTMLElement>('[data-testid="clp-sheet"]')?.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        close();
+      }
+    });
+  }
 
   function wire(): void {
     const input = root.querySelector<HTMLInputElement>('[data-testid="cat-name-input"]');
@@ -805,31 +849,17 @@ export function mountCategoryForm(
       }
     });
 
-    root.querySelectorAll<HTMLElement>('[data-testid="cat-swatch"]').forEach((el) => {
-      el.addEventListener("click", () => {
-        const slot = Number(el.getAttribute("data-slot"));
-        controller.setColorSlot(slot);
-        render();
+    const pickerSlot = root.querySelector<HTMLElement>('[data-testid="cat-color-picker-slot"]');
+    if (pickerSlot) {
+      mountColorPicker(pickerSlot, {
+        selectedSlot: controller.getDraft().colorSlot,
+        onSelect: (slot) => {
+          controller.setColorSlot(slot);
+          render();
+        },
+        onMore: openColorSheet,
       });
-    });
-
-    // Arrow-key navigation within the 12-swatch grid, wrapping by row — same
-    // `nextGridFocusIndex` primitive 06a's grid uses (GRID_COLUMNS applies
-    // here too: both grids are 4 columns).
-    const swatchGrid = root.querySelector<HTMLElement>('[data-testid="cat-swatch-grid"]');
-    const swatches = swatchGrid ? Array.from(swatchGrid.querySelectorAll<HTMLElement>(".cat-swatch-cell")) : [];
-    swatchGrid?.addEventListener("keydown", (e) => {
-      const from = swatches.indexOf(document.activeElement as HTMLElement);
-      if (from === -1) {
-        return;
-      }
-      const nextIndex = nextGridFocusIndex(swatches.length, from, e.key);
-      if (nextIndex === from) {
-        return;
-      }
-      e.preventDefault();
-      swatches[nextIndex]?.focus();
-    });
+    }
 
     root.querySelector('[data-action="delete-category"]')?.addEventListener("click", () => {
       const id = original.id;
@@ -864,7 +894,7 @@ export function mountCategoryForm(
     el.className = `cat-form-message${message ? ` cat-form-message--${error ? "error" : "warning"}` : ""}`;
   }
 
-  wireCategoryFormBackButton(controller.getDraft, original, handlers.onClose);
+  applyFormBackButton();
 
   mainButton.onClick(() => {
     void (async () => {

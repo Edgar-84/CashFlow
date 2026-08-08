@@ -8,8 +8,8 @@
  * `renderColorSheet` takes no callbacks and `mountColorPicker` only wires the
  * quick row: the component owns neither the sheet's open/closed flag nor the
  * draft (component doc's Inputs) — the host screen renders the sheet from
- * its own state and wires its circles itself, the same way `screens/
- * categories.ts` already wires its own `cat-swatch` grid today.
+ * its own state and wires its circles itself, the way `screens/
+ * categories.ts::mountCategoryForm`'s `openColorSheet` (U2.2) does.
  */
 
 import { categorySlotCssVar, categorySlotName, PALETTE_SLOT_COUNT, QUICK_SLOTS } from "../lib/category-colors";
