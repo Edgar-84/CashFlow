@@ -11,7 +11,7 @@ class BudgetPlanBase(BaseModel):
     category_id: UUID
     amount: int  # minor units (kopecks/cents) — NEVER float
     period: Period = "monthly"
-    notify_threshold: int = Field(default=80, ge=0, le=100)  # percent
+    notify_threshold: int = Field(default=70, ge=0, le=100)  # percent (D507; was 80)
 
 
 class BudgetPlanCreate(BudgetPlanBase):

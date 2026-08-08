@@ -147,7 +147,11 @@ async def test_get_budget_plan_as_viewer(
     response = await client.get(f"/budgets/{plan.id}", headers=auth_headers(viewer.tg_id))
 
     assert response.status_code == 200
-    assert response.json()["id"] == str(plan.id)
+    body = response.json()
+    assert body["id"] == str(plan.id)
+    # D507: the default changed 80 -> 70, but a plan already seeded at 80
+    # (the `plan` fixture) must keep reading 80 — no existing row changes.
+    assert body["notify_threshold"] == 80
 
 
 async def test_get_missing_budget_plan_is_404(
@@ -199,6 +203,7 @@ async def test_create_budget_plan_as_admin(
     body = response.json()
     assert body["amount"] == 5_000
     assert body["account_id"] == str(account_id)
+    assert body["notify_threshold"] == 70  # D507 default, no threshold sent
 
 
 async def test_create_budget_plan_as_member_is_403(

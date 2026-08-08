@@ -196,7 +196,7 @@ and has no observable effect on its own.
       `tests/test_models.py`, `tests/test_categories_api.py`.
       Model: sonnet.
 
-- [ ] **U0.2 Notify-threshold default 80 → 70** (D507) — one constant in the
+- [x] **U0.2 Notify-threshold default 80 → 70** (D507) — one constant in the
       model, one in the bot.
       AC: `POST /budgets` with no `notify_threshold` stores **70** and the
       response says 70; a budget created through the bot's flow without an
@@ -473,13 +473,16 @@ Telegram client. They are the actual acceptance gate for M2 and M3.
   requests per save; cheap at family scale.
 
 ## STATE (handoff)
-- **Done:** planning, plus **U0.1** (widen `color_slot` to 1–72). The five
-  spec files in the table at the top are written and are the source of truth;
-  the 60 ramp hexes and their contrast figures are already in
-  `design-system.md`, so U1.1 reproduces them rather than inventing them.
-- **Next:** U0.2 (notify-threshold default 80 → 70). M0's two units are
-  independent of each other and of everything else and can go in either
-  order.
+- **Done:** planning, plus **U0.1** (widen `color_slot` to 1–72) and **U0.2**
+  (notify-threshold default 80 → 70). M0 is complete. The five spec files in
+  the table at the top are written and are the source of truth; the 60 ramp
+  hexes and their contrast figures are already in `design-system.md`, so
+  U1.1 reproduces them rather than inventing them.
+- **Next:** M1 (the palette), starting with U1.1.
+- **U0.2 note:** no migration, no existing row rewritten — `BudgetPlanResponse`
+  built with an explicit `notify_threshold=80` still reads 80
+  (`test_budget_plan_models`, `test_get_budget_plan_as_viewer`), proving the
+  field default only fills in absent values.
 - **U0.1 note:** `CategoryResponse.color_slot` was found still carrying the
   old `ge=1, le=12` bound — the plan's Contracts section assumed it was
   already lenient, but it wasn't. Fixed to fully unbounded (`int | None =
