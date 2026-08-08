@@ -345,7 +345,7 @@ session, and either can be reverted without the other.
 
 ### M4 — Smoke
 
-- [ ] **U4.1 e2e smoke: a ramp slot and a defaulted threshold, through
+- [x] **U4.1 e2e smoke: a ramp slot and a defaulted threshold, through
       `initData`** — one test through the real stack, the same shape as V4's
       U4.1.
       AC: a category created through `initData` auth with `color_slot: 72`
@@ -485,14 +485,26 @@ Telegram client. They are the actual acceptance gate for M2 and M3.
   (notify-threshold default 80 → 70), **U1.1** (generate the ramp), **U1.2**
   (`category-colors.ts` knows all 72), **U2.1** (`components/color-picker.ts`),
   **U2.2** (the category form wires it in, the 12-swatch grid is gone),
-  **U3.1** (`screens/budget-form.ts` as a standalone screen) and **U3.2**
-  (`screens/budgets.ts` navigates to it, the inline form is deleted). M0, M1,
-  M2 and M3 are complete. The five spec files in the table at the top are
-  written and are the source of truth; the 60 ramp hexes and their contrast
-  figures are already in `design-system.md`, so U1.1 reproduces them rather
-  than inventing them.
-- **Next:** U4.1 — the e2e smoke test through `initData` (a ramp slot, a
-  defaulted threshold).
+  **U3.1** (`screens/budget-form.ts` as a standalone screen), **U3.2**
+  (`screens/budgets.ts` navigates to it, the inline form is deleted) and
+  **U4.1** (the e2e smoke test through `initData`). M0, M1, M2, M3 and M4 are
+  all complete — the plan's units are done. The five spec files in the table
+  at the top are written and are the source of truth; the 60 ramp hexes and
+  their contrast figures are already in `design-system.md`, so U1.1
+  reproduces them rather than inventing them.
+- **Next:** none — only the two live-test checkpoints (CP1, CP2) remain, and
+  those are the human on a real device, not a unit.
+- **U4.1 note:** added one fixture/test pair,
+  `ramp_and_threshold_fixtures`/`test_ramp_slot_and_defaulted_notify_threshold_through_init_data`,
+  to the existing `tests/test_e2e_smoke.py` (same file every prior plan's
+  U4.1/U3.1 smoke unit has extended — see its module docstring). Needed two
+  separate categories for the two budget-creation assertions:
+  `budget_plans` carries `UNIQUE (category_id, account_id, period)`
+  (`docs/SCHEMA.sql`), so a second `POST /budgets` against the same category
+  would 409 rather than exercise the explicit-`85` path. Ran via
+  `bash scripts/integration_docker.sh` (no local Postgres reachable in this
+  session) — all 8 tests in the file green, including the 7 pre-existing
+  ones, confirming this addition didn't disturb their fixtures.
 - **U3.2 note:** deleting the inline form's mutation path left two fields
   dead and they were removed with it, beyond what the AC named directly:
   `BudgetRow.spentKnown` (only existed to flag `fetchProgress`'s failure

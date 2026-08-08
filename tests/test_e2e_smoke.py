@@ -1,7 +1,8 @@
 """MVP U5.1 e2e smoke (@integration), extended by family-features-v1_1 U3.1,
-mini-app-v2 U3.1, mini-app-v3 U4.1 and mini-app-v4 U4.1 (same-numbered but
-unrelated units in different plan files — see each test's docstring for
-which one it belongs to): bot client / initData -> real API -> test DB.
+mini-app-v2 U3.1, mini-app-v3 U4.1, mini-app-v4 U4.1 and mini-app-v5 U4.1
+(same-numbered but unrelated units in different plan files — see each
+test's docstring for which one it belongs to): bot client / initData ->
+real API -> test DB.
 
 Exercises the actual production path through bot.client.BackendClient (the
 bot's only channel to the backend, bot/CLAUDE.md) against the real FastAPI
@@ -40,6 +41,12 @@ the same way the statistics routes do and key off `spent_at`, not
 `created_at` — plus `PATCH /accounts/me`'s currency relabel (D401/D400): no
 `expenses.amount` changes, `GET /users/me` reports the new code, and a
 non-admin is 403.
+
+mini-app-v5 U4.1 adds the last initData scenario for this plan: a category
+created with the widened palette's top slot (`color_slot: 72`, D500) reads
+back 72, and one past it (`73`) is 422 with nothing written; a budget
+created with no `notify_threshold` reads back the new default (`70`, D507)
+and one with an explicit `85` reads back 85 unchanged.
 """
 
 import json
@@ -655,3 +662,104 @@ async def test_filtered_expense_list_and_currency_relabel_through_init_data(
                 "/accounts/me", headers=member_headers, json={"currency": "USD"}
             )
             assert member_forbidden.status_code == 403
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def ramp_and_threshold_fixtures(db_pool: asyncpg.Pool) -> AsyncIterator[dict[str, Any]]:
+    """mini-app-v5 U4.1: a fresh account with a single ADMIN user. Category
+    create (`color_slot`) and budget create both need their resource's write
+    access, which the default matrix (api/CLAUDE.md) grants only to `admin`
+    — `member` is read-only on both. A dedicated account keeps this
+    scenario's categories/budgets from touching the fixed totals the other
+    tests in this module assert on.
+    """
+    tg_id = uuid4().int % 1_000_000_000
+    account_id: UUID | None = None
+    async with db_pool.acquire() as conn:
+        try:
+            account_id = await make_account(conn, name="Ramp Threshold Smoke Account")
+            admin = await make_user(
+                conn, account_id=account_id, tg_id=tg_id, name="Admin", role=Role.ADMIN
+            )
+            yield {"account_id": account_id, "admin": admin}
+        finally:
+            if account_id is not None:
+                await conn.execute("DELETE FROM budget_plans WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM users WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM categories WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM accounts WHERE id = $1", account_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_ramp_slot_and_defaulted_notify_threshold_through_init_data(
+    ramp_and_threshold_fixtures: dict[str, Any],
+) -> None:
+    """mini-app-v5 U4.1: one signed-initData scenario over the real app/DB —
+    a category created with the widened palette's top slot (`color_slot: 72`,
+    D500) reads back 72 in both the create response and a subsequent list;
+    one past it (`73`) is 422 and writes nothing (proven by re-listing and
+    finding only the accepted category); a budget created with no
+    `notify_threshold` reads back the new default (`70`, D507); a second
+    budget, in a different category (the `UNIQUE (category_id, account_id,
+    period)` constraint, docs/SCHEMA.sql, forbids a second plan on the same
+    one), with an explicit `85` reads back 85 unchanged.
+    """
+    admin = ramp_and_threshold_fixtures["admin"]
+    headers = {"X-Telegram-Init-Data": build_init_data(get_settings().bot_token, admin.tg_id)}
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as http_client:
+            ramp_category = await http_client.post(
+                "/categories",
+                headers=headers,
+                json={"name": "Ramp Category", "color_slot": 72},
+            )
+            assert ramp_category.status_code == 201
+            ramp_category_id = ramp_category.json()["id"]
+            assert ramp_category.json()["color_slot"] == 72
+
+            listed = await http_client.get("/categories", headers=headers)
+            assert listed.status_code == 200
+            assert {c["id"]: c["color_slot"] for c in listed.json()}[ramp_category_id] == 72
+
+            out_of_range = await http_client.post(
+                "/categories",
+                headers=headers,
+                json={"name": "Out Of Range Category", "color_slot": 73},
+            )
+            assert out_of_range.status_code == 422
+
+            after_rejected = await http_client.get("/categories", headers=headers)
+            assert after_rejected.status_code == 200
+            assert {c["id"] for c in after_rejected.json()} == {ramp_category_id}
+
+            budget_category_a = await http_client.post(
+                "/categories", headers=headers, json={"name": "Budget Category A"}
+            )
+            assert budget_category_a.status_code == 201
+            category_a_id = budget_category_a.json()["id"]
+
+            defaulted_budget = await http_client.post(
+                "/budgets",
+                headers=headers,
+                json={"category_id": category_a_id, "amount": 10_000},
+            )
+            assert defaulted_budget.status_code == 201
+            assert defaulted_budget.json()["notify_threshold"] == 70
+
+            budget_category_b = await http_client.post(
+                "/categories", headers=headers, json={"name": "Budget Category B"}
+            )
+            assert budget_category_b.status_code == 201
+            category_b_id = budget_category_b.json()["id"]
+
+            explicit_budget = await http_client.post(
+                "/budgets",
+                headers=headers,
+                json={"category_id": category_b_id, "amount": 20_000, "notify_threshold": 85},
+            )
+            assert explicit_budget.status_code == 201
+            assert explicit_budget.json()["notify_threshold"] == 85
