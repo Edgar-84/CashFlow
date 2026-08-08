@@ -174,6 +174,73 @@ body {
   background: var(--separator);
 }
 
+/* -- collapsed chart header (D414/U5.1, docs/ui/screens/01-home.md region 6)
+   The donut collapses into this once scrolled past — same segments, order
+   and colours, only the geometry differs. `position: fixed`, never
+   `sticky` (D414: a sticky element reserves flow space and would chase the
+   scroll offset that triggers it). Appearing/disappearing on actual scroll
+   is U5.2's job; this unit only gives the header its geometry. Capped at
+   `#app`'s own 480px/centred so it aligns with the rest of the page on wide
+   viewports, edge-to-edge `left`/`right` otherwise. */
+.collapsed-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  max-width: 480px;
+  margin: 0 auto;
+  height: 68px;
+  /* 7 (top) + 44 (row) + 10 (bar) + 7 (bottom) = 68 — border-box, so this has
+     to reconcile exactly with the 44px row and 10px bar below or one of them
+     overflows the stated 68px header (docs/ui/screens/01-home.md region 6). */
+  padding: 7px 12px;
+  background: var(--card);
+  border-bottom: 1px solid var(--separator);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.collapsed-row {
+  display: flex;
+  align-items: center;
+  height: 44px;
+}
+
+/* Centred in the remaining space between the ☰ and the total — "same target"
+   as the expanded card's own tappable period label. */
+.collapsed-label {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapsed-total {
+  flex: none;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* design-system.md: "Collapsed stacked bar (01) | 10px tall, 999px radius,
+   2px segment gaps, 3px minimum segment." Segment widths are pre-computed
+   percentages (lib/donut.ts::barSegments via home.ts's buildHomeData), so
+   `flex: 0 0 <pct>%` lays them out exactly as computed — no CSS min-width or
+   flex-shrink needed, which would redistribute clamp overage across every
+   segment instead of the largest one only, disagreeing with the geometry. */
+.collapsed-bar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
 /* -- ranked category rows (U1.6, docs/ui/screens/01-home.md region 4) ----
    Every non-zero category, ranked descending, **one card each** — not one
    shared card with internal separators. `.dot` (9px) stays the small

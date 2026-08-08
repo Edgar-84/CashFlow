@@ -81,7 +81,7 @@ used to be fixed is gone.
 | 3 | Over-budget strip | scrolls | full width card, `--status-red` text + warning icon |
 | 4 | Ranked category rows | scrolls | one card each, 12px gap, `10px 13px` padding |
 | ~~5~~ | ~~Bottom nav row~~ | — | **removed (V4)** — replaced by 2e + `../components/side-menu.md` |
-| 6 | **Collapsed chart header (V4)** | **`position: fixed; top: 0`**, out of flow | 68px: a 44px row (☰ · label · total) over a 10px stacked bar, `8px 12px` padding, `--card` background, 1px `--separator` bottom rule. **Present only while region 2c has scrolled above the viewport** |
+| 6 | **Collapsed chart header (V4)** | **`position: fixed; top: 0`**, out of flow | 68px: a 44px row (☰ · label · total) over a 10px stacked bar, `7px 12px` padding (7 + 44 + 10 + 7 = 68 — the two vertical numbers are the ones that have to reconcile), `--card` background, 1px `--separator` bottom rule. **Present only while region 2c has scrolled above the viewport** |
 
 Gaps: `20px` between region 2 and 3, `12px` between cards inside region 4.
 The page's bottom padding keeps its `96px` MainButton reserve plus
