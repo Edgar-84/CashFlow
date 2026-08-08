@@ -56,7 +56,7 @@ class BudgetBackendClient(Protocol):
 
 _BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
 _BAR_WIDTH = 10
-_DEFAULT_NOTIFY_THRESHOLD = 80
+_DEFAULT_NOTIFY_THRESHOLD = 70  # D507; was 80
 
 
 def _error_message(exc: httpx.HTTPStatusError) -> str:

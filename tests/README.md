@@ -15,7 +15,7 @@ check defaults/validation. No DB, no network.
 | `test_category_response_rejects_out_of_range_color_slot` | Parametrized `color_slot` of `0`/`13` fails Pydantic validation, not the DB (U0.3 AC) | [`models/category.py`](../models/category.py) |
 | `test_tag_models` | Create/Update/Response basic field round-trip; `TagResponse.is_active` defaults `True`, `expense_count` defaults `None` (U0.3) | [`models/tag.py`](../models/tag.py) |
 | `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags`; `user_name` defaults `None` and round-trips when supplied; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6); `spent_at` round-trips on `Response` (U0.3, not yet on `Create`/`Update` — that's U0.2b) | [`models/expense.py`](../models/expense.py) |
-| `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=80`); `notify_threshold` rejects >100; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6 added `Update`); `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
+| `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=70` — D507, was 80); a `Response` built with an explicit `notify_threshold=80` (a pre-D507 row) still reads 80; `notify_threshold` accepts 0/100 and rejects >100; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6 added `Update`); `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
 | `test_permission_models` | `PermissionCreate.own_only` defaults `True`; `PermissionUpdate` fields optional | [`models/permission.py`](../models/permission.py) |
 | `test_account_response_and_user_me_response` | `AccountResponse` carries `currency`/`name`; `UserMeResponse` (D211, U0.2c) extends `UserResponse` with `currency` and `account_name` | [`models/account.py`](../models/account.py), [`models/user.py`](../models/user.py) |
 | `test_account_response_rejects_unsupported_currency` | A currency outside the 15-code `Currency` enum fails Pydantic validation, not a raw DB error | [`models/account.py`](../models/account.py) |
@@ -528,10 +528,10 @@ Hermetic — the real app with `BudgetPlanRepository`/`ExpenseRepository`/`UserR
 | Test | Checks |
 |---|---|
 | `test_list_budget_plans_as_member` | Member `GET /budgets` returns the account's plans (default matrix: read-only) |
-| `test_get_budget_plan_as_viewer` | Viewer `GET /budgets/{id}` returns the plan |
+| `test_get_budget_plan_as_viewer` | Viewer `GET /budgets/{id}` returns the plan; a plan seeded at the old default (`notify_threshold=80`) still reads 80 after the D507 default change |
 | `test_get_missing_budget_plan_is_404` | Unknown id → 404 |
 | `test_get_budget_plan_progress` | `GET /budgets/{id}/progress` returns `spent`/`amount`/`remaining`/`fill_pct`/`is_over_threshold` computed from the fake `expense_repo`'s monthly sums |
-| `test_create_budget_plan_as_admin` | Admin `POST /budgets` → 201 |
+| `test_create_budget_plan_as_admin` | Admin `POST /budgets` → 201; no `notify_threshold` sent → stores/returns the D507 default of 70 |
 | `test_create_budget_plan_as_member_is_403` | Member `POST /budgets` → 403 (default matrix: no create) |
 | `test_create_duplicate_budget_plan_as_admin_is_409` | Duplicate `(category_id, account_id, period)` → 409 (`ConflictError` mapped by `main.py`'s handler) |
 | `test_update_budget_plan_as_admin` | Admin `PATCH /budgets/{id}` applies a partial update |
@@ -936,7 +936,7 @@ registration-order class of bug as `test_bot_handlers_categories.py`
 | `test_list_budgets_unknown_category_falls_back_to_placeholder` | A plan whose category isn't in the fetched category list still renders, as "Unknown" |
 | `test_list_budgets_progress_fetch_error_shows_inline_message_and_continues` | A `get_budget_plan_progress` failure for one plan shows an inline error for that plan without failing the whole list |
 | `test_add_budget_happy_path_with_explicit_threshold` | `/addbudget` → category → amount → threshold ends in a `create_budget_plan` call with the right `BudgetPlanCreate` and cleared state (U2.2 AC) |
-| `test_add_budget_threshold_skip_uses_default` | `/skip` at the threshold step creates the plan with the default 80% threshold |
+| `test_add_budget_threshold_skip_uses_default` | `/skip` at the threshold step creates the plan with the default 70% threshold (D507, was 80) |
 | `test_add_budget_no_categories` | `/addbudget` with no categories shows a message and never enters the FSM |
 | `test_add_budget_invalid_amount_reprompts` | Unparseable amount text re-prompts and stays in `BudgetManage.add_amount` (AC) |
 | `test_add_budget_invalid_threshold_reprompts` | Out-of-range threshold text re-prompts and stays in `BudgetManage.add_threshold`, no create call (AC) |

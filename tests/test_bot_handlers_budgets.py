@@ -329,7 +329,7 @@ async def test_add_budget_threshold_skip_uses_default() -> None:
 
     assert await state.get_state() is None
     assert client.created == [
-        BudgetPlanCreate(category_id=category.id, amount=10000, notify_threshold=80)
+        BudgetPlanCreate(category_id=category.id, amount=10000, notify_threshold=70)
     ]
 
 

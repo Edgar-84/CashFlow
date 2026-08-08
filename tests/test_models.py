@@ -215,7 +215,7 @@ def test_budget_plan_models() -> None:
     category_id = uuid4()
     create = BudgetPlanCreate(category_id=category_id, amount=500_00)
     assert create.period == "monthly"
-    assert create.notify_threshold == 80
+    assert create.notify_threshold == 70
 
     update = BudgetPlanUpdate(notify_threshold=90)
     assert update.amount is None
@@ -228,7 +228,26 @@ def test_budget_plan_models() -> None:
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
-    assert response.notify_threshold == 80
+    assert response.notify_threshold == 70
+
+    # D507: a row seeded at the old default (80) before the change still
+    # reads 80 — the field default only applies when the value is absent.
+    legacy_response = BudgetPlanResponse(
+        id=uuid4(),
+        category_id=category_id,
+        amount=500_00,
+        account_id=uuid4(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        notify_threshold=80,
+    )
+    assert legacy_response.notify_threshold == 80
+
+    # D507: bounds are unchanged by the default change — 0 and 100 stay valid.
+    at_min = BudgetPlanCreate(category_id=category_id, amount=500_00, notify_threshold=0)
+    assert at_min.notify_threshold == 0
+    at_max = BudgetPlanCreate(category_id=category_id, amount=500_00, notify_threshold=100)
+    assert at_max.notify_threshold == 100
 
     with pytest.raises(ValueError):
         BudgetPlanCreate(category_id=category_id, amount=500_00, notify_threshold=101)
