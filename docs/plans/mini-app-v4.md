@@ -419,7 +419,7 @@ navigate into screens that must already accept what they will be handed.
 
 ### M3 — Side menu and Settings
 
-- [ ] **U3.1 `components/side-menu.ts`** — implements
+- [x] **U3.1 `components/side-menu.ts`** — implements
       `docs/ui/components/side-menu.md`. Pure render + thin mount; no screen
       wiring yet.
       AC: **every acceptance criterion in that spec** that does not require the
@@ -796,6 +796,19 @@ human with a phone:
   Rejected: leaving both actions always visible and relying solely on the
   write call's 403 (the doc's Edge cases explicitly ask for the buttons
   themselves to be absent, not to fail after a tap).
+- 2026-08-08: **D419 — U3.1's panel width follows the component spec's
+  `min(80vw, 320px)`, not the plan checklist line's "at most 300px".** The
+  checklist line paraphrasing an AC is not itself the AC (task-methodology:
+  frontend units decompose the spec, never a summary of it); `side-menu.md`'s
+  Anatomy and `design-system.md`'s Sizing table agree on 320px, so that's the
+  number implemented. Also: the spec's "Closing" state (a 160ms reverse
+  animation) is left undone by this unit. Every screen in this codebase
+  re-renders by replacing `root.innerHTML` wholesale on each state change, so
+  animating an *exit* requires the panel to outlive that replace — a timed,
+  deferred unmount only the host can own. `renderSideMenu` implements the
+  entrance animation only (mirrors `date-range-picker.ts`, which has no exit
+  animation either); the closing transition is U3.2's job when it wires the
+  drawer's open/close state machine into Home.
 
 ## STATE (handoff)
 - **Plan written 2026-08-07.** No unit implemented yet. The nine spec files
@@ -1099,8 +1112,18 @@ human with a phone:
   `isDirty` already excludes `spentAt` from the dirty check — both of this
   unit's remaining AC halves ("selects the right pill", "does not make the
   draft dirty") fell out of U2.4 for free.
-- **Next:** `U3.1` `components/side-menu.ts` (M3) — unblocked, no dependency
-  on U2.5.
+- **U3.1 done.** `components/side-menu.ts` — pure `renderSideMenu` (returns
+  `""` when `open: false`, matching the spec's "nothing in the accessibility
+  tree") plus a thin `mount` (scrim/row taps, Escape, a Tab focus trap over
+  the enabled rows, first-row focus on open) — the same accepted,
+  code-reviewed-not-unit-tested `mount` gap every other component in
+  `src/components/` carries. Added `--scrim` to `tokens.css` (design-system.md
+  already specified it; nothing had implemented it yet) and a `side-menu-*`
+  block to `app.css`. See D419 for the panel-width source and the closing
+  animation deferred to U3.2. No changes to `home.ts`/`main.ts` — screen
+  wiring is U3.2's job.
+- **Next:** `U3.2` Home adopts the ☰ button and drops the tile row (M3) —
+  depends on U3.1, now unblocked.
 - **Nothing is blocked on input any more.** U3.3's currency names are drafted
   in `08-settings.md` as `[inferred]` copy to correct in the spec, not at
   implementation time.

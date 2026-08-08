@@ -28,6 +28,8 @@
 
   --accent: #F0B429;
   --accent-ink: #1A1206;
+
+  --scrim: rgba(14, 20, 22, 0.40);
 }
 
 :root[data-theme="dark"] {
@@ -54,4 +56,6 @@
 
   --accent: #E0A42B;
   --accent-ink: #1A1206;
+
+  --scrim: rgba(0, 0, 0, 0.55);
 }
