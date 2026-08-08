@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
 import type {
   BudgetPlanResponse,
@@ -16,6 +16,7 @@ import {
   loadHome,
   pickerValueForPeriod,
   renderHome,
+  resolveDayDate,
   type HomeApi,
   type HomeState,
 } from "../src/screens/home";
@@ -25,6 +26,7 @@ import type { TelegramWebApp } from "../src/lib/telegram";
 
 const THIS_MONTH: PeriodValue = { unit: "month", offset: 0 };
 const NOW = new Date(2026, 7, 4); // August 4, 2026 (local) — matches PERIOD_TOTAL/describe's own fixtures
+const TODAY = "2026-08-04"; // family_tz `today` matching NOW, U2.5's HomeData.today
 
 function category(id: string, name: string, created_at: string): CategoryResponse {
   return { id, name, account_id: "acc-1", created_at };
@@ -85,6 +87,7 @@ describe("buildHomeData", () => {
       currency: "EUR",
       budgetProgress: [progress()],
       period: THIS_MONTH,
+      today: TODAY,
     });
 
     expect(data.totalMinor).toBe(72470);
@@ -123,6 +126,7 @@ describe("buildHomeData", () => {
       currency: "EUR",
       budgetProgress: [],
       period: THIS_MONTH,
+      today: TODAY,
     });
 
     expect(data.rows.map((r) => r.categoryId)).toEqual([
@@ -150,6 +154,7 @@ describe("buildHomeData", () => {
       currency: "EUR",
       budgetProgress: [],
       period: THIS_MONTH,
+      today: TODAY,
     });
 
     expect(data.rows.map((r) => r.categoryId)).not.toContain("cat-unused");
@@ -168,6 +173,7 @@ describe("buildHomeData", () => {
       currency: "EUR",
       budgetProgress: [],
       period: THIS_MONTH,
+      today: TODAY,
     });
 
     expect(data.segments).toHaveLength(7);
@@ -183,6 +189,7 @@ describe("buildHomeData", () => {
       currency: "EUR",
       budgetProgress: [],
       period: THIS_MONTH,
+      today: TODAY,
     });
 
     const appended = category("cat-health", "Health", "2026-01-05T00:00:00Z");
@@ -193,6 +200,7 @@ describe("buildHomeData", () => {
       currency: "EUR",
       budgetProgress: [],
       period: THIS_MONTH,
+      today: TODAY,
     });
 
     for (const id of ["cat-groceries", "cat-transport", "cat-cafe"]) {
@@ -218,6 +226,7 @@ describe("buildHomeData", () => {
         currency: "EUR",
         budgetProgress: [progress()],
         period,
+        today: TODAY,
       });
       expect(data.overBudget).toEqual([]);
     }
@@ -226,7 +235,7 @@ describe("buildHomeData", () => {
 
 function fakeApi(overrides: Partial<HomeApi> = {}): HomeApi {
   return {
-    getMe: vi.fn().mockResolvedValue({ currency: "EUR" }),
+    getMe: vi.fn().mockResolvedValue({ currency: "EUR", today: TODAY }),
     listCategories: vi.fn().mockResolvedValue(CATEGORIES),
     statisticsByCategory: vi.fn().mockResolvedValue(CATEGORY_TOTALS),
     statisticsByPeriod: vi.fn().mockResolvedValue(PERIOD_TOTAL),
@@ -263,7 +272,7 @@ describe("loadHome", () => {
       createMemoryCache(),
       THIS_MONTH,
     );
-    expect(state).toEqual({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" });
+    expect(state).toEqual({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY });
   });
 
   it("maps a 403 to a forbidden state with tiles still reachable", async () => {
@@ -402,6 +411,25 @@ afterEach(() => {
   delete (globalThis as { window?: Window }).window;
 });
 
+describe("resolveDayDate", () => {
+  it("returns today unshifted at offset 0", () => {
+    expect(resolveDayDate("2026-08-07", 0)).toBe("2026-08-07");
+  });
+
+  it("(U2.5) resolves the AC's own example — the Day tab showing 3 August while today is 7 August", () => {
+    expect(resolveDayDate("2026-08-07", -4)).toBe("2026-08-03");
+  });
+
+  it("resolves yesterday and two days ago the same way the fixed pills do", () => {
+    expect(resolveDayDate("2026-08-07", -1)).toBe("2026-08-06");
+    expect(resolveDayDate("2026-08-07", -2)).toBe("2026-08-05");
+  });
+
+  it("crosses a month boundary correctly, never drifting via UTC/local conversion (D120's bug class)", () => {
+    expect(resolveDayDate("2026-08-01", -1)).toBe("2026-07-31");
+  });
+});
+
 describe("applyHomeChrome", () => {
   it("shows Add expense and hides the BackButton on a ready state", () => {
     const webApp = fakeWebApp();
@@ -416,6 +444,7 @@ describe("applyHomeChrome", () => {
       overBudget: [],
       tiles: HOME_TILES,
       period: THIS_MONTH,
+      today: TODAY,
     };
     applyHomeChrome(ready);
 
@@ -449,16 +478,45 @@ describe("applyHomeChrome", () => {
     installWebApp(webApp);
     const onAddExpense = vi.fn();
 
-    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" }, onAddExpense);
+    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY }, onAddExpense);
+    (webApp.MainButton.onClick as Mock).mock.calls[0][0]();
 
-    expect(webApp.MainButton.onClick).toHaveBeenCalledWith(onAddExpense);
+    expect(onAddExpense).toHaveBeenCalledOnce();
+  });
+
+  it("(U2.5) carries the Day tab's resolved date — family_tz `today` shifted by offset, never new Date() — to onAddExpense", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const onAddExpense = vi.fn();
+
+    applyHomeChrome(
+      { status: "empty", tiles: HOME_TILES, period: { unit: "day", offset: -1 }, currency: "EUR", today: TODAY },
+      onAddExpense,
+    );
+    (webApp.MainButton.onClick as Mock).mock.calls[0][0]();
+
+    expect(onAddExpense).toHaveBeenCalledWith("2026-08-03");
+  });
+
+  it("(U2.5) passes no date to onAddExpense from a non-Day tab — screen 02 defaults to today, unchanged", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const onAddExpense = vi.fn();
+
+    applyHomeChrome(
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
+      onAddExpense,
+    );
+    (webApp.MainButton.onClick as Mock).mock.calls[0][0]();
+
+    expect(onAddExpense).toHaveBeenCalledWith(undefined);
   });
 
   it("does not wire an onClick handler when none is provided", () => {
     const webApp = fakeWebApp();
     installWebApp(webApp);
 
-    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" });
+    applyHomeChrome({ status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY });
 
     expect(webApp.MainButton.onClick).not.toHaveBeenCalled();
   });
@@ -472,6 +530,7 @@ describe("renderHome", () => {
     currency: "EUR",
     budgetProgress: [progress()],
     period: THIS_MONTH,
+    today: TODAY,
   });
 
   it("renders a loading skeleton with the period control live and tiles already in the final layout", () => {
@@ -490,13 +549,13 @@ describe("renderHome", () => {
 
   it("names the period's unit deictically when empty, never a generic 'no data' (D405)", () => {
     const today = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: { unit: "day", offset: 0 }, currency: "EUR" },
+      { status: "empty", tiles: HOME_TILES, period: { unit: "day", offset: 0 }, currency: "EUR", today: TODAY },
       NOW,
     );
     expect(today).toContain("There were no expenses on this day.");
 
     const thisMonth = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
       NOW,
     );
     expect(thisMonth).toContain("There were no expenses in this month.");
@@ -505,7 +564,7 @@ describe("renderHome", () => {
 
   it("draws a complete ring at the donut's own 200px/30px geometry, in --separator, with no segment gaps (D405)", () => {
     const html = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
       NOW,
     );
     expect(html).toContain('data-testid="donut"');
@@ -520,7 +579,7 @@ describe("renderHome", () => {
 
   it("shows the formatted zero total for the account's currency in the ring's hole, --ink-secondary not --ink (D405)", () => {
     const html = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
       NOW,
     );
     expect(html).toContain('<div class="amt amt-zero">0.00 EUR</div>');
@@ -528,7 +587,7 @@ describe("renderHome", () => {
 
   it("occupies the same donut slot as a populated period — switching to empty moves nothing above the ranked rows", () => {
     const emptyHtml = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
       NOW,
     );
     const readyHtml = renderHome({ status: "ready", ...readyData }, NOW);
@@ -538,7 +597,7 @@ describe("renderHome", () => {
 
   it("keeps the yellow Add button present on an empty period (both Add affordances stay enabled — there is no disabled variant of this button)", () => {
     const html = renderHome(
-      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR" },
+      { status: "empty", tiles: HOME_TILES, period: THIS_MONTH, currency: "EUR", today: TODAY },
       NOW,
     );
     expect(html).toContain('data-testid="add-button"');
@@ -619,6 +678,7 @@ describe("renderHome", () => {
       currency: "EUR",
       budgetProgress: [],
       period: THIS_MONTH,
+      today: TODAY,
     });
     const html = renderHome({ status: "ready", ...single }, NOW);
     expect(html.match(/data-testid="ranked-row"/g)).toHaveLength(1);
@@ -657,6 +717,7 @@ describe("renderHome", () => {
       currency: "EUR",
       budgetProgress: [],
       period: THIS_MONTH,
+      today: TODAY,
     });
     const html = renderHome({ status: "ready", ...data }, NOW);
     expect(html).toContain(longName);
@@ -675,6 +736,7 @@ describe("renderHome", () => {
       currency: "EUR",
       budgetProgress: [],
       period: THIS_MONTH,
+      today: TODAY,
     });
     const html = renderHome({ status: "ready", ...data }, NOW);
     expect(html.match(/data-testid="ranked-row"/g)).toHaveLength(8);
@@ -703,6 +765,7 @@ describe("renderHome", () => {
       currency: "EUR",
       budgetProgress: [progress()],
       period: { unit: "day", offset: 0 },
+      today: TODAY,
     });
     const html = renderHome({ status: "ready", ...dayData }, NOW);
     expect(html).not.toContain('data-testid="over-budget"');
@@ -722,6 +785,7 @@ describe("renderHome", () => {
       currency: "EUR",
       budgetProgress: [progress()],
       period: { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" },
+      today: TODAY,
     });
     const html = renderHome({ status: "ready", ...customData }, NOW);
     expect(html).toContain("9 – 17 Jul");
@@ -737,6 +801,7 @@ describe("renderHome", () => {
         tiles: HOME_TILES,
         period: { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" },
         currency: "EUR",
+        today: TODAY,
       },
       NOW,
     );
