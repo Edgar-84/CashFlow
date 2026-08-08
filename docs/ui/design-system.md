@@ -275,7 +275,7 @@ sprite sheet — rather than a library.
 | Side menu slide in | 200ms | `ease-out`, `translateX(-100%)` → `0` |
 | Side menu slide out | 160ms | `ease-in`, the reverse |
 | Scrim fade | matches the panel it accompanies | `linear`, opacity 0 → 1 |
-| Collapsed chart header in/out | 160ms | `ease-out`, `translateY(-100%)` → `0` plus opacity |
+| Collapsed chart header in | 160ms | `ease-out`, `translateY(-100%)` → `0` plus opacity. **Out is instant (U5.2)** — the header is torn down as part of a full re-render, leaving nothing to animate an exit on; revisit only if a real device (CP5) shows this as a flicker |
 
 `prefers-reduced-motion: reduce` disables the skeleton pulse, **the side menu's
 slide and the collapsed header's**: under that setting each appears and

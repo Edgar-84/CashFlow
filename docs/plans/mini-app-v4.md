@@ -509,7 +509,7 @@ unpicking anything.
       Files: `webapp/src/screens/home.ts`, `webapp/src/lib/donut.ts`,
       `webapp/src/styles/app.css`, `webapp/tests/home.test.ts`,
       `webapp/tests/donut.test.ts`. Model: sonnet.
-- [ ] **U5.2 Scroll-driven collapse** — the `IntersectionObserver` sentinel, the
+- [x] **U5.2 Scroll-driven collapse** — the `IntersectionObserver` sentinel, the
       transition, and the single-☰ rule. Depends on U3.2 (the ☰ must exist
       before it can move).
       AC: scrolling until the donut leaves the viewport pins the header;
@@ -1260,11 +1260,61 @@ human with a phone:
     reachable in a real session until U5.2 makes the header actually appear.
     No `position: fixed` appear/disappear transition, no
     `IntersectionObserver` — both explicitly U5.2.
-- **Next:** U5.2 (Scroll-driven collapse), the last unit in this plan,
-  depending on U5.1 (just landed) and U3.2 (☰ must exist before it can move,
-  already done). CP5 is the real acceptance gate for M5 as a whole, on a real
-  device after U5.2 lands.
-- **Gotchas for the next session:**
+- **U5.2 done — the last unit in this plan.** `screens/home.ts::renderReady`/
+  `renderEmpty` gained an unconditional `renderCollapseSentinel()` (a 1px
+  `.collapse-sentinel` div, `data-testid="collapse-sentinel"`) right after the
+  chart card, in both collapsed states — the trigger itself, so it has to be
+  present whichever way `collapsed` is currently rendered, to catch the
+  *next* crossing in either direction. `mount` gained a module-level
+  `IntersectionObserver` (`collapseObserver`): on a crossing it calls itself
+  recursively with the flipped `collapsed` value, so `renderReady`/
+  `renderEmpty` (U5.1, already the single source of truth for which ☰
+  exists) do the actual re-render — no second, hand-patched code path for the
+  same markup. `mount` disconnects any prior observer at its own top (covers
+  same-screen re-renders: a period change, a retry, this observer's own
+  recursive call), and a new export, `unmountHome()`, disconnects it when
+  Home is left for another screen. `main.ts` wires the latter through a new
+  `setActiveScreen()` that replaces all fourteen direct `activeScreen = "x"`
+  assignments — the one place every `showX` already ran, now also the one
+  place "leaving Home" is detectable, so the observer can't outlive the
+  sentinel `#app`'s next `innerHTML` replace has already detached (AC: "no
+  listener leak across navigations"). Three of `showHome`'s handlers
+  (`onUnitChange`, `onOffsetChange`, `onApplyCustomRange` — period changes,
+  not `onRetry`) gained a `window.scrollTo(0, 0)` call: `refreshHome` already
+  renders expanded unconditionally (it never passes `collapsed: true` to
+  `mountHome`), so this is the other half — moving the viewport to match, per
+  the screen doc's "applying a range refetches and the page scrolls back to
+  the top."
+  - **Implementation detail, not a numbered D-id (same footing as U5.1's
+    `BAR_REFERENCE_WIDTH`):** the header's entrance uses a plain CSS
+    `@keyframes`/`animation` on `.collapsed-header` itself (`app.css`,
+    `prefers-reduced-motion: no-preference`-gated, same idiom as
+    `.side-menu-panel`'s own entrance) — it fires automatically on insertion,
+    no JS choreography needed. Disappearance is **instant**: the recursive
+    `mount()` re-render is a full `innerHTML` replace, so by the time
+    "collapsed" markup would need to fade out, it's already gone — there is
+    no element left alive to animate. Giving it a real exit fade would mean
+    keeping the header alive as a detached sibling with hand-driven timing
+    (the `openSideMenu`/`side-menu-closing` pattern), a second state machine
+    for a cosmetic, real-device-judged detail. Deferred rather than built
+    speculatively — CP5 is the actual judge of whether the instant
+    disappearance reads as a flicker worth fixing.
+  - **Scoped out, deliberately:** no attempt to make the collapse toggle
+    cheaper than a full re-render (e.g. patching just the ☰/Add button and
+    inserting/removing the header by hand). `renderHome` staying the single
+    source of truth for "which ☰ exists" was worth more than the saved
+    re-render cost, especially since `IntersectionObserver` only fires on
+    actual threshold crossings, not per scroll pixel — the recursion runs
+    once per crossing, not continuously.
+- **Next: CP5**, on a real device, in a real Telegram client, per the Live-test
+  checkpoints section above — the actual acceptance gate for M5. Specifically
+  worth checking: does the header flicker at the threshold given the instant
+  (not faded) disappearance above; does `position: fixed` fight the client's
+  own pull-to-refresh/swipe-to-close or its dynamic `viewportStableHeight`; is
+  68px the right height; is losing the tabs while collapsed annoying. If
+  anything here needs a fix, it's a small follow-up unit, not a re-open of
+  U5.1/U5.2 — both already merged and independently revertible.
+- **Gotchas for whoever runs CP5 or the next feature:**
   - `GET /expenses`'s period offset is `period_offset`, **not** `offset` — the
     latter paginates and the bot depends on it (D402).
   - Filtering is by `spent_at` with an `AT TIME ZONE` conversion; a naive UTC
@@ -1272,14 +1322,21 @@ human with a phone:
     applies: `spent_at` is a bare date, so it must **never** be run through a
     `timeZone`-aware `Intl`/`Date` conversion (D416) — parse it with
     `parseCalendarDate`-style local y/m/d construction only.
-  - Five units touch `screens/home.ts` (U2.1, U2.3, U3.2, U5.1, U5.2) — U5.1
-    just landed, so U5.2 is the last of the five. `/clear` before starting it.
-  - U5.2 wires the actual scroll trigger onto U5.1's markup: an
-    `IntersectionObserver` sentinel at the donut's bottom edge flips the
-    `collapsed` flag `renderHome`/`mount` already accept, `position: fixed`
-    (already on `.collapsed-header` in `app.css`) handles the rest. If it
-    goes badly on a real device (CP5), the whole of M5 (both units) is
-    revertible — the rest of V4 does not lean on it.
+  - If CP5 finds a real problem, M5 (U5.1 + U5.2 together) is revertible as
+    one or two commits — the rest of V4 does not lean on it.
+  - **Deferred, pre-existing (U5.2 review):** no `showX` function guards a
+    late-arriving async result against having already navigated away — a fast
+    tap sequence during an in-flight Home fetch can let a stale
+    `refreshHome()` call `mountHome` after `activeScreen` has moved on. This
+    predates U5.2 (it was always a wasted/overwritten paint); U5.2 makes the
+    consequence sharper, since a late `mountHome` now also creates a live,
+    self-recursing `IntersectionObserver` that `setActiveScreen`'s
+    leaving-Home check will never see and disconnect. Not fixed here — it's a
+    cross-cutting "does every `showX` still own the screen" guard, bigger
+    than this unit's scope, and needs a fast double-tap on a slow connection
+    to reach. A small mitigation if it's ever worth doing:
+    `if (activeScreen !== "home") return;` at the top of `refreshHome`'s two
+    `mountHome` calls.
   - Several units **delete** code and must delete its tests with it — see
     Risks.
   - There is no migration in this plan and no stop-and-ask gate.

@@ -1018,4 +1018,49 @@ describe("renderHome", () => {
       expect(barMarkup).toMatch(/var\(--category-slot-\d\)/);
     });
   });
+
+  // The sentinel is `mount`'s `IntersectionObserver` target (U5.2) — the
+  // scroll trigger itself is DOM glue with no meaningful unit test, same
+  // accepted gap as `mount` (module header comment), but its presence,
+  // position and state-gating in the rendered markup are pure and worth
+  // asserting directly.
+  describe("scroll-driven collapse sentinel (D414/U5.2)", () => {
+    it("renders exactly one sentinel right after the chart card, in both collapsed states", () => {
+      for (const collapsed of [false, true]) {
+        const html = renderHome({ status: "ready", ...readyData }, NOW, collapsed);
+        expect(html.match(/data-testid="collapse-sentinel"/g)).toHaveLength(1);
+        const cardCloseIndex = html.indexOf('<div class="collapse-sentinel"');
+        const lastCardOpenBeforeIt = html.lastIndexOf('<div class="card chart-card">', cardCloseIndex);
+        expect(lastCardOpenBeforeIt).toBeGreaterThan(-1);
+        // Nothing else (offline banner, ranked rows) sits between the chart
+        // card's own closing tag and the sentinel — it marks the card's
+        // bottom edge, not some later point in the page.
+        const rankedRowsIndex = html.indexOf('data-testid="ranked-rows"');
+        if (rankedRowsIndex !== -1) {
+          expect(cardCloseIndex).toBeLessThan(rankedRowsIndex);
+        }
+      }
+    });
+
+    it("renders the sentinel for the empty state too, collapsed or not", () => {
+      for (const collapsed of [false, true]) {
+        const html = renderHome(
+          { status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME },
+          NOW,
+          collapsed,
+        );
+        expect(html).toContain('data-testid="collapse-sentinel"');
+      }
+    });
+
+    it("omits the sentinel for the loading, error and forbidden states, which have no chart card to anchor it to", () => {
+      expect(renderHome({ status: "loading", period: THIS_MONTH }, NOW)).not.toContain(
+        'data-testid="collapse-sentinel"',
+      );
+      expect(renderHome({ status: "error", message: "oops", period: THIS_MONTH }, NOW)).not.toContain(
+        'data-testid="collapse-sentinel"',
+      );
+      expect(renderHome({ status: "forbidden" }, NOW)).not.toContain('data-testid="collapse-sentinel"');
+    });
+  });
 });

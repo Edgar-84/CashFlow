@@ -241,6 +241,45 @@ body {
   overflow: hidden;
 }
 
+/* D414/U5.2: the 1px `IntersectionObserver` target at the bottom edge of the
+   chart card (`home.ts::renderCollapseSentinel`) — no visible footprint, a
+   plain flex child so it needs no positioning trickery to sit exactly where
+   the card ends. */
+.collapse-sentinel {
+  height: 1px;
+}
+
+/* design-system.md's Motion table: "Collapsed chart header in/out | 160ms |
+   ease-out, translateY(-100%) -> 0 plus opacity" — `-100%` clears the
+   header's own height (68px, `.collapsed-header` above), same idiom as
+   `.side-menu-panel`'s `translateX(-100%)` entrance below. Entrance only:
+   `animation` (not `transition`) fires on insertion with no JS choreography.
+   Disappearance is instant, not the spec's symmetric "out" — the recursive
+   `mount()` re-render (D414/U5.2) is a full `innerHTML` replace, so by the
+   time collapsed markup would need to fade out it is already gone, no
+   element left alive to animate. A real exit fade needs the header kept
+   alive as a detached, hand-timed sibling (`openSideMenu`'s own
+   `side-menu-closing` pattern) plus a guard against the observer firing
+   again mid-transition — judged disproportionate for a CP5-graded, purely
+   cosmetic gap; revisit only if CP5 finds the instant disappearance actually
+   reads as a flicker. */
+@media (prefers-reduced-motion: no-preference) {
+  .collapsed-header {
+    animation: collapsed-header-in 0.16s ease-out;
+  }
+}
+
+@keyframes collapsed-header-in {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* -- ranked category rows (U1.6, docs/ui/screens/01-home.md region 4) ----
    Every non-zero category, ranked descending, **one card each** — not one
    shared card with internal separators. `.dot` (9px) stays the small

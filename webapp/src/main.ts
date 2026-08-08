@@ -69,6 +69,7 @@ import {
   createHomeController,
   createMemoryCache as createHomeCache,
   mount as mountHome,
+  unmountHome,
   type HomeHandlers,
 } from "./screens/home";
 import { clampOffset, type PeriodValue } from "./lib/period";
@@ -126,6 +127,19 @@ type ActiveScreen =
   | "statistics"
   | "settings";
 let activeScreen: ActiveScreen | null = null;
+
+/** Central setter for `activeScreen`, called at the top of every `showX`
+ * function in place of the old direct assignment — its own job is unchanged,
+ * but leaving Home this way gives U5.2's scroll-collapse `IntersectionObserver`
+ * exactly one place to be torn down from. Without this, the observer would
+ * keep watching a sentinel that the next screen's own `mount` has already
+ * detached from `#app` (`home.ts::unmountHome`'s own comment has the rest). */
+function setActiveScreen(next: ActiveScreen): void {
+  if (activeScreen === "home" && next !== "home") {
+    unmountHome();
+  }
+  activeScreen = next;
+}
 
 /** Where Categories' BackButton goes (U3.2). Defaults to Home; Add Expense's
  * "More" cell (`showAddExpense`'s `onMore` handler, below) points it back to
@@ -186,6 +200,19 @@ function addExpenseFromHome(date?: string): void {
   void showAddExpense(date ? { ...emptyDraft(), spentAt: date } : undefined);
 }
 
+/** Screen doc's Edge cases (V4/D414): "Collapsed, then the period changes via
+ * the label — the picker opens over the collapsed state; applying a range
+ * refetches and the page scrolls back to the top, restoring the donut." A new
+ * period always starts expanded, and `refreshHome` below already renders
+ * expanded unconditionally (it never passes `collapsed: true` to `mountHome`)
+ * — this is the other half, moving the *viewport* back to match, since
+ * changing what's rendered doesn't by itself move a already-scrolled-down
+ * page. Called from all three period-change handlers, never `onRetry` (not a
+ * period change) or the cold open (already at the top). */
+function scrollHomeToTop(): void {
+  window.scrollTo(0, 0);
+}
+
 /** Mounts Home. Its MainButton and the side menu's "Add expense" row both
  * route to `showAddExpense` (docs/design/mini-app-ux.md §5's
  * `H -->|MainButton| A` flow, D409's drawer replacing the old tile row). */
@@ -194,7 +221,7 @@ async function showHome(): Promise<void> {
   if (!root) {
     return;
   }
-  activeScreen = "home";
+  setActiveScreen("home");
 
   const handlers: HomeHandlers = {
     onRetry: () => {
@@ -225,14 +252,17 @@ async function showHome(): Promise<void> {
     },
     onUnitChange: (unit) => {
       homePeriod = { unit, offset: 0 };
+      scrollHomeToTop();
       void refreshHome(root, handlers);
     },
     onOffsetChange: (offset) => {
       homePeriod = { ...homePeriod, offset: clampOffset(offset) };
+      scrollHomeToTop();
       void refreshHome(root, handlers);
     },
     onApplyCustomRange: (range) => {
       homePeriod = { unit: "custom", offset: 0, start: range.start, end: range.end };
+      scrollHomeToTop();
       void refreshHome(root, handlers);
     },
     onAddExpense: addExpenseFromHome,
@@ -268,7 +298,7 @@ async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
   if (!root) {
     return;
   }
-  activeScreen = "add-expense";
+  setActiveScreen("add-expense");
 
   const handlers: AddExpenseHandlers = {
     onRetry: () => {
@@ -369,7 +399,7 @@ export async function showEditExpense(
   if (!root) {
     return;
   }
-  activeScreen = "add-expense";
+  setActiveScreen("add-expense");
 
   const handlers: AddExpenseHandlers = {
     onRetry: () => {
@@ -410,7 +440,7 @@ async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
   if (!root) {
     return;
   }
-  activeScreen = "expenses";
+  setActiveScreen("expenses");
 
   const controller = createExpensesController(client, expensesCache, filter);
 
@@ -448,7 +478,7 @@ async function showExpenseDetail(id: Uuid, onBack: () => void): Promise<void> {
   if (!root) {
     return;
   }
-  activeScreen = "expense-detail";
+  setActiveScreen("expense-detail");
 
   const handlers: DetailHandlers = {
     onRetry: () => {
@@ -475,7 +505,7 @@ async function showBudgets(): Promise<void> {
   if (!root) {
     return;
   }
-  activeScreen = "budgets";
+  setActiveScreen("budgets");
 
   const handlers: BudgetsHandlers = {
     onRetry: () => {
@@ -522,7 +552,7 @@ async function showCategories(deleteFailure: CategoryDeleteFailure | null = null
   if (!root) {
     return;
   }
-  activeScreen = "categories";
+  setActiveScreen("categories");
 
   const handlers = buildCategoriesHandlers();
   applyCategoriesChrome(handlers.onBack);
@@ -550,7 +580,7 @@ function renderCategoriesFromCache(deleteFailure: CategoryDeleteFailure | null =
     void showCategories(deleteFailure);
     return;
   }
-  activeScreen = "categories";
+  setActiveScreen("categories");
   const handlers = buildCategoriesHandlers();
   applyCategoriesChrome(handlers.onBack);
   mountCategories(root, { status: "ready", ...cached.data }, handlers, deleteFailure);
@@ -616,7 +646,7 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
   if (!root) {
     return;
   }
-  activeScreen = "category-form";
+  setActiveScreen("category-form");
 
   const cached = categoriesCache.get();
   if (!cached) {
@@ -691,7 +721,7 @@ async function showTags(deleteFailure: TagDeleteFailure | null = null): Promise<
   if (!root) {
     return;
   }
-  activeScreen = "tags";
+  setActiveScreen("tags");
 
   const handlers = buildTagsHandlers();
   applyTagsChrome(handlers.onBack);
@@ -717,7 +747,7 @@ function renderTagsFromCache(deleteFailure: TagDeleteFailure | null = null): voi
     void showTags(deleteFailure);
     return;
   }
-  activeScreen = "tags";
+  setActiveScreen("tags");
   const handlers = buildTagsHandlers();
   applyTagsChrome(handlers.onBack);
   mountTags(root, { status: "ready", ...cached.data }, handlers, deleteFailure);
@@ -779,7 +809,7 @@ async function showTagForm(tagId: Uuid | null): Promise<void> {
   if (!root) {
     return;
   }
-  activeScreen = "tag-form";
+  setActiveScreen("tag-form");
 
   const cached = tagsCache.get();
   if (!cached) {
@@ -836,7 +866,7 @@ async function showStatistics(monthsBack = 0, grouping: Grouping = "category"): 
   if (!root) {
     return;
   }
-  activeScreen = "statistics";
+  setActiveScreen("statistics");
 
   const handlers: StatisticsHandlers = {
     onRetry: () => {
@@ -872,7 +902,7 @@ async function showSettings(): Promise<void> {
   if (!root) {
     return;
   }
-  activeScreen = "settings";
+  setActiveScreen("settings");
 
   const handlers: SettingsHandlers = {
     onRetry: () => {
