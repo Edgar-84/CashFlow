@@ -29,7 +29,7 @@ CREATE TABLE categories (
   account_id UUID NOT NULL REFERENCES accounts(id),
   created_at TIMESTAMPTZ DEFAULT now(),
   is_active  BOOLEAN NOT NULL DEFAULT true,   -- false = archived (in use, kept for history, D302)
-  color_slot SMALLINT                          -- 1..12 palette slot index, NULL = auto (D308); no CHECK, validated by Pydantic
+  color_slot SMALLINT                          -- 1..72 palette slot index, NULL = auto (D308); no CHECK, validated by Pydantic
 );
 
 CREATE TABLE tags (

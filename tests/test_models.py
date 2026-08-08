@@ -107,16 +107,25 @@ def test_category_models() -> None:
     assert colored.expense_count == 3
 
 
-@pytest.mark.parametrize("color_slot", [0, 13])
-def test_category_response_rejects_out_of_range_color_slot(color_slot: int) -> None:
+@pytest.mark.parametrize("color_slot", [0, 73, -1])
+def test_category_create_and_update_reject_out_of_range_color_slot(color_slot: int) -> None:
     with pytest.raises(ValidationError):
-        CategoryResponse(
-            id=uuid4(),
-            name="Rent",
-            account_id=uuid4(),
-            created_at=datetime.now(UTC),
-            color_slot=color_slot,
-        )
+        CategoryCreate(name="Groceries", color_slot=color_slot)
+    with pytest.raises(ValidationError):
+        CategoryUpdate(color_slot=color_slot)
+
+
+def test_category_response_stays_lenient_on_color_slot() -> None:
+    # Four-schema rule (D112's lesson): a Response must never reject a row
+    # the DB already holds, even one written by a since-narrowed range.
+    response = CategoryResponse(
+        id=uuid4(),
+        name="Rent",
+        account_id=uuid4(),
+        created_at=datetime.now(UTC),
+        color_slot=73,
+    )
+    assert response.color_slot == 73
 
 
 def test_tag_models() -> None:

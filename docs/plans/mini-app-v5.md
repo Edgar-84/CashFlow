@@ -184,7 +184,7 @@ and has no observable effect on its own.
 
 ### M0 — Backend (no migration, no stop-and-ask gate)
 
-- [ ] **U0.1 Widen `color_slot` to 1–72** (D500) — Pydantic bounds and the
+- [x] **U0.1 Widen `color_slot` to 1–72** (D500) — Pydantic bounds and the
       schema comment. No service change, no repository change, no migration.
       AC: `POST /categories` with `color_slot: 72` is 201 and reads back 72;
       `73` and `0` are each 422; `null` is still accepted and still leaves the
@@ -473,12 +473,21 @@ Telegram client. They are the actual acceptance gate for M2 and M3.
   requests per save; cheap at family scale.
 
 ## STATE (handoff)
-- **Done:** planning only. The five spec files in the table at the top are
-  written and are the source of truth; the 60 ramp hexes and their contrast
-  figures are already in `design-system.md`, so U1.1 reproduces them rather
-  than inventing them. No code has been touched.
-- **Next:** U0.1 (widen `color_slot` to 1–72). M0's two units are independent
-  of each other and of everything else and can go in either order.
+- **Done:** planning, plus **U0.1** (widen `color_slot` to 1–72). The five
+  spec files in the table at the top are written and are the source of truth;
+  the 60 ramp hexes and their contrast figures are already in
+  `design-system.md`, so U1.1 reproduces them rather than inventing them.
+- **Next:** U0.2 (notify-threshold default 80 → 70). M0's two units are
+  independent of each other and of everything else and can go in either
+  order.
+- **U0.1 note:** `CategoryResponse.color_slot` was found still carrying the
+  old `ge=1, le=12` bound — the plan's Contracts section assumed it was
+  already lenient, but it wasn't. Fixed to fully unbounded (`int | None =
+  None`, no `Field` constraint at all) as part of this unit, matching
+  `BudgetPlanResponse.amount`'s D112 pattern. `tests/test_category_service.py`
+  also had its own `[0, 13, -1]` out-of-range parametrize, not listed in
+  U0.1's file list — updated to `[0, 73, -1]` since it directly asserts the
+  old bound.
 - **Gotchas for the next session:**
   - The **save defect is diagnosed, not guessed** — `budgets.ts::mount`'s
     `input` listeners call `setAmountDraft`/`setThresholdDraft` and stop there.
