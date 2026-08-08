@@ -290,7 +290,7 @@ and has no observable effect on its own.
 Ordered after M2 so the two milestones never touch the same file in the same
 session, and either can be reverted without the other.
 
-- [ ] **U3.1 `screens/budget-form.ts`** — implements
+- [x] **U3.1 `screens/budget-form.ts`** — implements
       `docs/ui/screens/04b-budget-form.md` as a standalone screen module with
       its own tests. **Not yet reachable from anywhere** — U3.2 wires it.
       `amountFieldError`, `thresholdFieldError` and `budgetFormValid` move here
@@ -471,18 +471,43 @@ Telegram client. They are the actual acceptance gate for M2 and M3.
   while staying on the same screen, and it is what forced `fetchProgress`'s
   `spentKnown: false` fallback and its "Spend unknown" copy. Costs `1 + N`
   requests per save; cheap at family scale.
+- 2026-08-08: **D512 — `BudgetFormMode` gains a `currency` field**, on both the
+  `create` and `edit` variants — the plan's own contract snippet omitted it,
+  but region 3's amount-field suffix and region 2's spend line both need a
+  currency code and the screen is specified to fetch nothing on open, so there
+  is nowhere else for it to come from. Purely additive (no existing field
+  changed); U3.2 passes it from `04-budgets.md`'s already-loaded
+  `BudgetsData.currency`, the same "already loaded, don't refetch" rationale
+  the rest of the type follows.
 
 ## STATE (handoff)
 - **Done:** planning, plus **U0.1** (widen `color_slot` to 1–72), **U0.2**
   (notify-threshold default 80 → 70), **U1.1** (generate the ramp), **U1.2**
-  (`category-colors.ts` knows all 72), **U2.1** (`components/color-picker.ts`)
-  and **U2.2** (the category form wires it in, the 12-swatch grid is gone).
-  M0, M1 and M2 are complete. The five spec files in the table at the top are
-  written and are the source of truth; the 60 ramp hexes and their contrast
-  figures are already in `design-system.md`, so U1.1 reproduces them rather
-  than inventing them.
-- **Next:** U3.1 — `screens/budget-form.ts` as a standalone screen (RISKY,
-  reviewer subagent).
+  (`category-colors.ts` knows all 72), **U2.1** (`components/color-picker.ts`),
+  **U2.2** (the category form wires it in, the 12-swatch grid is gone) and
+  **U3.1** (`screens/budget-form.ts` as a standalone screen). M0, M1 and M2
+  are complete. The five spec files in the table at the top are written and
+  are the source of truth; the 60 ramp hexes and their contrast figures are
+  already in `design-system.md`, so U1.1 reproduces them rather than
+  inventing them.
+- **Next:** U3.2 — wire `04-budgets.md` to navigate to `budget-form.ts` and
+  delete the inline form (`BudgetEditMode`, `renderBudgetForm`, `fetchProgress`'s
+  `spentKnown` fallback) and its tests.
+- **U3.1 note:** `amountFieldError`/`thresholdFieldError`/`budgetFormValid`/
+  `DEFAULT_NOTIFY_THRESHOLD` are **new copies** in `budget-form.ts`, not yet
+  removed from `budgets.ts` — the unit's own Files list doesn't touch
+  `budgets.ts`/`budgets.test.ts`, and the inline form they validate is still
+  live until U3.2 deletes it. The "move" the contract describes completes
+  across both units: U3.1 adds the destination, U3.2 removes the source. See
+  **D512** for the one contract gap found (`currency` missing from
+  `BudgetFormMode`). `mount()` is untested under Node like every other
+  screen's mount (`webapp/vitest.config.ts` runs `environment: "node"`, no
+  `document`) — the D508 regression (AC: "assert the button's `disabled`
+  property after dispatching one `input` event") is covered at the level
+  `mount`'s own input listener delegates to: `controller.setAmountDraft` +
+  `budgetFormValid`, which is exactly what determines the button's
+  `disabled` property; `renderBudgetForm` is also tested directly at both
+  draft states for the same regression.
 - **U2.2 note:** the sheet is mount-only, never part of `renderCategoryForm`'s
   pure output — same shape as `screens/home.ts::openPicker`'s date-range-picker
   sheet: `mountCategoryForm` appends a sibling root for it on `+`/`onMore`,
