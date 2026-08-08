@@ -236,6 +236,49 @@ async def test_create_category_as_viewer_is_403(
     assert response.status_code == 403
 
 
+async def test_create_category_with_ramp_color_slot_reads_back(
+    client: AsyncClient, override_repos: OverrideRepos, admin: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.post(
+        "/categories",
+        headers=auth_headers(admin.tg_id),
+        json={"name": "Utilities", "color_slot": 72},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["color_slot"] == 72
+
+
+@pytest.mark.parametrize("color_slot", [0, 73])
+async def test_create_category_rejects_out_of_range_color_slot(
+    client: AsyncClient, override_repos: OverrideRepos, admin: UserResponse, color_slot: int
+) -> None:
+    override_repos([])
+
+    response = await client.post(
+        "/categories",
+        headers=auth_headers(admin.tg_id),
+        json={"name": "Utilities", "color_slot": color_slot},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_create_category_without_color_slot_auto_assigns_slot_1(
+    client: AsyncClient, override_repos: OverrideRepos, admin: UserResponse
+) -> None:
+    override_repos([])
+
+    response = await client.post(
+        "/categories", headers=auth_headers(admin.tg_id), json={"name": "Utilities"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["color_slot"] == 1
+
+
 async def test_update_category_as_admin(
     client: AsyncClient,
     override_repos: OverrideRepos,
@@ -265,6 +308,22 @@ async def test_update_category_as_member_is_403(
     )
 
     assert response.status_code == 403
+
+
+async def test_update_category_with_ramp_color_slot_succeeds(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    admin: UserResponse,
+    category: CategoryResponse,
+) -> None:
+    override_repos([category])
+
+    response = await client.patch(
+        f"/categories/{category.id}", headers=auth_headers(admin.tg_id), json={"color_slot": 40}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["color_slot"] == 40
 
 
 async def test_delete_category_as_admin(
