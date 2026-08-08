@@ -20,12 +20,11 @@ body {
 #app {
   max-width: 480px;
   margin: 0 auto;
-  /* Bottom clearance stacks two independent reservations: 96px for
-     Telegram's native MainButton (pre-existing), plus 112px for the U1.6
-     fixed bottom nav — its own 88px (8 top pad + 2*32px rows + 8px row gap +
-     8px bottom pad) plus the 24px "gap above region 5"
-     (docs/ui/screens/01-home.md) — plus the device's own safe-area inset. */
-  padding: 14px 12px calc(96px + 112px + env(safe-area-inset-bottom, 0px));
+  /* 96px reserves clearance for Telegram's native MainButton, plus the
+     device's own safe-area inset. The U1.6 fixed bottom nav that used to add
+     a second reservation here is gone (U3.2/D409) — navigation moved into
+     the ☰ side menu, which is an overlay, not docked page space. */
+  padding: 14px 12px calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Every top-level state wrapper (home.ts's renderSkeleton/renderReady/...)
@@ -61,14 +60,13 @@ body {
 }
 
 /* docs/ui/screens/01-home.md region 2d + D318/design-system.md's `--accent`
-   exception: the in-card yellow Add button, `.chart-card`'s only absolutely
-   positioned child. `right`/`bottom` are offsets from `.chart-card`'s own
-   padding edge (CSS's standard containing-block behaviour for an absolutely
-   positioned box), which is exactly "12px inset from the card's right and
-   bottom padding edges" per the screen spec's Layout table — no extra
-   arithmetic needed. Never `position: fixed`: that is what would let it
-   collide with MainButton (D318's binding constraint, and an acceptance
-   criterion, not a style note). */
+   exception: the in-card yellow Add button. `right`/`bottom` are offsets from
+   `.chart-card`'s own padding edge (CSS's standard containing-block
+   behaviour for an absolutely positioned box), which is exactly "12px inset
+   from the card's right and bottom padding edges" per the screen spec's
+   Layout table — no extra arithmetic needed. Never `position: fixed`: that is
+   what would let it collide with MainButton (D318's binding constraint, and
+   an acceptance criterion, not a style note). */
 .add-btn {
   position: absolute;
   right: 12px;
@@ -86,6 +84,40 @@ body {
 }
 
 .add-btn:focus-visible {
+  outline: 2px solid var(--category-slot-1);
+  outline-offset: 2px;
+}
+
+/* docs/ui/screens/01-home.md region 2e + docs/ui/components/side-menu.md's
+   Sizing (D409/U3.2): the ☰ button, 44×44 with a 20px glyph, `--ink` on the
+   card with no fill — chrome, not a primary action, so `--accent` stays the
+   Add button's alone. Static by default (the 403 layout has no `.chart-card`
+   to anchor it, home.ts's `renderReadOnly`); inside `.chart-card` it becomes
+   absolutely positioned, bottom-left, vertically centred on the Add button's
+   own centre line: the Add button's box runs from `bottom: 12px` to `bottom:
+   68px` (56px tall), centre at `bottom: 40px`, so a 44px button centred on
+   that same line sits at `bottom: 18px`, not a literal 12px inset (the screen
+   spec's own text: "inset 12px... vertically centred on the Add button" —
+   centring wins). */
+.menu-btn {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.chart-card .menu-btn {
+  position: absolute;
+  left: 12px;
+  bottom: 18px;
+}
+
+.menu-btn:focus-visible {
   outline: 2px solid var(--category-slot-1);
   outline-offset: 2px;
 }
@@ -238,55 +270,6 @@ body {
 
 .strip b {
   font-weight: 600;
-}
-
-/* -- bottom nav (U1.6, docs/ui/screens/01-home.md region 5) --------------
-   The only fixed element on the screen: six text-only tiles, two rows of
-   three, pinned above `env(safe-area-inset-bottom)`. `#app`'s bottom
-   padding is sized to keep scrolled content (the ranked rows) clear of it.
-   `bottom: 96px` (D331), not `0` — Telegram's native MainButton is chrome
-   this app doesn't control, and `#app`'s own pre-existing `96px` padding
-   (below) exists specifically because MainButton can cover page content at
-   the true viewport bottom. Docking this nav at raw `bottom: 0` would sit
-   it inside that same reserved zone, i.e. under MainButton. `96px` reuses
-   that already-established reserve instead of inventing a second one. */
-
-.tiles {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 96px;
-  margin: 0 auto;
-  max-width: 480px;
-  z-index: 10;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
-  background: var(--app-background);
-}
-
-.tile {
-  background: var(--card);
-  border: 0;
-  border-radius: 8px;
-  height: 32px;
-  padding: 0 8px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--ink-secondary);
-  text-align: center;
-  cursor: pointer;
-}
-
-.tile:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.tile:focus-visible {
-  outline: 2px solid var(--category-slot-1);
-  outline-offset: 2px;
 }
 
 /* -- state copy + retry --------------------------------------------------- */
@@ -2043,13 +2026,14 @@ body {
   cursor: pointer;
 }
 
-/* -- side menu (U3.1) --------------------------------------------------------
+/* -- side menu (U3.1/U3.2) ----------------------------------------------------
    docs/ui/components/side-menu.md. Full-height drawer over a scrim, opaque
    `--card` (unlike the reference's translucent gradient — see the spec's
-   Delta). Only the entrance animation lives here: this codebase re-renders by
-   replacing `innerHTML` wholesale, so a closing transition needs the panel to
-   outlive that replace — a host-level timed unmount (U3.2), not something
-   this pure component can drive. */
+   Delta). The entrance animation plays automatically whenever `.side-menu-panel`
+   mounts; the closing one (`.side-menu-closing`, below) is added by hand by
+   `screens/home.ts::openSideMenu` (D419) — this codebase re-renders by
+   replacing `innerHTML` wholesale, so the panel has to outlive that replace
+   to animate out, which only the host can arrange. */
 .side-menu-root {
   position: fixed;
   inset: 0;
@@ -2099,6 +2083,41 @@ body {
   }
   to {
     opacity: 1;
+  }
+}
+
+/* Component doc's Closing state: reverse, 160ms ease-in, added by
+   `openSideMenu` on scrim tap/row tap/BackButton/Escape and removed together
+   with the panel once the timer matching this duration fires. Under
+   `prefers-reduced-motion` the host skips both the class and the wait
+   entirely (screen doc: "disables... the menu's slide"), so these rules only
+   need to exist in the no-preference world, same as the entrance animation
+   above. */
+@media (prefers-reduced-motion: no-preference) {
+  .side-menu-panel.side-menu-closing {
+    animation: side-menu-slide-out 0.16s ease-in forwards;
+  }
+
+  .side-menu-scrim.side-menu-closing {
+    animation: side-menu-scrim-fade-out 0.16s linear forwards;
+  }
+}
+
+@keyframes side-menu-slide-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes side-menu-scrim-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 
