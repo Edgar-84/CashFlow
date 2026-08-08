@@ -1111,6 +1111,68 @@ body {
   color: var(--status-red);
 }
 
+/* -- budget form screen (U3.1, docs/ui/screens/04b-budget-form.md) --------
+   Own screen, not the `.budget-form` card above (that one stays under the
+   Budgets list until U3.2 deletes it). Regions 3/5 reuse `.card.field` +
+   `.amount-input` + `.currency-suffix`; region 8's Save/Cancel pair reuses
+   `.detail-edit-actions`. `20px`/`24px` gaps are design-system.md's
+   between-sections spacing scale, applied as flex `gap` plus a margin
+   adjustment on the regions that need a different figure — same mechanism
+   as `.account-field`'s own margin-top comment (add-expense form). */
+.budget-form-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.budget-form-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px; /* #app's 14px top padding + 6px reaches the spec's 20px */
+}
+
+/* design-system.md Typography: "Sheet section heading" role (15px/600),
+   reused here for the same visual weight. */
+.budget-form-category {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* `margin-top: -16px` pulls the 20px container gap down to the spec's 4px
+   under the header — same trick `.field-error`'s own negative margin uses
+   against the add-expense form's 12px gap. */
+.budget-form-spent {
+  margin: -16px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+.budget-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* +4px on top of the container's 20px gap reaches the spec's 24px above the
+   Save/Cancel row. */
+.budget-form-actions {
+  margin-top: 4px;
+}
+
+.budget-form-delete {
+  align-self: center;
+  margin-top: 20px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--status-red);
+  cursor: pointer;
+}
+
 .budget-row-skeleton {
   height: 72px;
   border-radius: 14px;
