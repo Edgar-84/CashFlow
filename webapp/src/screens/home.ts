@@ -529,6 +529,7 @@ function renderEmpty(period: PeriodValue, currency: Currency, now: Date, collaps
       ${collapsed ? "" : renderMenuButton()}
       ${collapsed ? "" : renderAddButton()}
     </div>
+    ${renderCollapseSentinel()}
   </div>`;
 }
 
@@ -596,6 +597,19 @@ function renderCollapsedBar(bars: HomeBarSegment[], label: string): string {
     )
     .join("");
   return `<div class="collapsed-bar" role="img" aria-label="${escapeHtml(label)}" data-testid="collapsed-bar">${segs}</div>`;
+}
+
+// D414/U5.2: a 1px marker at the bottom edge of region 2c (the chart card) —
+// screen doc's "the trigger is an IntersectionObserver on a 1px sentinel at
+// the bottom edge of region 2c, not a scroll-position listener." Rendered
+// unconditionally (both collapsed states) since it's the trigger itself, not
+// a symptom of collapsing: `mount` below needs it present whichever way
+// `collapsed` is already rendered, to detect the *next* crossing in either
+// direction. Placed on iOS's rubber-band side of the boundary deliberately
+// (screen doc's Edge cases: "well clear of the overscroll region, so the
+// header does not flicker at the boundary").
+function renderCollapseSentinel(): string {
+  return `<div class="collapse-sentinel" data-testid="collapse-sentinel"></div>`;
 }
 
 // Region 6 (D414/U5.1): the fixed 68px summary the donut collapses into once
@@ -691,6 +705,7 @@ function renderReady(
       ${collapsed ? "" : renderMenuButton()}
       ${collapsed ? "" : renderAddButton()}
     </div>
+    ${renderCollapseSentinel()}
     ${renderOverBudgetStrip(data.overBudget, data.currency)}
     ${renderRankedRows(data.rows)}
   </div>`;
@@ -875,6 +890,27 @@ function openSideMenu(root: HTMLElement, trigger: HTMLElement, state: HomeState,
   });
 }
 
+// D414/U5.2: the one `IntersectionObserver` driving the scroll collapse,
+// module-level because Home has a single mount at a time (the shared `#app`
+// root, `main.ts`) and every `mount` call — a period change, a retry, this
+// very observer firing — needs to find and disconnect its predecessor rather
+// than accumulate one per call.
+let collapseObserver: IntersectionObserver | null = null;
+
+function disconnectCollapseObserver(): void {
+  collapseObserver?.disconnect();
+  collapseObserver = null;
+}
+
+// Exported for `main.ts` to call when navigating away from Home to any other
+// screen: the next screen's own `mount` replaces `#app`'s children wholesale,
+// which detaches the sentinel but does not by itself stop the observer from
+// still holding it — this unit's AC ("no listener leak across navigations")
+// wants that deterministic, not left to next-visit cleanup.
+export function unmountHome(): void {
+  disconnectCollapseObserver();
+}
+
 export function mount(
   root: HTMLElement,
   state: HomeState,
@@ -885,6 +921,7 @@ export function mount(
   if (typeof document === "undefined") {
     return;
   }
+  disconnectCollapseObserver();
   root.innerHTML = renderHome(state, now, collapsed);
 
   root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
@@ -948,5 +985,39 @@ export function mount(
         onOpenPicker: () => openPicker(root, state.period, now, handlers.onApplyCustomRange),
       });
     }
+  }
+
+  // D414/U5.2: the scroll trigger itself. Only `renderReady`/`renderEmpty`
+  // render a sentinel — loading/error/forbidden have nothing to collapse
+  // into, so `querySelector` finds nothing there and this is a no-op, same
+  // shape as the `menuBtn` guard above. `typeof IntersectionObserver` mirrors
+  // the `typeof document` guard this function already opens with: absent
+  // under Node (this branch is unreachable in `vitest`, so it stays outside
+  // this unit's test coverage the same way `mount` itself already is), and
+  // if a real but non-supporting environment ever lacks it, the header
+  // simply never appears — indistinguishable from the "too few rows to
+  // scroll" edge case the screen doc already specifies as correct.
+  const sentinel = root.querySelector<HTMLElement>('[data-testid="collapse-sentinel"]');
+  if (sentinel && typeof IntersectionObserver === "function") {
+    collapseObserver = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (!entry) {
+        return;
+      }
+      // Region 2c starts in the viewport on every mount (the sentinel sits
+      // right after it, near the top of the page), so the only way it stops
+      // intersecting is by being scrolled past — never by scrolling up past
+      // the top, which is exactly the Expanded/Collapsed trigger pair the
+      // screen doc states. Re-mounting with the flipped value re-renders
+      // `renderReady`/`renderEmpty` (the single source of truth for which
+      // ☰ exists, D414/U5.1) and, via the `disconnectCollapseObserver()`
+      // call at the top of `mount`, tears this observer down and replaces it
+      // with one watching the freshly-rendered sentinel.
+      const nextCollapsed = !entry.isIntersecting;
+      if (nextCollapsed !== collapsed) {
+        mount(root, state, handlers, now, nextCollapsed);
+      }
+    });
+    collapseObserver.observe(sentinel);
   }
 }
