@@ -1,7 +1,7 @@
 """MVP U5.1 e2e smoke (@integration), extended by family-features-v1_1 U3.1,
-mini-app-v2 U3.1 and mini-app-v3 U4.1 (same-numbered but unrelated units in
-different plan files — see each test's docstring for which one it belongs
-to): bot client / initData -> real API -> test DB.
+mini-app-v2 U3.1, mini-app-v3 U4.1 and mini-app-v4 U4.1 (same-numbered but
+unrelated units in different plan files — see each test's docstring for
+which one it belongs to): bot client / initData -> real API -> test DB.
 
 Exercises the actual production path through bot.client.BackendClient (the
 bot's only channel to the backend, bot/CLAUDE.md) against the real FastAPI
@@ -33,6 +33,13 @@ statistics (D313) filed by `spent_at` rather than `created_at` (D314), and
 the category archive lifecycle (D302) — create with an explicit colour,
 archive while in use, `include_archived`, and the archived-category write
 guard (409) — all against the real app/DB.
+
+mini-app-v4 U4.1 adds the last initData scenario: `GET /expenses`'s new
+`category_id`/`period`/`period_offset` filters (D402) — proving they narrow
+the same way the statistics routes do and key off `spent_at`, not
+`created_at` — plus `PATCH /accounts/me`'s currency relabel (D401/D400): no
+`expenses.amount` changes, `GET /users/me` reports the new code, and a
+non-admin is 403.
 """
 
 import json
@@ -481,3 +488,170 @@ async def test_period_and_archive_round_trip_through_init_data(
                 json={"amount": 500, "category_id": category_id},
             )
             assert blocked.status_code == 409
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def filtered_list_currency_fixtures(db_pool: asyncpg.Pool) -> AsyncIterator[dict[str, Any]]:
+    """mini-app-v4 U4.1: a fresh account with an ADMIN and a MEMBER user —
+    `PATCH /accounts/me` needs an admin for the success path and a member
+    for the 403 path (`api/deps.py::require_admin`) — plus one category. A
+    dedicated account keeps this scenario's own expenses and currency change
+    from touching the fixed totals the other tests in this module assert on.
+    """
+    tg_id_admin = uuid4().int % 1_000_000_000
+    tg_id_member = uuid4().int % 1_000_000_000
+    account_id: UUID | None = None
+    async with db_pool.acquire() as conn:
+        try:
+            account_id = await make_account(conn, name="Filtered List Currency Smoke Account")
+            category_id = await make_category(conn, account_id=account_id, name="Smoke Category")
+            admin = await make_user(
+                conn, account_id=account_id, tg_id=tg_id_admin, name="Admin", role=Role.ADMIN
+            )
+            member = await make_user(
+                conn, account_id=account_id, tg_id=tg_id_member, name="Member", role=Role.MEMBER
+            )
+            yield {
+                "account_id": account_id,
+                "category_id": category_id,
+                "admin": admin,
+                "member": member,
+            }
+        finally:
+            if account_id is not None:
+                await conn.execute("DELETE FROM expenses WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM users WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM categories WHERE account_id = $1", account_id)
+                await conn.execute("DELETE FROM accounts WHERE id = $1", account_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_filtered_expense_list_and_currency_relabel_through_init_data(
+    filtered_list_currency_fixtures: dict[str, Any],
+) -> None:
+    """mini-app-v4 U4.1: one signed-initData scenario over the real app/DB —
+    add an expense today and one backdated to yesterday into the same
+    category; `GET /expenses?category_id` returns both, `+ period=day&
+    period_offset=0` narrows to exactly the non-backdated one and
+    `period_offset=-1` to exactly the backdated one (D402), proving the
+    filter keys off `spent_at` not `created_at` (D314); `PATCH
+    /expenses/{id}` moves the backdated one to today and both period
+    queries update accordingly; an admin `PATCH /accounts/me` to EUR (D401)
+    leaves both `amount` values untouched (D400 — relabel only, no
+    conversion) while `GET /users/me` reports EUR; a member's `PATCH
+    /accounts/me` is 403.
+    """
+    fixtures = filtered_list_currency_fixtures
+    category_id = fixtures["category_id"]
+    admin_headers = {
+        "X-Telegram-Init-Data": build_init_data(get_settings().bot_token, fixtures["admin"].tg_id)
+    }
+    member_headers = {
+        "X-Telegram-Init-Data": build_init_data(get_settings().bot_token, fixtures["member"].tg_id)
+    }
+
+    family_tz = get_settings().family_tz
+    local_today = datetime.now(UTC).astimezone(ZoneInfo(family_tz)).date()
+    local_yesterday = local_today - timedelta(days=1)
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as http_client:
+            today_expense = await http_client.post(
+                "/expenses",
+                headers=admin_headers,
+                json={"amount": 2_000, "category_id": str(category_id)},
+            )
+            assert today_expense.status_code == 201
+            today_id = today_expense.json()["id"]
+            assert today_expense.json()["spent_at"] == local_today.isoformat()
+
+            yesterday_expense = await http_client.post(
+                "/expenses",
+                headers=admin_headers,
+                json={
+                    "amount": 5_000,
+                    "category_id": str(category_id),
+                    "spent_at": local_yesterday.isoformat(),
+                },
+            )
+            assert yesterday_expense.status_code == 201
+            yesterday_id = yesterday_expense.json()["id"]
+
+            both = await http_client.get(
+                "/expenses",
+                headers=admin_headers,
+                params={"category_id": str(category_id), "limit": 50},
+            )
+            assert both.status_code == 200
+            assert {e["id"] for e in both.json()} == {today_id, yesterday_id}
+
+            day_today = await http_client.get(
+                "/expenses",
+                headers=admin_headers,
+                params={"category_id": str(category_id), "period": "day", "period_offset": 0},
+            )
+            assert day_today.status_code == 200
+            assert [e["id"] for e in day_today.json()] == [today_id]
+
+            day_yesterday = await http_client.get(
+                "/expenses",
+                headers=admin_headers,
+                params={"category_id": str(category_id), "period": "day", "period_offset": -1},
+            )
+            assert day_yesterday.status_code == 200
+            assert [e["id"] for e in day_yesterday.json()] == [yesterday_id]
+
+            moved = await http_client.patch(
+                f"/expenses/{yesterday_id}",
+                headers=admin_headers,
+                json={"spent_at": local_today.isoformat()},
+            )
+            assert moved.status_code == 200
+            assert moved.json()["spent_at"] == local_today.isoformat()
+
+            # Both expenses now carry spent_at == today (D314): period_offset=-1
+            # loses the expense it used to hold and period_offset=0 gains it.
+            day_yesterday_after_move = await http_client.get(
+                "/expenses",
+                headers=admin_headers,
+                params={"category_id": str(category_id), "period": "day", "period_offset": -1},
+            )
+            assert day_yesterday_after_move.status_code == 200
+            assert day_yesterday_after_move.json() == []
+
+            day_today_after_move = await http_client.get(
+                "/expenses",
+                headers=admin_headers,
+                params={"category_id": str(category_id), "period": "day", "period_offset": 0},
+            )
+            assert day_today_after_move.status_code == 200
+            assert {e["id"] for e in day_today_after_move.json()} == {today_id, yesterday_id}
+
+            currency_update = await http_client.patch(
+                "/accounts/me", headers=admin_headers, json={"currency": "EUR"}
+            )
+            assert currency_update.status_code == 200
+            assert currency_update.json()["currency"] == "EUR"
+
+            me = await http_client.get("/users/me", headers=admin_headers)
+            assert me.status_code == 200
+            assert me.json()["currency"] == "EUR"
+
+            after_currency = await http_client.get(
+                "/expenses",
+                headers=admin_headers,
+                params={"category_id": str(category_id), "limit": 50},
+            )
+            assert after_currency.status_code == 200
+            assert {e["id"]: e["amount"] for e in after_currency.json()} == {
+                today_id: 2_000,
+                yesterday_id: 5_000,
+            }
+
+            member_forbidden = await http_client.patch(
+                "/accounts/me", headers=member_headers, json={"currency": "USD"}
+            )
+            assert member_forbidden.status_code == 403

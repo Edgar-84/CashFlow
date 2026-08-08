@@ -1012,13 +1012,13 @@ in this period." without calling the formatter at all.
 
 ---
 
-## E2e smoke (`test_e2e_smoke.py`) — MVP U5.1 + family-features-v1_1 U3.1 + mini-app-v2 U3.1 + mini-app-v3 U4.1, `@pytest.mark.integration`, excluded from default `verify.sh`
+## E2e smoke (`test_e2e_smoke.py`) — MVP U5.1 + family-features-v1_1 U3.1 + mini-app-v2 U3.1 + mini-app-v3 U4.1 + mini-app-v4 U4.1, `@pytest.mark.integration`, excluded from default `verify.sh`
 Real FastAPI app on a real Postgres pool (`main.lifespan`). The first three
 tests drive it through `bot.client.BackendClient` (no fakes for expenses/
 budgets/DB); the outbound Telegram call inside `NotificationService` is
 swapped for a `httpx.MockTransport` (same pattern as
 `test_notification_service.py`), so those tests need neither a live bot
-token nor network access. The last three drive the same real app/DB through a
+token nor network access. The rest drive the same real app/DB through a
 signed `X-Telegram-Init-Data` header instead (mini-app-v2's auth path,
 `test_deps.py::build_init_data`), no `BackendClient` involved.
 
@@ -1030,3 +1030,4 @@ signed `X-Telegram-Init-Data` header instead (mini-app-v2's auth path,
 | `test_init_data_auth_round_trips_through_expenses_and_statistics` | A signed `X-Telegram-Init-Data` payload (no `X-Internal-Token`) authenticates `GET /users/me`, `POST /expenses`, the created expense appears in a paginated `GET /expenses`, and `GET /statistics/by-category?months_back=0` includes its total — against the real app/DB (mini-app-v2 U3.1 AC) |
 | `test_init_data_tampered_payload_against_real_app_is_401` | A tampered `X-Telegram-Init-Data` payload (`user` field changed post-signing) → 401 against the real app/DB, not just `test_deps.py`'s fake dependency chain (mini-app-v2 U3.1 AC) |
 | `test_period_and_archive_round_trip_through_init_data` | Creates a category with an explicit `color_slot`, adds an expense today and one backdated to yesterday via `spent_at`; `period=day&offset=0/-1`, `period=custom` and `period=week&offset=0` on `/statistics/by-period` prove filtering follows `spent_at` not `created_at` (D313/D314); archiving the in-use category 204s, disappears from the default `GET /categories`, stays visible with `include_archived=true`, its expenses and `/statistics/by-category` total are unaffected, and a new `POST /expenses` into it now 409s (mini-app-v3 U4.1 AC, D302) |
+| `test_filtered_expense_list_and_currency_relabel_through_init_data` | Adds an expense today and one backdated to yesterday into the same category; `GET /expenses?category_id` returns both, `+ period=day&period_offset=0/-1` (D402) narrows to exactly the non-backdated / backdated one, proving the filter keys off `spent_at` not `created_at` (D314); `PATCH /expenses/{id}` moves the backdated one to today and both period queries update accordingly; an admin `PATCH /accounts/me` to EUR (D401) leaves both `amount` values untouched (D400) while `GET /users/me` reports EUR; a member's `PATCH /accounts/me` is 403 (mini-app-v4 U4.1 AC) |

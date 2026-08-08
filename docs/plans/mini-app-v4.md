@@ -472,7 +472,7 @@ navigate into screens that must already accept what they will be handed.
 
 ### M4 — Smoke
 
-- [ ] **U4.1 e2e: filtered list + currency through `initData` (@integration)** —
+- [x] **U4.1 e2e: filtered list + currency through `initData` (@integration)** —
       one signed-payload scenario over the real app: create a category → add an
       expense today and one backdated to yesterday → `GET /expenses?category_id`
       returns both → `+ period=day&period_offset=0` returns exactly the
@@ -1177,8 +1177,31 @@ human with a phone:
   `app.css` gained a `.settings-*` block, entirely from existing
   design-system.md values (48px row per its Sizing table, 10px/600/0.11em
   eyebrow reusing `.cat-archived-header`'s type ramp) — no new tokens.
-- **Next:** `U4.1` e2e smoke (M4) — depends on U0.3/U0.4, both done;
-  unblocked. M5 (U5.1/U5.2) still follows it, depending on U3.2 only.
+- **U4.1 done.** `tests/test_e2e_smoke.py` gained
+  `filtered_list_currency_fixtures` (a dedicated account with an ADMIN and a
+  MEMBER user plus one category, mirroring `period_archive_fixtures`'s
+  shape) and one new `@pytest.mark.integration` test, driven through the
+  Mini App's signed-`initData` auth path like the module's other
+  `initData` tests, no `BackendClient`. Scenario: an expense today and one
+  backdated to yesterday in the same category; `GET /expenses?category_id`
+  returns both, `+ period=day&period_offset=0/-1` (D402) narrows to exactly
+  the non-backdated / backdated one — proving the new filter keys off
+  `spent_at`, not `created_at` (D314), the same invariant
+  `test_period_and_archive_round_trip_through_init_data` already proves for
+  `/statistics/by-period`; `PATCH /expenses/{id}` moves the backdated one to
+  today and both period queries update (period_offset=-1 empties,
+  period_offset=0 gains it); an admin `PATCH /accounts/me` to EUR (D401)
+  leaves both `amount` values byte-identical (D400's "relabel only, no
+  conversion" is asserted, not just assumed) while `GET /users/me` reports
+  EUR; a member's `PATCH /accounts/me` is 403 via `require_admin`. Verified
+  green against a throwaway Docker Postgres
+  (`bash scripts/integration_docker.sh -k
+  test_filtered_expense_list_and_currency_relabel_through_init_data`) —
+  excluded from `verify.sh`'s default run like every other test in this
+  module. `tests/README.md`'s e2e-smoke table gained the matching row. No
+  contract change, no new decision.
+- **Next:** M5 (U5.1/U5.2), depending on U3.2 only — the whole rest of the
+  plan is now done.
 - **Gotchas for the next session:**
   - `GET /expenses`'s period offset is `period_offset`, **not** `offset` — the
     latter paginates and the bot depends on it (D402).
