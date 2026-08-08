@@ -15,6 +15,12 @@ export interface CategoryColor {
 
 const FALLBACK_MAX_SLOT = 6;
 
+/** Total addressable slots (D500) — the named set (1-12) plus the ramp (13-72). */
+export const PALETTE_SLOT_COUNT = 72;
+
+/** The picker's quick row (D504) — design-system.md's named slots 1-7. */
+export const QUICK_SLOTS = [1, 2, 3, 4, 5, 6, 7] as const;
+
 export function assignCategoryColors(
   categories: { id: string; created_at: string; color_slot?: number | null }[],
   fallbackMaxSlot = FALLBACK_MAX_SLOT,
@@ -53,6 +59,34 @@ const SLOT_NAMES = [
   "Magenta",
 ];
 
+/** `design-system.md`'s ramp (slots 13-72, D500/D501) — ten hue families of
+ * six lightness steps each, in the exact order `scripts/gen_palette.py`
+ * generates them. Positional naming ("Olive 3"), not a lookup table: the
+ * ramp is sixty slots and the family/step math is the whole point. */
+const RAMP_FIRST_SLOT = 13;
+const RAMP_STEP_COUNT = 6;
+const RAMP_FAMILIES = [
+  "Olive",
+  "Green",
+  "Teal",
+  "Blue",
+  "Violet",
+  "Magenta",
+  "Red",
+  "Orange",
+  "Brown",
+  "Slate",
+];
+const RAMP_LAST_SLOT = RAMP_FIRST_SLOT + RAMP_FAMILIES.length * RAMP_STEP_COUNT - 1;
+
 export function categorySlotName(slot: number): string {
-  return SLOT_NAMES[slot - 1] ?? `Slot ${slot}`;
+  const named = SLOT_NAMES[slot - 1];
+  if (named) return named;
+  if (slot >= RAMP_FIRST_SLOT && slot <= RAMP_LAST_SLOT) {
+    const rampIndex = slot - RAMP_FIRST_SLOT;
+    const family = RAMP_FAMILIES[Math.floor(rampIndex / RAMP_STEP_COUNT)];
+    const step = (rampIndex % RAMP_STEP_COUNT) + 1;
+    return `${family} ${step}`;
+  }
+  return `Slot ${slot}`;
 }
