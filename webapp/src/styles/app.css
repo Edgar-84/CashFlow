@@ -2043,6 +2043,136 @@ body {
   cursor: pointer;
 }
 
+/* -- side menu (U3.1) --------------------------------------------------------
+   docs/ui/components/side-menu.md. Full-height drawer over a scrim, opaque
+   `--card` (unlike the reference's translucent gradient — see the spec's
+   Delta). Only the entrance animation lives here: this codebase re-renders by
+   replacing `innerHTML` wholesale, so a closing transition needs the panel to
+   outlive that replace — a host-level timed unmount (U3.2), not something
+   this pure component can drive. */
+.side-menu-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+}
+
+.side-menu-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+}
+
+.side-menu-panel {
+  position: relative;
+  width: min(80vw, 320px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border-radius: 0 14px 14px 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .side-menu-panel {
+    animation: side-menu-slide-in 0.2s ease-out;
+  }
+
+  .side-menu-scrim {
+    animation: side-menu-scrim-fade 0.2s linear;
+  }
+}
+
+@keyframes side-menu-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes side-menu-scrim-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.side-menu-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
+  background: var(--app-background);
+  border-bottom: 1px solid var(--separator);
+}
+
+.side-menu-account {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.side-menu-currency {
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.side-menu-rows {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-menu-row {
+  flex-shrink: 0;
+  height: 48px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* Settings is separated from the six by a gap, not a rule — the spec's
+   Anatomy: a rule here would read as a heading boundary, not a grouping. */
+.side-menu-row-settings {
+  margin-top: 12px;
+}
+
+.side-menu-row:active {
+  background: var(--app-background);
+}
+
+.side-menu-row[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Inward, unlike .period-tab's +2px offset: rows sit flush against each
+   other with no gap, so an outward ring would bleed into the next row. */
+.side-menu-row:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.side-menu-footer {
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  font-size: 11.5px;
+  color: var(--ink-secondary);
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */
