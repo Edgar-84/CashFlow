@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { assignCategoryColors, categorySlotCssVar, categorySlotName, OTHER_COLOR_VAR } from "../src/lib/category-colors";
+import {
+  assignCategoryColors,
+  categorySlotCssVar,
+  categorySlotName,
+  OTHER_COLOR_VAR,
+  PALETTE_SLOT_COUNT,
+  QUICK_SLOTS,
+} from "../src/lib/category-colors";
 
 function category(id: string, created_at: string, color_slot: number | null = null) {
   return { id, created_at, color_slot };
@@ -30,6 +37,17 @@ describe("assignCategoryColors", () => {
 
     expect(result.slice(0, 6).map((c) => c.slot)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(result.slice(6).map((c) => c.slot)).toEqual([null, null]);
+  });
+
+  it("caps the fallback at slot 6 even with 40 categories and the full 72-slot palette available", () => {
+    const categories = Array.from({ length: 40 }, (_, i) =>
+      category(`cat-${i}`, `2026-01-01T00:00:${String(i).padStart(2, "0")}Z`, null),
+    );
+
+    const result = assignCategoryColors(categories);
+
+    expect(result.slice(0, 6).map((c) => c.slot)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(result.slice(6).every((c) => c.slot === null)).toBe(true);
   });
 
   it("does not shift a later category's colour when an earlier category is deleted", () => {
@@ -83,6 +101,10 @@ describe("categorySlotCssVar", () => {
   it("maps null to the neutral Other colour", () => {
     expect(categorySlotCssVar(null)).toBe(OTHER_COLOR_VAR);
   });
+
+  it("maps a ramp slot to its CSS custom property", () => {
+    expect(categorySlotCssVar(72)).toBe("var(--category-slot-72)");
+  });
 });
 
 describe("categorySlotName", () => {
@@ -91,5 +113,27 @@ describe("categorySlotName", () => {
     expect(categorySlotName(6)).toBe("Green");
     expect(categorySlotName(7)).toBe("Teal");
     expect(categorySlotName(12)).toBe("Magenta");
+  });
+
+  it("names the ramp positionally, matching design-system.md's ramp table", () => {
+    expect(categorySlotName(13)).toBe("Olive 1");
+    expect(categorySlotName(18)).toBe("Olive 6");
+    expect(categorySlotName(72)).toBe("Slate 6");
+  });
+
+  it("falls back to a generic label past the closed 72-slot set", () => {
+    expect(categorySlotName(73)).toBe("Slot 73");
+  });
+});
+
+describe("PALETTE_SLOT_COUNT", () => {
+  it("is 72", () => {
+    expect(PALETTE_SLOT_COUNT).toBe(72);
+  });
+});
+
+describe("QUICK_SLOTS", () => {
+  it("is the named set's first seven slots", () => {
+    expect(QUICK_SLOTS).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 });

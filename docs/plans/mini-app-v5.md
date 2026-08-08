@@ -226,7 +226,7 @@ and has no observable effect on its own.
       Files: `scripts/gen_palette.py`(new), `webapp/src/styles/tokens.css`.
       Model: sonnet.
 
-- [ ] **U1.2 `category-colors.ts` knows all 72** — names, count, quick set.
+- [x] **U1.2 `category-colors.ts` knows all 72** — names, count, quick set.
       AC: `categorySlotName(1) === "Blue"` and `(12) === "Magenta"` (the named
       set, unchanged); `(13) === "Olive 1"`, `(18) === "Olive 6"`,
       `(72) === "Slate 6"`; `(73)` falls back to `"Slot 73"` rather than
@@ -474,12 +474,19 @@ Telegram client. They are the actual acceptance gate for M2 and M3.
 
 ## STATE (handoff)
 - **Done:** planning, plus **U0.1** (widen `color_slot` to 1–72), **U0.2**
-  (notify-threshold default 80 → 70) and **U1.1** (generate the ramp). M0 and
-  the first unit of M1 are complete. The five spec files in the table at the
-  top are written and are the source of truth; the 60 ramp hexes and their
-  contrast figures are already in `design-system.md`, so U1.1 reproduces them
-  rather than inventing them.
-- **Next:** M1 continues with U1.2 (`category-colors.ts` knows all 72).
+  (notify-threshold default 80 → 70), **U1.1** (generate the ramp) and **U1.2**
+  (`category-colors.ts` knows all 72). M0 and M1 are complete. The five spec
+  files in the table at the top are written and are the source of truth; the
+  60 ramp hexes and their contrast figures are already in `design-system.md`,
+  so U1.1 reproduces them rather than inventing them.
+- **Next:** M2 starts with U2.1 (`components/color-picker.ts`).
+- **U1.2 note:** `categorySlotName`'s ramp half is computed positionally
+  (family list + `Math.floor`/`%` against `RAMP_FIRST_SLOT`/`RAMP_STEP_COUNT`),
+  not a 60-entry lookup table — the family order
+  (`Olive, Green, Teal, Blue, Violet, Magenta, Red, Orange, Brown, Slate`)
+  matches `scripts/gen_palette.py::FAMILIES` exactly. `FALLBACK_MAX_SLOT`
+  (`assignCategoryColors`) was left untouched, per the contract; the AC's
+  40-category regression test asserts categories past index 6 stay `null`.
 - **U0.2 note:** no migration, no existing row rewritten — `BudgetPlanResponse`
   built with an explicit `notify_threshold=80` still reads 80
   (`test_budget_plan_models`, `test_get_budget_plan_as_viewer`), proving the
