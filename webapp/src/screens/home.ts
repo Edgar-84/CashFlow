@@ -720,12 +720,18 @@ function renderWarningGlyph(): string {
 // so Home and screen 04 keep saying the same thing) and the new `alert.warn`,
 // carrying the percentage, spent and limit `alert.over` doesn't. `overMinor`
 // comes straight from `-remaining` (never `spent - amount`, D606); `fillPct`
-// is rounded here and nowhere else.
+// is rounded here and nowhere else. Exported, raw and unescaped, so
+// `main.ts::budgetToastMessage` (D608/D609) composes the toast from this
+// exact sentence — "one copy source, not two" (mini-app-v6 plan, U4.3's AC)
+// — rather than a second copy of the wording that could drift from this one.
+export function budgetAlertMessage(alert: HomeBudgetAlert, currency: Currency): string {
+  return alert.kind === "exceeded"
+    ? `${alert.label} is over budget by ${formatAmount(alert.overMinor ?? 0)} ${currency}`
+    : `${alert.label} is at ${Math.round(alert.fillPct)}% — ${formatAmount(alert.spentMinor)} of ${formatAmount(alert.limitMinor)} ${currency}`;
+}
+
 function renderBudgetAlertLine(alert: HomeBudgetAlert, currency: Currency): string {
-  const text =
-    alert.kind === "exceeded"
-      ? `${escapeHtml(alert.label)} is over budget by ${escapeHtml(formatAmount(alert.overMinor ?? 0))} ${escapeHtml(currency)}`
-      : `${escapeHtml(alert.label)} is at ${Math.round(alert.fillPct)}% — ${escapeHtml(formatAmount(alert.spentMinor))} of ${escapeHtml(formatAmount(alert.limitMinor))} ${escapeHtml(currency)}`;
+  const text = escapeHtml(budgetAlertMessage(alert, currency));
   return `<div class="alert-line alert-line--${alert.kind}" data-testid="budget-alert" data-category-id="${alert.categoryId}">${renderWarningGlyph()}<span>${text}</span></div>`;
 }
 

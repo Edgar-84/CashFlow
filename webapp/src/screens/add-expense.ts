@@ -884,7 +884,10 @@ export function renderAddExpense(state: AddExpenseLoadState, draft: Draft = empt
 export interface AddExpenseHandlers {
   onRetry: () => void;
   onClose: () => void;
-  onSuccess: () => void;
+  /** Carries the saved expense's category id — `main.ts` stores it as the
+   * pending budget-toast trigger for the next Home load (D609); this screen
+   * itself does nothing with the value beyond forwarding it. */
+  onSuccess: (categoryId: Uuid) => void;
   /** "More" cell tap (docs/ui/components/category-picker.md) — navigates to
    * screen 06 (Categories). Carries the current draft so the host (main.ts)
    * can restore amount/tags/comment on return; `categoryId` is deliberately
@@ -1106,7 +1109,7 @@ export function mount(
       const outcome = await controller.submit();
       if (outcome.status === "success") {
         haptics.notification("success");
-        handlers.onSuccess();
+        handlers.onSuccess(outcome.expense.category_id);
       } else if (outcome.status === "error") {
         rerenderForm(outcome.message);
       }
