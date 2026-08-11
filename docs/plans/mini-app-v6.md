@@ -319,7 +319,7 @@ export function budgetToastMessage(
       `docs/ui/design-system.md` (only if a token is genuinely missing).
       Model: opus, skill: `ui-spec`.
 
-- [ ] **U0.5 A DOM test environment, per-file opt-in** (D603, G1 answered yes) —
+- [x] **U0.5 A DOM test environment, per-file opt-in** (D603, G1 answered yes) —
       `jsdom` as a devDependency plus a `vitest.config.ts`, so the `mount`
       wiring M1 fixes and the toast M4 adds can be tested at the level they
       actually live. **The only unit in this plan permitted to touch
@@ -673,7 +673,12 @@ the actual acceptance gate for M2 and M4.
   the top are written and are the source of truth for M1–M4. `verify.sh` green
   after them (docs only). **They have not been reviewed by the human yet**: any
   correction made directly in a spec file wins over this plan's summary of it,
-  and over anything said in the session that wrote it. No code unit is
+  and over anything said in the session that wrote it. Plus **U0.5** — `jsdom`
+  is a `devDependency`, `webapp/vitest.config.ts` is new (test config moved out
+  of `vite.config.ts`, which now only holds `build.outDir`), the global
+  environment stays `"node"` (all 22 pre-existing test files pass unchanged),
+  and `tests/dom-env-smoke.test.ts` proves the per-file `// @vitest-environment
+  jsdom` opt-in works — throwaway, deleted by U1.1. No other code unit is
   implemented. The four defects are diagnosed against real code, not inferred
   from the brief:
   - item 1 → `webapp/src/screens/add-expense.ts:1025-1028` (no `applyChrome()`),
@@ -686,11 +691,10 @@ the actual acceptance gate for M2 and M4.
     `webapp/tests/home.test.ts:82`;
   - item 4 → `webapp/src/screens/home.ts:227-235` (`is_exceeded` only) and
     `:665-673` (`overBudget[0]` only).
-- **Next:** **U0.5** (the `jsdom` test environment — the human's yes is
-  recorded, G1/D603), then **U1.1** (the comment-only save, the user's most
-  painful item, and the one that wants U0.5 in front of it for its DOM
-  regression). After that M2 → M3 → M4 in order; M4's three units are the only
-  ones that must stay in sequence (U4.2 builds the component U4.3 triggers).
+- **Next:** **U1.1** (the comment-only save, the user's most painful item, and
+  the one that wants U0.5 in front of it for its DOM regression — U0.5 is now
+  done). After that M2 → M3 → M4 in order; M4's three units are the only ones
+  that must stay in sequence (U4.2 builds the component U4.3 triggers).
 - **Spec-authoring notes worth keeping (U0.1–U0.4):**
   - The toast introduces **no new colour token**: it is `--ink` background with
     `--card` text, the existing pair used in reverse, which inverts per theme for
