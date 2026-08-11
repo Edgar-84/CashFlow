@@ -429,7 +429,7 @@ export function budgetToastMessage(
 Ordered after M3 so the two milestones' `home.ts` edits never land in the same
 session, and either can be reverted without the other.
 
-- [ ] **U4.1 Home's strip shows approaching-limit too** (D606) — implements
+- [x] **U4.1 Home's strip shows approaching-limit too** (D606) — implements
       U0.1's spec. `overBudget` becomes `budgetAlerts`; `renderOverBudgetStrip`
       becomes a list.
       AC: a budget at 82% renders "approaching limit" with **82%, the amount
@@ -748,8 +748,30 @@ the actual acceptance gate for M2 and M4.
   regression case the plan called for — it fails against the pre-U3.1 code.
   The existing "same order, count and colours" bar test and the "top three"
   a11y label test stay green untouched.
-- **Next:** M4 (`U4.1` → `U4.2` → `U4.3`) in order; those three units are the
-  only ones that must stay in sequence (U4.2 builds the component U4.3
+- Plus **U4.1** — `HomeOverBudgetRow`/`overBudget` (exceeded-only, first-row-only)
+  replaced by `HomeBudgetAlert`/`budgetAlerts` (D606's contract) in
+  `webapp/src/screens/home.ts`. `buildHomeData` builds an `exceeded` group
+  (`is_exceeded`) and an `approaching` group (`is_over_threshold && !is_exceeded
+  && fill_pct !== null`), each sorted into `rows`' ranked order via a
+  `categoryId → rank` map, then concatenates exceeded-first. `overMinor` is
+  `-remaining`, never `spent - amount` (D606's rule, functionally identical for
+  today's fixtures but now literal). `renderOverBudgetStrip` (single line) is
+  replaced by `renderBudgetAlertStrip` (one `.budget-alert-strip` card, one
+  `.alert-line`/`.alert-line--exceeded`/`.alert-line--approaching` div per
+  alert) plus a new inline warning-glyph SVG (`renderWarningGlyph`,
+  `currentColor`, `aria-hidden`) — the first place in the codebase drawing that
+  glyph; U4.2's toast defines its own copy of the same shape rather than
+  importing this one, matching this codebase's per-file inline-SVG convention
+  (category-picker.ts, color-picker.ts, period-selector.ts each already do the
+  same). `app.css`'s `.strip`/`.strip b` rules replaced by
+  `.budget-alert-strip`/`.alert-line`/`.alert-glyph` — no new design-system
+  token needed (`--status-red`/`--ink` both already existed). Strip is fully
+  absent (not an empty card) with no alerts, unchanged from before. Tests:
+  `buildHomeData` alert-shape/ordering/threshold/null-fill_pct coverage plus
+  `renderHome` copy/ordering/display-only-markup coverage, all under
+  `webapp/tests/home.test.ts`; the two D310 month-gate tests retargeted to
+  `budgetAlerts` rather than removed.
+- **Next:** `U4.2` → `U4.3` in order (U4.2 builds the toast component U4.3
   triggers).
 - **Spec-authoring notes worth keeping (U0.1–U0.4):**
   - The toast introduces **no new colour token**: it is `--ink` background with
