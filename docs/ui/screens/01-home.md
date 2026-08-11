@@ -24,6 +24,21 @@ into a stacked bar and pins to the top of the viewport while the list scrolls**
 6. Scrolling the ranked rows collapses the donut into a **pinned stacked bar**;
    scrolling back to the top restores the donut.
 
+**Revised 2026-08-11 (V6, HUMAN)**, two changes, each marked `(V6)` below.
+Both are fixes to shipped behaviour, not new surfaces:
+1. Region 3 becomes the **budget alert strip**: it shows *approaching-limit*
+   budgets as well as exceeded ones, with the percentage used, the amount spent
+   and the limit — and it shows **every** alert, not only the first. Today a
+   budget between its notify threshold and 100% is reported on screen 04 as
+   "⚠ Approaching limit" and is **silent here** (HUMAN, 2026-08-11: "the
+   Budgets menu correctly shows Approaching limit for it, but the main screen
+   shows nothing for it at all"). See `docs/plans/mini-app-v6.md`, D606.
+2. The donut's six slices are the period's **six biggest categories**, not its
+   six oldest. Today the fold is by `created_at`, so on an account with more
+   than six categories a recolour of a newer one is invisible in the ring while
+   the ranked row below it shows the new colour correctly (HUMAN, 2026-08-11:
+   "the main ring/pie chart doesn't reflect the new color"). See D605.
+
 ## Reference
 - `../refs/01-home/day-tab.jpg` — Day tab, one day's donut, ranked category rows,
   yellow FAB over the donut card
@@ -51,7 +66,8 @@ into a stacked bar and pins to the top of the viewport while the list scrolls**
     a skip-to-present control that appears once you have navigated back **(V4)**.
   - Our six existing navigation tiles moved into a left-hand drawer **(V4)**;
     the reference has no equivalent of either arrangement.
-  - The over-budget strip has no reference counterpart; it stays, month-scoped.
+  - The budget alert strip has no reference counterpart; it stays, month-scoped,
+    and **(V6)** carries approaching-limit lines as well as exceeded ones.
   - The reference's donut is a drill-down; ours is **display-only (V4)**.
 - **Explicitly not taking:** the green app bar and its `EXPENSES / INCOME`
   tabs (this app has no income concept); the `Total ▾` account switcher (one
@@ -78,7 +94,7 @@ used to be fixed is gone.
 | 2c | ↳ Donut | — | 200px box, 30px stroke, total centred in the hole |
 | 2d | ↳ **Add button** | absolute, **within the card** | 56px circle, `--accent`, bottom-right, inset 12px from the card's right and bottom padding edges |
 | 2e | ↳ **☰ Menu button (V4)** | absolute, **within the card** | 44×44, transparent, `--ink` glyph, bottom-**left**, inset 12px from the card's left and bottom padding edges, **vertically centred on the Add button** |
-| 3 | Over-budget strip | scrolls | full width card, `--status-red` text + warning icon |
+| 3 | **Budget alert strip (V6)** | scrolls | full width card, one line per alert, 12.5px, warning glyph + text; `--status-red` for an exceeded budget, `--ink` for an approaching one |
 | 4 | Ranked category rows | scrolls | one card each, 12px gap, `10px 13px` padding |
 | ~~5~~ | ~~Bottom nav row~~ | — | **removed (V4)** — replaced by 2e + `../components/side-menu.md` |
 | 6 | **Collapsed chart header (V4)** | **`position: fixed; top: 0`**, out of flow | 68px: a 44px row (☰ · label · total) over a 10px stacked bar, `7px 12px` padding (7 + 44 + 10 + 7 = 68 — the two vertical numbers are the ones that have to reconcile), `--card` background, 1px `--separator` bottom rule. **Present only while region 2c has scrolled above the viewport** |
@@ -162,6 +178,70 @@ Individual expenses stay on screen 03, reachable by tapping a row.
 It shows **all** categories with a non-zero total, ranked descending — the donut
 folds at six slices, the rows do not fold at all. A category at 0 for the period
 is omitted entirely.
+
+### The donut's slices are the ranked rows (V6)
+**The donut draws the same list region 4 does, in the same order**: the period's
+categories ranked by spend descending. Slice *i* is ranked row *i*. Everything
+past the sixth is folded into one trailing `Other` slice in `--ink-secondary`,
+so the shares still sum to the whole circle.
+
+Three consequences, all of them the point of the change:
+
+- **A category with 0 in the period gets no slice.** Previously the fold was by
+  creation date, so a dormant category could hold a zero-width slice while a
+  real spender was folded into `Other`.
+- **`Other` is the tail of the ranking** — the smallest categories, the ones a
+  reader loses nothing by not seeing separately.
+- **Recolouring a category changes its own slice and nothing else.** The colour
+  still comes from `categories.color_slot` (D301), never from position, so
+  ordering by spend cannot recycle or shift a colour. This is what makes the
+  ring reflect a colour change at all: before V6, a recoloured category outside
+  the six oldest was inside grey `Other`, whatever colour it now had.
+
+The "two states, one dataset" contract with the collapsed bar (above) is
+unchanged and now easier to hold: both read the one ranked list. The donut's
+`role="img"` label continues to name the **top three categories and their
+shares**, which after V6 is literally its first three slices.
+
+Ordering **within** the ring is the ranking, not the slot order: two adjacent
+slices can be any two colours, and the palette is not consulted for adjacency
+`[inferred]`. Slices carry a 2px gap (design-system) so neighbours never touch.
+
+### Budget alert strip (V6)
+Region 3 is one card holding **one line per budget alert**, in this order:
+
+1. every **exceeded** budget (`is_exceeded`), each in `--status-red`, 600 weight;
+2. every **approaching** budget (`is_over_threshold` and not `is_exceeded`),
+   each in `--ink`, 400 weight.
+
+Within each group, lines follow the ranked-row order of their category
+`[inferred]` — the reader has just seen that order in the ring, so reusing it
+costs nothing to learn.
+
+**Both kinds carry the warning glyph** (design-system's Iconography entry:
+triangle + bar + dot, 14px box `[inferred]`, `currentColor`), so the state
+survives greyscale and the a11y rule "over-budget always ships icon + word" is
+satisfied by shape, not by red alone. The approaching line is deliberately
+**not** `--status-red`: it is a different state, red is a two-use token
+(design-system), and screen 04 already draws the same distinction
+(`.budget-status--warn` is `--ink`, `.budget-status--over` is `--status-red`).
+
+**Every number in these lines comes from `GET /budgets/{id}/progress`** —
+`fill_pct`, `spent`, `amount` and `remaining`. None is recomputed in the
+browser, and the over-budget amount is `-remaining`, never `spent - amount`
+(the rule `04-budgets.md`'s Copy table already fixes). The percentage is
+rounded at render only.
+
+The strip stays **month-at-offset-0 only** (D310, unchanged — rationale under
+Resolved) and it stays **display-only**: no line is tappable, no line has a
+haptic, exactly like the donut. Tapping a budget is what screen 04 is for.
+
+#### What this replaces
+Two shipped behaviours, both undocumented until now: `buildHomeData` filtered
+`is_exceeded` alone, so the 70–99% band never appeared; and
+`renderOverBudgetStrip` rendered `overBudget[0]`, so a second exceeded budget
+was silently dropped. Neither was ever specified — this section is the first
+statement of what region 3 holds.
 
 ### Navigation (V4 — replaces the bottom navigation row)
 The six tiles (Add expense · Expenses · Budgets · Statistics · Categories ·
@@ -250,6 +330,10 @@ the third one's location changed.
 | **Collapsed (V4)** | the donut has scrolled above the viewport top | A fixed 68px header: ☰, the period label, the period's total, and the stacked bar. The donut, the tabs and the yellow button are all off-screen or unrendered; MainButton is unchanged. |
 | **Loading, collapsed (V4)** | a period change while scrolled down | Cannot occur — a period change scrolls to the top first. Stated so the combination is not implemented "just in case". |
 | Single category | exactly one non-zero category | Donut renders as one full ring; the ranked list still shows the one row (unlike V2, which suppressed the legend at ≤1 — the ranked rows are the data now, not a legend). |
+| **Approaching only (V6)** | Month at offset 0, at least one budget at/over its `notify_threshold`, none exceeded | Region 3 renders, `--ink`, one line per approaching budget, each naming the percentage used, the amount spent and the limit. **No red anywhere on the screen** — this is the state that shows nothing at all today |
+| **Both kinds (V6)** | Month at offset 0, at least one exceeded **and** at least one approaching | Both groups render in the same card, every exceeded line first in `--status-red`, then every approaching line in `--ink` |
+| **No alerts (V6)** | every budget below its threshold, or no budgets at all | Region 3 is **absent** — not an empty card, not a "you're on track" line. Nothing to say is said by saying nothing |
+| **Alerts on a non-month period (V6)** | Day / Week / Year / Period, or Month at a non-zero offset | Region 3 is absent regardless of how many budgets are exceeded or approaching (D310, unchanged) |
 
 ## Interactions
 
@@ -268,6 +352,7 @@ the third one's location changed.
 | **☰ Menu button (V4)** | tap | light impact haptic; opens the side menu. Same behaviour from the chart card and from the collapsed header |
 | **Collapsed stacked bar (V4)** | tap | **nothing** — the same display-only rule the donut now follows |
 | **Collapsed period label (V4)** | tap | opens the date-range picker, identical to the expanded label |
+| **Budget alert line (V6)** | tap | **nothing.** No haptic, no navigation — the strip is display-only, the same rule the donut follows. Managing a budget is screen 04's job, reached from the side menu |
 
 **Period never resets.** Switching to screen 02 and coming back, or a retry after
 an error, restores the period that was in force. It resets only on a cold open,
@@ -308,7 +393,8 @@ clock.
 | `readonly` | "You have read-only access to this account." | existing string, unchanged |
 | `offline.banner` | "Offline — showing data from {time}" | existing string, unchanged |
 | `offline.period` | "Offline — showing {period}" | on a period tap while offline |
-| `overbudget` | "{Category} is over budget by {amount} {currency}" | existing, unchanged |
+| `alert.over` | "{Category} is over budget by {amount} {currency}" | **(V6)** the key was `overbudget`; the **string is unchanged**, so Home and screen 04 keep saying the same thing about the same budget. `{amount}` is `-remaining` from the API |
+| `alert.warn` | "{Category} is at {pct}% — {spent} of {limit} {currency}" | **(V6)** `[inferred]` from the user's brief ("including the percentage used, amount spent, and budget limit"). `{pct}` is `fill_pct` rounded to a whole number; the em dash separates the headline from the two supporting numbers. Deliberately does **not** repeat screen 04's bare "⚠ Approaching limit" — that string has a bar and a limit beside it for context, and this one has to carry its own |
 | `mb.add` | "Add expense" | MainButton label; existing string, unchanged |
 | `add.aria` | "Add expense" | the yellow button's accessible name — the `+` glyph alone is not one |
 | `menu.aria` | "Menu" | **(V4)** the ☰ button's accessible name; see `../components/side-menu.md` for the panel's own strings |
@@ -334,7 +420,7 @@ Still forbidden: one string for all five units, and the word "data".
 | `GET /categories` | — | names + `color_slot` |
 | `GET /statistics/by-category` | `period`, `offset` \| `period=custom` + `start_date`/`end_date` | |
 | `GET /statistics/by-period` | same | the total in the hole |
-| `GET /budgets` + `/budgets/{id}/progress` | — | over-budget strip; **month-scoped only** |
+| `GET /budgets` + `/budgets/{id}/progress` | — | the budget alert strip; **month-scoped only**. **(V6)** every field both line kinds need is already on `BudgetProgress` — `fill_pct`, `spent`, `amount`, `remaining`, `is_over_threshold`, `is_exceeded` — and this screen already fetches progress for every plan on every load, so V6's strip costs **no new call and no new field** |
 
 ### Backend deltas this screen needs
 
@@ -364,9 +450,15 @@ Still forbidden: one string for all five units, and the word "data".
    period at all. See `../screens/03-expenses.md`'s Data section for the
    contract; it is a backend unit this screen's row tap depends on.
 
-The over-budget strip is **shown only on `month` at offset 0** and hidden for
+**(V6)** Neither V6 change needs a backend delta at all: the strip's numbers are
+listed above, and the donut's reordering is a pure client-side change to which
+of the `GET /statistics/by-category` totals gets a slice.
+
+The budget alert strip is **shown only on `month` at offset 0** and hidden for
 `day`, `week`, `year` and custom periods (D310, extended; confirmed 2026-08-04,
-HUMAN). Rationale under Resolved, below.
+HUMAN). Rationale under Resolved, below. **(V6)** This gate applies to *both*
+line kinds — an approaching-limit line is as month-scoped as an exceeded one,
+for the same reason.
 
 ## Accessibility
 - Every category swatch is paired with its name in the same row. The donut is
@@ -394,12 +486,48 @@ HUMAN). Rationale under Resolved, below.
 - **(V4)** Only one ☰ is in the DOM at a time, so a screen reader never
   encounters two controls named "Menu". Focus order while collapsed: ☰ → period
   label → ranked rows.
+- **(V6)** Each budget alert line names its category in text and carries the
+  warning glyph, so neither the state nor the identity depends on `--status-red`
+  vs `--ink`. The strip is **not** a live region and **not** focusable: it is
+  part of the page a reader walks through, not an announcement. (The
+  announcement is `../components/toast.md`, which fires once, on the return leg
+  from saving an expense.)
+- **(V6)** The donut's `role="img"` label is unchanged in form — top three
+  categories and their shares — and after the reordering those are its first
+  three slices, so the label and the drawing can no longer describe different
+  categories.
 - `prefers-reduced-motion`: disables the skeleton pulse, the period-change
   crossfade **and the menu's slide**; the chart and the panel swap instantly.
 
 ## Edge cases
 - **More than six categories** — donut folds the tail into "Other"; the ranked
-  rows list every one of them.
+  rows list every one of them. **(V6)** The six that get their own slice are the
+  six **largest by spend in the period**; "Other" is everything below them,
+  however recently any of it was created.
+- **(V6) A category recoloured while it sits outside the top six** — the ring
+  does not change, because that category has no slice of its own; its ranked row
+  and its dot do change. Correct and intended: the ring shows six categories, so
+  a colour it does not draw cannot be shown. What V6 fixes is the *other* case —
+  a top-six category whose colour the ring ignored.
+- **(V6) Two categories sharing a colour slot** — permitted since D317 and
+  unchanged: the ring draws two slices of the same colour, adjacent or not, and
+  the ranked rows name them separately. The rows are what disambiguates; the ring
+  never claims to.
+- **(V6) A budget whose `fill_pct` is `null`** (a plan with `amount <= 0`, which
+  the API keeps readable per D112) — **no line at all**, neither kind. A
+  percentage that does not exist is not rendered as "null%" or "0%".
+- **(V6) Many alerts at once** — every one renders, one line each. At family
+  scale this is two or three lines; the strip is not capped and does not scroll
+  `[inferred]`. If an account ever has ten budgets over threshold, the honest
+  answer is that ten lines is the truth, and the fix would be a cap with a
+  "+N more" line, not a silent drop like the shipped `overBudget[0]`.
+- **(V6) A long category name in an alert line** — the line wraps rather than
+  truncating `[inferred]`: unlike a ranked row, the numbers here are mid-sentence
+  and an ellipsis would eat them.
+- **(V6) A budget exceeded in a category with no spend this period** —
+  unreachable (spend is what exceeds it), but stated: the strip reads
+  `BudgetProgress`, not the ranked rows, so a category absent from region 4 can
+  still appear in region 3 without contradiction.
 - **Exactly one category** — donut is a full ring, one row below.
 - **Long category name** — ranked row truncates with an ellipsis at one line;
   the amount and share never shrink or wrap.
@@ -517,8 +645,26 @@ HUMAN). Rationale under Resolved, below.
       slide.
 - [ ] Changing the period keeps the donut's 200px slot occupied by a skeleton —
       nothing below it moves.
-- [ ] The over-budget strip is absent on the Day, Week, Year and Period tabs,
+- [ ] The budget alert strip is absent on the Day, Week, Year and Period tabs,
       and present on Month at offset 0 when a budget is exceeded.
+- [ ] **(V6)** On Month at offset 0, a budget at 82% of its limit renders one
+      line reading "Groceries is at 82% — 410.00 of 500.00 PLN", in `--ink` with
+      a warning glyph, where today the screen shows nothing for that budget.
+- [ ] **(V6)** With one budget exceeded and another at 82%, **both** lines
+      render in the same card, the exceeded one first and in `--status-red`.
+- [ ] **(V6)** With two budgets exceeded, **two** lines render — not one.
+- [ ] **(V6)** A budget at 60% of its limit with a 70% threshold renders no
+      line, and with no budgets at all region 3 is absent entirely.
+- [ ] **(V6)** Tapping any alert line does nothing — no navigation, no haptic.
+- [ ] **(V6)** With seven categories where the biggest spender is the newest,
+      the donut's first slice is that category in its own colour, and the
+      `Other` slice holds the six smallest.
+- [ ] **(V6)** Every slice below the fold matches the ranked row at the same
+      position — first slice ↔ first row, second ↔ second — in both colour and
+      category.
+- [ ] **(V6)** A category with no spend in the period has no slice.
+- [ ] **(V6)** Changing one category's colour on screen 06b and returning to
+      Home changes that category's slice colour and no other slice's.
 - [ ] Rendering is correct in both light and dark, with every colour resolved
       from `tokens.css`.
 
@@ -581,5 +727,27 @@ blew through is history, not a warning.
       sub-1% categories into "Other" for the bar only — makes the bar disagree
       with the donut, which this spec forbids elsewhere. Judgeable on a real
       account with a long tail.
+- [?] **(V6) `alert.warn`'s wording.** "{Category} is at 82% — 410.00 of 500.00
+      PLN" is `[inferred]` from the brief's three required numbers. Two things
+      to judge on a device: whether the em dash reads as a sentence or as a
+      table, and whether the over-budget line should gain the same two numbers
+      for symmetry. This spec keeps `alert.over` unchanged so Home and screen 04
+      agree word for word; the cost is that the two lines are shaped
+      differently.
+- [?] **(V6) The warning glyph on both line kinds.** The design system's
+      Iconography table declares the warning icon "in `--status-red`", and this
+      spec uses the same shape in `currentColor` for the approaching line. If
+      that reads as a red icon rendered wrong rather than a neutral icon
+      rendered right, the answer is a second, quieter glyph — not dropping the
+      icon, which the a11y rule needs.
+- [?] **(V6) Screen 04 writes "⚠" as a literal character** (`04-budgets.md`'s
+      `status.warn` / `status.over`) while this screen specifies the inline-SVG
+      warning glyph. Two shapes for one meaning, in two places. Not fixed here
+      because V6's brief does not touch screen 04, but the next change to either
+      screen should settle it.
+- [?] **(V6) Region 3's height with several alerts.** Two or three wrapped lines
+      between the chart card and the first ranked row is real vertical cost on
+      the screen whose job is the chart. Uncapped by decision (Edge cases); a
+      cap plus "+N more" is the fallback if a real account makes it noisy.
 - Remaining `[?]`s that touch this screen live in `../design-system.md`
   (safe-area insets, focus states) and are global.
