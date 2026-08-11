@@ -345,7 +345,7 @@ export function budgetToastMessage(
 
 ### M1 — The comment-only save (the user's item 1)
 
-- [ ] **U1.1 A comment-only edit enables Save and PATCHes the comment**
+- [x] **U1.1 A comment-only edit enables Save and PATCHes the comment**
       (D600/D601/D602) — extract `draftInputBindings`, wire both text inputs
       through it, add the AC row to `02b-edit-expense.md`.
       AC: **the regression is asserted through the DOM** (U0.5's environment):
@@ -667,6 +667,23 @@ the actual acceptance gate for M2 and M4.
   new field on a four-schema entity, and a backend change this plan otherwise
   does not need) and polling for a partner's crossings (no push channel
   exists — see Non-goals).
+- 2026-08-11: **D610 — U1.1's DOM regression test lives in `add-expense.test.ts`
+  itself, switching that whole file to `jsdom`** — U0.5's opt-in is per
+  **file**, not per describe block (vitest's `@vitest-environment` docblock
+  applies file-wide), and the plan's unit lists only `add-expense.test.ts` as a
+  test file to touch, so a second file just for the DOM case would be an
+  unlisted file for no benefit. Verified safe: none of the file's other ~110
+  tests depend on `document`/`window` being absent, and the existing
+  `installWebApp`/`afterEach` pattern (assign then `delete globalThis.window`)
+  behaves the same under jsdom as it always did — `window` and `document` are
+  two separate globals vitest's jsdom environment sets, so deleting one leaves
+  the other alone — proven by all 113 tests in the file passing unchanged.
+  Narrower than "nothing changes", though: jsdom also seeds other ambient
+  globals (e.g. `window.innerHeight`) with real defaults instead of Node's
+  `undefined`, which matters if a future test in this file ever exercises
+  `lib/telegram.ts::getViewportStableHeight`'s fallback without
+  `installWebApp` in place — worth a second look before adding a `focus`-event
+  DOM test here (reviewer NIT, U1.1).
 
 ## STATE (handoff)
 - **Done:** planning, plus **U0.1–U0.4** — the five spec files in the table at
@@ -691,10 +708,18 @@ the actual acceptance gate for M2 and M4.
     `webapp/tests/home.test.ts:82`;
   - item 4 → `webapp/src/screens/home.ts:227-235` (`is_exceeded` only) and
     `:665-673` (`overBudget[0]` only).
-- **Next:** **U1.1** (the comment-only save, the user's most painful item, and
-  the one that wants U0.5 in front of it for its DOM regression — U0.5 is now
-  done). After that M2 → M3 → M4 in order; M4's three units are the only ones
-  that must stay in sequence (U4.2 builds the component U4.3 triggers).
+  Plus **U1.1** — `draftInputBindings` (D601) replaces the two hand-wired
+  `amount-input`/`comment-input` listeners in `wireForm`; both bindings call
+  `refreshChrome`, closing item 1. The regression is covered two ways (D602/
+  D603): a pure spy-on-`refreshChrome` suite (`describe("draftInputBindings
+  …")`) and a DOM test under `mount` that dispatches a real `input` event and
+  asserts `MainButton.enable()`/"Save changes" — the latter required switching
+  `add-expense.test.ts`'s own environment to `jsdom` (D610); `tests/dom-env-
+  smoke.test.ts` is deleted, its job done. `docs/ui/screens/02b-edit-expense.md`
+  gained the comment-only-save AC row.
+- **Next:** **U2.1** (the category grid's usage order, implementing U0.3's
+  spec). After that M3 → M4 in order; M4's three units are the only ones that
+  must stay in sequence (U4.2 builds the component U4.3 triggers).
 - **Spec-authoring notes worth keeping (U0.1–U0.4):**
   - The toast introduces **no new colour token**: it is `--ink` background with
     `--card` text, the existing pair used in reverse, which inverts per theme for
