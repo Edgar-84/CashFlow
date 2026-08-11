@@ -9,6 +9,7 @@ import type {
 } from "../src/api/types";
 import {
   applyHomeChrome,
+  budgetAlertMessage,
   buildHomeData,
   createHomeController,
   createMemoryCache,
@@ -739,6 +740,54 @@ describe("applyHomeChrome", () => {
     applyHomeChrome({ status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME });
 
     expect(webApp.MainButton.onClick).not.toHaveBeenCalled();
+  });
+});
+
+// -- budgetAlertMessage (U4.3, D609) — the one function `main.ts`'s toast
+//    trigger and this screen's own strip both compose their sentence from,
+//    so the two surfaces can never disagree about the same budget. ----------
+
+describe("budgetAlertMessage", () => {
+  it("renders the exceeded line exactly as the strip does, `overMinor` from `-remaining`", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [progress()],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    const [alert] = data.budgetAlerts;
+    const message = budgetAlertMessage(alert, "EUR");
+
+    expect(message).toBe("Café is over budget by 23.90 EUR");
+    // The same sentence renderHome's strip renders (escaped) for this alert —
+    // proof the two are one copy source, not two.
+    const html = renderHome({ status: "ready", ...data }, NOW);
+    expect(html).toContain(message);
+  });
+
+  it("renders the approaching line exactly as the strip does: percentage, spent and limit", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "PLN",
+      budgetProgress: [
+        progress({ fill_pct: 82, spent: 41000, amount: 50000, remaining: 9000, is_exceeded: false }),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    const [alert] = data.budgetAlerts;
+    const message = budgetAlertMessage(alert, "PLN");
+
+    expect(message).toBe("Café is at 82% — 410.00 of 500.00 PLN");
+    const html = renderHome({ status: "ready", ...data }, NOW);
+    expect(html).toContain(message);
   });
 });
 

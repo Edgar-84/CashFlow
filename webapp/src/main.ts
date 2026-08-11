@@ -73,12 +73,15 @@ import {
 } from "./screens/expenses";
 import {
   applyHomeChrome,
+  budgetAlertMessage,
   createHomeController,
   createMemoryCache as createHomeCache,
   mount as mountHome,
   unmountHome,
+  type HomeBudgetAlert,
   type HomeHandlers,
 } from "./screens/home";
+import { showToast } from "./components/toast";
 import { clampOffset, type PeriodValue } from "./lib/period";
 import {
   applyStatisticsChrome,
@@ -112,6 +115,34 @@ const settingsCache = createSettingsCache();
 // same shape as `showStatistics`'s `monthsBack` closure argument) — it only
 // resets to the cold-open default when the app itself reboots.
 let homePeriod: PeriodValue = { unit: "month", offset: 0 };
+
+/** The just-saved expense's category id (D609), set by `showAddExpense`'s and
+ * `showEditExpense`'s `onSuccess` handlers below regardless of which screen
+ * they navigate to next (edit returns to screen 03b, not Home) — `refreshHome`
+ * is the one place this is read, and it reads and clears it unconditionally,
+ * on every Home load, so a budget alert toasts on the *next* Home visit
+ * whether that's immediate (create) or after further navigation (edit), and
+ * never toasts twice. */
+let pendingBudgetToastCategoryId: Uuid | null = null;
+
+/** Pure routing decision for D609 — `null` (no expense saved since the last
+ * Home load, or that category carries no alert) is the one signal
+ * `refreshHome` needs to skip `showToast`. Composes nothing of its own:
+ * `alert`'s sentence comes straight from `budgetAlertMessage`, the same
+ * function `home.ts`'s strip renders from, so the toast and the strip can
+ * never disagree about the same budget. Pure so this decision has
+ * Node-level coverage, same reasoning as `withCreatedTagPreselected`. */
+export function budgetToastMessage(
+  alerts: HomeBudgetAlert[],
+  categoryId: Uuid | null,
+  currency: Currency,
+): string | null {
+  if (categoryId === null) {
+    return null;
+  }
+  const alert = alerts.find((a) => a.categoryId === categoryId);
+  return alert ? budgetAlertMessage(alert, currency) : null;
+}
 
 /** Which screen's `showX` most recently ran. Set at the top of every `showX`
  * function below. Its one consumer today is `deleteCategoryAndUpdateCache`
@@ -284,6 +315,14 @@ async function showHome(): Promise<void> {
  * stale-response guard is honoured, so a fast double-tap never lets an
  * earlier period's response overwrite a later one. */
 async function refreshHome(root: HTMLElement, handlers: HomeHandlers): Promise<void> {
+  // Consumed here, unconditionally, before the load even starts — "cleared
+  // even when the reload fails" (D609's AC) falls out of this for free: a
+  // stale/discarded response, an error, offline or forbidden all still clear
+  // it, because nothing below this line depends on the load's outcome to do
+  // so.
+  const toastCategoryId = pendingBudgetToastCategoryId;
+  pendingBudgetToastCategoryId = null;
+
   applyHomeChrome({ status: "loading", period: homePeriod }, addExpenseFromHome);
   mountHome(root, { status: "loading", period: homePeriod }, handlers, new Date());
 
@@ -293,6 +332,21 @@ async function refreshHome(root: HTMLElement, handlers: HomeHandlers): Promise<v
   }
   applyHomeChrome(state, addExpenseFromHome);
   mountHome(root, state, handlers, new Date());
+
+  // Only a fresh "ready" load toasts (D609's AC: a 403/offline Home renders
+  // its own state with no toast) — `mountHome` above has already drawn the
+  // strip this same alert appears in; the toast is additive, never a
+  // substitute for it. `root` is the same node `mountHome` just replaced
+  // `innerHTML` on — an earlier toast still up from a fast period-control
+  // tap is torn down with it, which is fine: `toast.ts::showToast`'s
+  // `forceRemove` calling `.remove()` on an already-detached node, or the
+  // `WeakMap` entry it clears, are both no-ops on a node that's gone.
+  if (state.status === "ready") {
+    const message = budgetToastMessage(state.budgetAlerts, toastCategoryId, state.currency);
+    if (message) {
+      showToast(root, { message, kind: "warning" });
+    }
+  }
 }
 
 /** Mounts Add Expense (U2.2, screen 02; grid/account redesign U3.2, date row
@@ -315,7 +369,8 @@ async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
     onClose: () => {
       void showHome();
     },
-    onSuccess: () => {
+    onSuccess: (categoryId) => {
+      pendingBudgetToastCategoryId = categoryId;
       void showHome();
     },
     onMore: (draft) => {
@@ -414,7 +469,10 @@ export async function showEditExpense(
       void showEditExpense(expense, onBack, initialDraft);
     },
     onClose: onBack,
-    onSuccess: onBack,
+    onSuccess: (categoryId) => {
+      pendingBudgetToastCategoryId = categoryId;
+      onBack();
+    },
     onMore: (draft) => {
       categoriesReturnTo = () => void showEditExpense(expense, onBack, { ...draft, categoryId: null });
       void showCategories();

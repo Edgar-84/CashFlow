@@ -468,7 +468,7 @@ session, and either can be reverted without the other.
       `webapp/src/styles/app.css`, `webapp/tests/toast.test.ts`(new).
       Model: sonnet.
 
-- [ ] **U4.3 A saved expense that crosses a threshold toasts on Home**
+- [x] **U4.3 A saved expense that crosses a threshold toasts on Home**
       (D608/D609) — the trigger, and the only one.
       AC: `budgetToastMessage` returns the approaching or the exceeded line for
       the saved expense's category when that category has an alert, and `null`
@@ -684,6 +684,24 @@ the actual acceptance gate for M2 and M4.
   `lib/telegram.ts::getViewportStableHeight`'s fallback without
   `installWebApp` in place — worth a second look before adding a `focus`-event
   DOM test here (reviewer NIT, U1.1).
+- 2026-08-11: **D611 — `AddExpenseHandlers.onSuccess` widens to carry the
+  saved expense's category id**, superseding this unit's own Files list (only
+  `main.ts`/`home.ts` and their tests were named) — a plan gap found during
+  implementation, not a scope decision made in advance. `budgetToastMessage`
+  needs the just-saved expense's category, and `main.ts` has no way to learn
+  it: `onSuccess` was `() => void`, called from `add-expense.ts`'s own
+  `mainButton.onClick` handler with `outcome.expense` (the `SubmitOutcome` on
+  success) already in scope there and nowhere else. Widened to `(categoryId:
+  Uuid) => void`, one call site (`handlers.onSuccess(outcome.expense.category_id)`),
+  human-confirmed before editing a file outside the unit's listed scope.
+  Screen 02b's `onSuccess` (`showEditExpense`) takes the same widened
+  signature even though it navigates to screen 03b, not Home — D609's pending
+  id is set regardless of destination, consumed whenever Home is next
+  reached. Rejected: reading the category off `addExpenseCache` after the
+  fact (that cache holds the categories list, not what was just submitted)
+  and adding a second, main.ts-only callback alongside the existing
+  `onSuccess` (two events for one save is the extra surface `onSuccess`
+  already exists to avoid).
 
 ## STATE (handoff)
 - **Done:** planning, plus **U0.1–U0.4** — the five spec files in the table at
@@ -820,7 +838,43 @@ the actual acceptance gate for M2 and M4.
   `--ink`/`--card` exactly as `design-system.md` already specifies. Not
   wired into any screen — `main.ts`/`home.ts` are untouched; U4.3 is the
   trigger.
-- **Next:** `U4.3` (the toast's one trigger, on top of U4.2's component).
+- Plus **U4.3** — the trigger, wired (D608/D609). `home.ts` gains
+  `budgetAlertMessage` (exported, pure, raw/unescaped), extracted out of
+  `renderBudgetAlertLine`'s inline `text` composition so it and `main.ts`'s
+  toast read from the one function, not two copies of the same wording.
+  `add-expense.ts`'s `AddExpenseHandlers.onSuccess` widens `() => void` to
+  `(categoryId: Uuid) => void` (D611 — this unit's one file outside the
+  plan's own Files list, human-confirmed before editing it), carrying
+  `outcome.expense.category_id` from its one call site. `main.ts` gains a
+  module-level `pendingBudgetToastCategoryId: Uuid | null`, set by both
+  `showAddExpense`'s and `showEditExpense`'s `onSuccess` closures (the edit
+  path sets it too, even though it navigates to screen 03b rather than Home
+  — the id survives until whenever Home is next reached, per D609's "read
+  once by the next `showHome()`"), and the pure, exported `budgetToastMessage(alerts,
+  categoryId, currency)`, which returns the matching alert's
+  `budgetAlertMessage` or `null` (no category, or that category carries no
+  alert). `refreshHome` reads and clears `pendingBudgetToastCategoryId`
+  **unconditionally, before the load even starts** — the mechanism that
+  satisfies "cleared even when the reload fails" for free, since nothing
+  after that line depends on the load's outcome to do the clearing — and
+  calls `showToast` (from `components/toast.ts`, U4.2) only when the fresh
+  load resolves `"ready"` (never `offline`/`forbidden`/`error`/`empty`,
+  per the AC), after `mountHome` has already drawn the strip the toast
+  restates. Tests: `home.test.ts`'s new `budgetAlertMessage` describe block
+  asserts the exceeded/approaching sentences match `renderHome`'s own strip
+  output verbatim (the "one copy source" AC, made mechanical rather than
+  read-and-trust); `main.test.ts`'s new `budgetToastMessage` describe block
+  covers the match/no-alert/null-category/empty-list/multi-alert cases
+  directly under Node, the same pattern `withCreatedTagPreselected` and
+  `withArchivedCategory` already established for main.ts's pure routing
+  decisions. The DOM-level wiring itself (`refreshHome`, the two `onSuccess`
+  closures) has no direct unit test, the same accepted gap every other
+  `showX`/`mount` function in `main.ts`/`home.ts` already carries — CP2 (on a
+  device) is where "lands on Home and shows one toast" actually gets checked.
+- **Next:** V6 is fully implemented (M0–M4 all done). Remaining: the human's
+  spec review of U0.1–U0.4 (never confirmed, per the STATE note above), and
+  the two live-test checkpoints, CP1 (after M2, already shippable) and CP2
+  (after M4, now also shippable) — both need a real device, not a unit.
 - **Spec-authoring notes worth keeping (U0.1–U0.4):**
   - The toast introduces **no new colour token**: it is `--ink` background with
     `--card` text, the existing pair used in reverse, which inverts per theme for

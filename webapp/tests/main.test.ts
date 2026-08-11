@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { boot, budgetFormModeFromRow, budgetFormModeFromUnbudgeted, withArchivedCategory, withCreatedTagPreselected } from "../src/main";
+import {
+  boot,
+  budgetFormModeFromRow,
+  budgetFormModeFromUnbudgeted,
+  budgetToastMessage,
+  withArchivedCategory,
+  withCreatedTagPreselected,
+} from "../src/main";
 import type { AddExpenseLoadState } from "../src/screens/add-expense";
+import type { HomeBudgetAlert } from "../src/screens/home";
 import type { BudgetRow, UnbudgetedRow } from "../src/screens/budgets";
 import type { CategoryResponse, ExpenseResponse } from "../src/api/types";
 
@@ -102,6 +110,61 @@ function expense(categoryId: string): ExpenseResponse {
     user_name: "Edgar",
   };
 }
+
+// -- budgetToastMessage (U4.3, D608/D609) — the toast's one trigger: which
+//    category's alert, if any, the just-saved expense should surface on the
+//    next Home load. ---------------------------------------------------------
+
+function alert(overrides: Partial<HomeBudgetAlert> = {}): HomeBudgetAlert {
+  return {
+    kind: "approaching",
+    categoryId: "cat-cafe",
+    label: "Café",
+    fillPct: 82,
+    spentMinor: 41000,
+    limitMinor: 50000,
+    overMinor: null,
+    ...overrides,
+  };
+}
+
+describe("budgetToastMessage", () => {
+  it("returns the approaching line for the saved expense's category when it carries one", () => {
+    expect(budgetToastMessage([alert()], "cat-cafe", "PLN")).toBe(
+      "Café is at 82% — 410.00 of 500.00 PLN",
+    );
+  });
+
+  it("returns the exceeded line for the saved expense's category when it carries one", () => {
+    const exceeded = alert({ kind: "exceeded", overMinor: 2390, categoryId: "cat-groceries", label: "Groceries" });
+    expect(budgetToastMessage([exceeded], "cat-groceries", "EUR")).toBe(
+      "Groceries is over budget by 23.90 EUR",
+    );
+  });
+
+  it("returns null when the saved category has no alert (no budget, or below its threshold)", () => {
+    expect(budgetToastMessage([alert({ categoryId: "cat-cafe" })], "cat-transport", "EUR")).toBeNull();
+  });
+
+  it("returns null when categoryId is null (no expense saved since the last Home load)", () => {
+    expect(budgetToastMessage([alert()], null, "EUR")).toBeNull();
+  });
+
+  it("returns null when the alert list is empty", () => {
+    expect(budgetToastMessage([], "cat-cafe", "EUR")).toBeNull();
+  });
+
+  it("picks the matching alert out of several, regardless of position", () => {
+    const alerts = [
+      alert({ categoryId: "cat-groceries", label: "Groceries", kind: "exceeded", overMinor: 500 }),
+      alert({ categoryId: "cat-cafe", label: "Café" }),
+      alert({ categoryId: "cat-transport", label: "Transport", fillPct: 91 }),
+    ];
+    expect(budgetToastMessage(alerts, "cat-transport", "EUR")).toBe(
+      "Transport is at 91% — 410.00 of 500.00 EUR",
+    );
+  });
+});
 
 describe("withArchivedCategory", () => {
   it("is a no-op when the expense's category is already in the loaded list", async () => {
