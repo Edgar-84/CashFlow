@@ -100,10 +100,21 @@ export interface HomeRankedRow {
   sharePct: number;
 }
 
-export interface HomeOverBudgetRow {
+// docs/plans/mini-app-v6.md's Contracts (D606) — the old exceeded-only filter
+// and its "first row only" render are both gone; every alert of both kinds
+// renders now (`docs/ui/screens/01-home.md`'s "Budget alert strip").
+export type HomeBudgetAlertKind = "exceeded" | "approaching";
+
+export interface HomeBudgetAlert {
+  kind: HomeBudgetAlertKind;
   categoryId: Uuid;
   label: string;
-  overMinor: number;
+  /** `BudgetProgress.fill_pct`, rounded at render only — never recomputed. */
+  fillPct: number;
+  spentMinor: number;
+  limitMinor: number;
+  /** `-remaining` from the API; only set on `kind: "exceeded"`. */
+  overMinor: number | null;
 }
 
 export interface HomeData {
@@ -116,7 +127,9 @@ export interface HomeData {
    * same `donutInput`/fold so the two can never disagree. */
   bars: HomeBarSegment[];
   rows: HomeRankedRow[];
-  overBudget: HomeOverBudgetRow[];
+  /** Region 3 (D606): every exceeded alert first, then every approaching
+   * one, each group in `rows`' ranked order. */
+  budgetAlerts: HomeBudgetAlert[];
   period: PeriodValue;
   /** `UserMeResponse.today` (U3.3), `YYYY-MM-DD` in `family_tz` — the date
    * the Day tab hands to screen 02 is resolved from this, never the device
@@ -219,14 +232,50 @@ export function buildHomeData(input: {
   // it's still fetched regardless of the tab in force; only its visibility
   // is gated here.
   const isMonthToDate = input.period.unit === "month" && input.period.offset === 0;
-  const overBudget: HomeOverBudgetRow[] = isMonthToDate
+
+  // D606: within each kind, lines follow the ranked-row order of their
+  // category — the reader has just seen that order in the ring. A budget on
+  // a category absent from `rows` (0 spend this period; unreachable for
+  // `is_exceeded`, since spend is what exceeds it, but not for the ranking
+  // itself) sorts after every ranked category rather than throwing.
+  const rankIndex = new Map(rows.map((r, i) => [r.categoryId, i]));
+  const byRank = (a: HomeBudgetAlert, b: HomeBudgetAlert): number =>
+    (rankIndex.get(a.categoryId) ?? Infinity) - (rankIndex.get(b.categoryId) ?? Infinity);
+
+  const exceededAlerts: HomeBudgetAlert[] = isMonthToDate
     ? input.budgetProgress
         .filter((p) => p.is_exceeded)
         .map((p) => ({
+          kind: "exceeded" as const,
           categoryId: p.category_id,
           label: nameById.get(p.category_id) ?? "Unknown",
-          overMinor: p.spent - p.amount,
+          // `is_exceeded` is only ever true when `fill_pct` is not null
+          // (services/budget_service.py), so this always resolves.
+          fillPct: p.fill_pct ?? 0,
+          spentMinor: p.spent,
+          limitMinor: p.amount,
+          overMinor: -p.remaining,
         }))
+        .sort(byRank)
+    : [];
+
+  // `fill_pct !== null` guards the edge case docs/ui/screens/01-home.md
+  // states explicitly: a plan with `amount <= 0` renders no approaching
+  // line, never "null%" — `is_over_threshold` already implies this
+  // server-side, but the check is cheap and keeps the rule visible here too.
+  const approachingAlerts: HomeBudgetAlert[] = isMonthToDate
+    ? input.budgetProgress
+        .filter((p) => p.is_over_threshold && !p.is_exceeded && p.fill_pct !== null)
+        .map((p) => ({
+          kind: "approaching" as const,
+          categoryId: p.category_id,
+          label: nameById.get(p.category_id) ?? "Unknown",
+          fillPct: p.fill_pct as number,
+          spentMinor: p.spent,
+          limitMinor: p.amount,
+          overMinor: null,
+        }))
+        .sort(byRank)
     : [];
 
   return {
@@ -235,7 +284,7 @@ export function buildHomeData(input: {
     segments,
     bars,
     rows,
-    overBudget,
+    budgetAlerts: [...exceededAlerts, ...approachingAlerts],
     period: input.period,
     today: input.today,
     accountName: input.accountName,
@@ -657,14 +706,39 @@ function renderRankedRows(rows: HomeRankedRow[]): string {
   return `<div class="ranked-rows" data-testid="ranked-rows">${items}</div>`;
 }
 
-function renderOverBudgetStrip(overBudget: HomeOverBudgetRow[], currency: Currency): string {
-  if (overBudget.length === 0) {
+// docs/ui/design-system.md's Iconography table: "triangle + bar + dot ...
+// `--status-red` on an exceeded line, `currentColor` elsewhere" — drawn in
+// `currentColor` throughout so `.alert-line--exceeded`/`--approaching`'s own
+// text colour carries the state, exactly like `renderAddButton`'s `+` above.
+// `aria-hidden` since each line's own text already names the state in words
+// (Accessibility: "neither the state nor the identity depends on colour").
+function renderWarningGlyph(): string {
+  return `<svg class="alert-glyph" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M7 1.3 13 12.3H1L7 1.3Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none" /><line x1="7" y1="5.2" x2="7" y2="8.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /><circle cx="7" cy="10.4" r="0.9" fill="currentColor" /></svg>`;
+}
+
+// docs/ui/screens/01-home.md's Copy table: `alert.over` (unchanged wording,
+// so Home and screen 04 keep saying the same thing) and the new `alert.warn`,
+// carrying the percentage, spent and limit `alert.over` doesn't. `overMinor`
+// comes straight from `-remaining` (never `spent - amount`, D606); `fillPct`
+// is rounded here and nowhere else.
+function renderBudgetAlertLine(alert: HomeBudgetAlert, currency: Currency): string {
+  const text =
+    alert.kind === "exceeded"
+      ? `${escapeHtml(alert.label)} is over budget by ${escapeHtml(formatAmount(alert.overMinor ?? 0))} ${escapeHtml(currency)}`
+      : `${escapeHtml(alert.label)} is at ${Math.round(alert.fillPct)}% — ${escapeHtml(formatAmount(alert.spentMinor))} of ${escapeHtml(formatAmount(alert.limitMinor))} ${escapeHtml(currency)}`;
+  return `<div class="alert-line alert-line--${alert.kind}" data-testid="budget-alert" data-category-id="${alert.categoryId}">${renderWarningGlyph()}<span>${text}</span></div>`;
+}
+
+// docs/ui/screens/01-home.md's region 3: one card, one line per alert —
+// every exceeded alert first, then every approaching one (already ordered by
+// `buildHomeData`). Absent entirely with no alerts (Edge cases: "region 3 is
+// absent — not an empty card"), matching the old strip's empty-array return.
+function renderBudgetAlertStrip(alerts: HomeBudgetAlert[], currency: Currency): string {
+  if (alerts.length === 0) {
     return "";
   }
-  const first = overBudget[0];
-  return `<div class="strip" data-testid="over-budget">
-    <b>${escapeHtml(first.label)}</b> is over budget by ${escapeHtml(formatAmount(first.overMinor))} ${escapeHtml(currency)}
-  </div>`;
+  const lines = alerts.map((alert) => renderBudgetAlertLine(alert, currency)).join("");
+  return `<div class="card budget-alert-strip" data-testid="budget-alerts">${lines}</div>`;
 }
 
 function renderOfflineBanner(lastSyncedAt: string | undefined): string {
@@ -701,7 +775,7 @@ function renderReady(
       ${collapsed ? "" : renderAddButton()}
     </div>
     ${renderCollapseSentinel()}
-    ${renderOverBudgetStrip(data.overBudget, data.currency)}
+    ${renderBudgetAlertStrip(data.budgetAlerts, data.currency)}
     ${renderRankedRows(data.rows)}
   </div>`;
 }

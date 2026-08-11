@@ -361,21 +361,35 @@ body {
   background: var(--card);
 }
 
-/* -- over-budget strip ---------------------------------------------------- */
+/* -- budget alert strip (V6, D606) ----------------------------------------- */
 
-.strip {
+.budget-alert-strip {
   display: flex;
-  align-items: center;
-  gap: 9px;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 12px;
-  background: var(--card);
-  border-radius: 12px;
   font-size: 12.5px;
-  color: var(--status-red);
 }
 
-.strip b {
+.alert-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.alert-line--exceeded {
+  color: var(--status-red);
   font-weight: 600;
+}
+
+.alert-line--approaching {
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.alert-glyph {
+  flex: none;
+  margin-top: 1px;
 }
 
 /* -- state copy + retry --------------------------------------------------- */

@@ -79,7 +79,7 @@ function progress(overrides: Partial<BudgetProgress> = {}): BudgetProgress {
 }
 
 describe("buildHomeData", () => {
-  it("builds segments from the ranked rows (D605), by spend descending, and the over-budget strip", () => {
+  it("builds segments from the ranked rows (D605), by spend descending, and the budget alert strip", () => {
     const data = buildHomeData({
       categories: CATEGORIES,
       categoryTotals: CATEGORY_TOTALS,
@@ -101,10 +101,131 @@ describe("buildHomeData", () => {
     // creation-order list this used to read from.
     expect(data.segments.map((s) => s.categoryId)).toEqual(data.rows.map((r) => r.categoryId));
     expect(data.rows[0].sharePct).toBeCloseTo((41260 / 72470) * 100, 5);
-    expect(data.overBudget).toEqual([
-      { categoryId: "cat-cafe", label: "Café", overMinor: 2390 },
+    // `overMinor` is `-remaining` (2390 = -(-2390)), never `spent - amount`
+    // recomputed (D606).
+    expect(data.budgetAlerts).toEqual([
+      {
+        kind: "exceeded",
+        categoryId: "cat-cafe",
+        label: "Café",
+        fillPct: 119.9,
+        spentMinor: 14390,
+        limitMinor: 12000,
+        overMinor: 2390,
+      },
     ]);
     expect(data.period).toBe(THIS_MONTH);
+  });
+
+  it("(D606) reports an approaching-limit budget with percentage, spent and limit, no red anywhere", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "PLN",
+      budgetProgress: [
+        progress({
+          fill_pct: 82,
+          spent: 41000,
+          amount: 50000,
+          remaining: 9000,
+          is_exceeded: false,
+        }),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+
+    expect(data.budgetAlerts).toEqual([
+      {
+        kind: "approaching",
+        categoryId: "cat-cafe",
+        label: "Café",
+        fillPct: 82,
+        spentMinor: 41000,
+        limitMinor: 50000,
+        overMinor: null,
+      },
+    ]);
+  });
+
+  it("(D606) both kinds render together, exceeded first — ordered by the ranked row, not by budget-plan order", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [
+        // Groceries ranks first (41260) but is only approaching; Café ranks
+        // third (14390) but is exceeded — the exceeded group still comes
+        // first as a whole, ahead of every approaching line.
+        progress({
+          budget_plan_id: "plan-groceries",
+          category_id: "cat-groceries",
+          amount: 50000,
+          spent: 41260,
+          remaining: 8740,
+          fill_pct: 82.52,
+          is_over_threshold: true,
+          is_exceeded: false,
+        }),
+        progress(),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+
+    expect(data.budgetAlerts.map((a) => [a.kind, a.categoryId])).toEqual([
+      ["exceeded", "cat-cafe"],
+      ["approaching", "cat-groceries"],
+    ]);
+  });
+
+  it("(D606) two exceeded budgets both render — the old overBudget[0]-only bug is gone", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [
+        progress({ budget_plan_id: "plan-groceries", category_id: "cat-groceries" }),
+        progress(),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+
+    expect(data.budgetAlerts.map((a) => a.categoryId)).toEqual(["cat-groceries", "cat-cafe"]);
+  });
+
+  it("(D606) a budget below its notify threshold renders no alert; a null fill_pct never renders 'null%'", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [
+        progress({ fill_pct: 60, is_over_threshold: false, is_exceeded: false }),
+        // Defensive case: a plan with amount <= 0 has fill_pct: null and the
+        // API never sets is_over_threshold/is_exceeded true alongside it —
+        // asserted here anyway, since the screen doc calls it out by name.
+        progress({
+          budget_plan_id: "plan-null",
+          category_id: "cat-transport",
+          fill_pct: null,
+          is_over_threshold: true,
+          is_exceeded: false,
+        }),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+
+    expect(data.budgetAlerts).toEqual([]);
   });
 
   it("gives the donut's first slice to the newest category when it is the biggest spender, and folds the six smallest into Other (D605)", () => {
@@ -307,7 +428,7 @@ describe("buildHomeData", () => {
     }
   });
 
-  it("shows the over-budget strip only on month at offset 0 (D310, extended)", () => {
+  it("shows the budget alert strip only on month at offset 0 (D310, extended to both alert kinds)", () => {
     const notThisMonth: PeriodValue[] = [
       { unit: "day", offset: 0 },
       { unit: "week", offset: 0 },
@@ -321,12 +442,12 @@ describe("buildHomeData", () => {
         categoryTotals: CATEGORY_TOTALS,
         periodTotal: PERIOD_TOTAL,
         currency: "EUR",
-        budgetProgress: [progress()],
+        budgetProgress: [progress(), progress({ fill_pct: 82, is_exceeded: false })],
         period,
         today: TODAY,
         accountName: ACCOUNT_NAME,
       });
-      expect(data.overBudget).toEqual([]);
+      expect(data.budgetAlerts).toEqual([]);
     }
   });
 });
@@ -412,11 +533,11 @@ describe("loadHome", () => {
     }
   });
 
-  it("hides the over-budget strip when the requested period isn't month at offset 0", async () => {
+  it("hides the budget alert strip when the requested period isn't month at offset 0", async () => {
     const state = await loadHome(fakeApi(), createMemoryCache(), { unit: "day", offset: 0 });
     expect(state.status).toBe("ready");
     if (state.status === "ready") {
-      expect(state.overBudget).toEqual([]);
+      expect(state.budgetAlerts).toEqual([]);
     }
   });
 });
@@ -540,7 +661,7 @@ describe("applyHomeChrome", () => {
       segments: [],
       bars: [],
       rows: [],
-      overBudget: [],
+      budgetAlerts: [],
       period: THIS_MONTH,
       today: TODAY,
       accountName: ACCOUNT_NAME,
@@ -896,22 +1017,139 @@ describe("renderHome", () => {
     expect(html.match(/data-testid="ranked-row"/g)).toHaveLength(8);
   });
 
-  it("shows the over-budget strip when a category is exceeded on month at offset 0", () => {
+  it("shows the budget alert strip, exceeded line verbatim, when a category is exceeded on month at offset 0", () => {
     const html = renderHome({ status: "ready", ...readyData }, NOW);
-    expect(html).toContain('data-testid="over-budget"');
-    expect(html).toContain("Café");
+    expect(html).toContain('data-testid="budget-alerts"');
+    expect(html).toContain("Café is over budget by 23.90 EUR");
+    expect(html).toContain('alert-line--exceeded');
   });
 
-  it("orders the over-budget strip before the ranked rows (Layout table region 3 before region 4)", () => {
+  it("(D606) renders the AC's own approaching-limit example: percentage, spent and limit, in --ink, not --status-red", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "PLN",
+      budgetProgress: [
+        progress({
+          fill_pct: 82,
+          spent: 41000,
+          amount: 50000,
+          remaining: 9000,
+          is_exceeded: false,
+        }),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    const html = renderHome({ status: "ready", ...data }, NOW);
+    expect(html).toContain("Café is at 82% — 410.00 of 500.00 PLN");
+    expect(html).toContain('alert-line--approaching');
+    expect(html).not.toContain('alert-line--exceeded');
+  });
+
+  it("(D606) renders both kinds in the same card, exceeded first", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [
+        progress({
+          budget_plan_id: "plan-groceries",
+          category_id: "cat-groceries",
+          amount: 50000,
+          spent: 41260,
+          remaining: 8740,
+          fill_pct: 82.52,
+          is_over_threshold: true,
+          is_exceeded: false,
+        }),
+        progress(),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    const html = renderHome({ status: "ready", ...data }, NOW);
+    const exceededIndex = html.indexOf('alert-line--exceeded');
+    const approachingIndex = html.indexOf('alert-line--approaching');
+    expect(exceededIndex).toBeGreaterThan(-1);
+    expect(approachingIndex).toBeGreaterThan(-1);
+    expect(exceededIndex).toBeLessThan(approachingIndex);
+  });
+
+  it("(D606) two exceeded budgets render two lines — the old 'first row only' behaviour is gone", () => {
+    const data = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [
+        progress({ budget_plan_id: "plan-groceries", category_id: "cat-groceries" }),
+        progress(),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    const html = renderHome({ status: "ready", ...data }, NOW);
+    expect(html.match(/data-testid="budget-alert"/g)).toHaveLength(2);
+    expect(html).toContain("Groceries is over budget");
+    expect(html).toContain("Café is over budget");
+  });
+
+  it("renders no line for a budget below its notify threshold, and the strip is absent with no budgets at all", () => {
+    const belowThreshold = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [progress({ fill_pct: 60, is_over_threshold: false, is_exceeded: false })],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    expect(renderHome({ status: "ready", ...belowThreshold }, NOW)).not.toContain(
+      'data-testid="budget-alerts"',
+    );
+
+    const noBudgets = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    expect(renderHome({ status: "ready", ...noBudgets }, NOW)).not.toContain(
+      'data-testid="budget-alerts"',
+    );
+  });
+
+  it("(D404-style) each alert line carries no button semantics — no role, no tabindex, no data-action (display-only, no tap navigates)", () => {
     const html = renderHome({ status: "ready", ...readyData }, NOW);
-    const stripIndex = html.indexOf('data-testid="over-budget"');
+    const stripStart = html.indexOf('data-testid="budget-alerts"');
+    const stripEnd = html.indexOf("ranked-rows", stripStart);
+    const stripMarkup = html.slice(stripStart, stripEnd);
+    expect(stripMarkup).not.toContain("role=");
+    expect(stripMarkup).not.toContain("tabindex");
+    expect(stripMarkup).not.toContain("data-action");
+  });
+
+  it("orders the budget alert strip before the ranked rows (Layout table region 3 before region 4)", () => {
+    const html = renderHome({ status: "ready", ...readyData }, NOW);
+    const stripIndex = html.indexOf('data-testid="budget-alerts"');
     const rowsIndex = html.indexOf('data-testid="ranked-rows"');
     expect(stripIndex).toBeGreaterThan(-1);
     expect(rowsIndex).toBeGreaterThan(-1);
     expect(stripIndex).toBeLessThan(rowsIndex);
   });
 
-  it("hides the over-budget strip outside month at offset 0, even with an exceeded budget", () => {
+  it("hides the budget alert strip outside month at offset 0, even with an exceeded budget", () => {
     const dayData = buildHomeData({
       categories: CATEGORIES,
       categoryTotals: CATEGORY_TOTALS,
@@ -923,7 +1161,7 @@ describe("renderHome", () => {
       accountName: ACCOUNT_NAME,
     });
     const html = renderHome({ status: "ready", ...dayData }, NOW);
-    expect(html).not.toContain('data-testid="over-budget"');
+    expect(html).not.toContain('data-testid="budget-alerts"');
   });
 
   it("embeds the period selector's own label for the active period", () => {
