@@ -147,58 +147,8 @@ export function buildHomeData(input: {
   today: string;
   accountName: string;
 }): HomeData {
-  const orderedCategories = [...input.categories].sort((a, b) =>
-    a.created_at.localeCompare(b.created_at),
-  );
   const colorBySlot = new Map(assignCategoryColors(input.categories).map((c) => [c.id, c.slot]));
-  const totalsById = new Map(input.categoryTotals.map((t) => [t.category_id, t.total]));
   const nameById = new Map(input.categories.map((c) => [c.id, c.name]));
-
-  const donutInput = orderedCategories.map((c) => ({
-    id: c.id,
-    label: c.name,
-    minor: totalsById.get(c.id) ?? 0,
-  }));
-  const rawSegments = donutSegments(donutInput, {
-    circumference: DONUT_CIRCUMFERENCE,
-    maxSlots: MAX_DONUT_SLOTS,
-  });
-  // donutSegments() folds anything past maxSlots into one trailing "Other"
-  // row (lib/donut.ts) — only the first `realCount` output slots map 1:1
-  // onto `orderedCategories`; a folded run has one extra slot with no
-  // single category behind it.
-  const realCount = Math.min(orderedCategories.length, MAX_DONUT_SLOTS);
-  const segments: HomeSegment[] = rawSegments.map((seg, index) => {
-    const category = index < realCount ? orderedCategories[index] : undefined;
-    const slot = category ? (colorBySlot.get(category.id) ?? null) : null;
-    return {
-      categoryId: category ? category.id : null,
-      label: category ? category.name : "Other",
-      colorVar: category ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
-      dash: seg.dash,
-      gap: seg.gap,
-      offset: seg.offset,
-    };
-  });
-
-  // Collapsed stacked bar (D414/U5.1): same `donutInput`/`realCount` fold as
-  // the donut above, so the two geometries can never list different
-  // categories in a different order or colour.
-  const rawBars = donutBarSegments(donutInput, {
-    gapPct: BAR_GAP_PCT,
-    minPct: BAR_MIN_SEGMENT_PCT,
-    maxSlots: MAX_DONUT_SLOTS,
-  });
-  const bars: HomeBarSegment[] = rawBars.map((seg, index) => {
-    const category = index < realCount ? orderedCategories[index] : undefined;
-    const slot = category ? (colorBySlot.get(category.id) ?? null) : null;
-    return {
-      categoryId: category ? category.id : null,
-      label: category ? category.name : "Other",
-      colorVar: category ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
-      widthPct: seg.widthPct,
-    };
-  });
 
   // docs/ui/screens/01-home.md: "all categories with a non-zero total,
   // ranked descending" — every one of them, not a top-N legend (the old
@@ -217,6 +167,51 @@ export function buildHomeData(input: {
         sharePct: input.periodTotal.total > 0 ? (t.total / input.periodTotal.total) * 100 : 0,
       };
     });
+
+  // (D605) "The donut draws the same list region 4 does, in the same
+  // order": the donut and the collapsed bar take their slices from `rows`
+  // (the period's categories ranked by spend descending) rather than from
+  // creation order, so a category with 0 spend never occupies a slice and a
+  // top-six-by-spend category's colour is never hidden inside "Other".
+  const donutInput = rows.map((r) => ({ id: r.categoryId, label: r.label, minor: r.minor }));
+  const rawSegments = donutSegments(donutInput, {
+    circumference: DONUT_CIRCUMFERENCE,
+    maxSlots: MAX_DONUT_SLOTS,
+  });
+  // donutSegments() folds anything past maxSlots into one trailing "Other"
+  // row (lib/donut.ts) — only the first `realCount` output slots map 1:1
+  // onto `rows`; a folded run has one extra slot with no single category
+  // behind it.
+  const realCount = Math.min(rows.length, MAX_DONUT_SLOTS);
+  const segments: HomeSegment[] = rawSegments.map((seg, index) => {
+    const row = index < realCount ? rows[index] : undefined;
+    return {
+      categoryId: row ? row.categoryId : null,
+      label: row ? row.label : "Other",
+      colorVar: row ? row.colorVar : OTHER_COLOR_VAR,
+      dash: seg.dash,
+      gap: seg.gap,
+      offset: seg.offset,
+    };
+  });
+
+  // Collapsed stacked bar (D414/U5.1): same `donutInput`/`realCount` fold as
+  // the donut above, so the two geometries can never list different
+  // categories in a different order or colour.
+  const rawBars = donutBarSegments(donutInput, {
+    gapPct: BAR_GAP_PCT,
+    minPct: BAR_MIN_SEGMENT_PCT,
+    maxSlots: MAX_DONUT_SLOTS,
+  });
+  const bars: HomeBarSegment[] = rawBars.map((seg, index) => {
+    const row = index < realCount ? rows[index] : undefined;
+    return {
+      categoryId: row ? row.categoryId : null,
+      label: row ? row.label : "Other",
+      colorVar: row ? row.colorVar : OTHER_COLOR_VAR,
+      widthPct: seg.widthPct,
+    };
+  });
 
   // D310, extended by docs/ui/screens/01-home.md: the strip states a monthly
   // fact, so it is shown only when the screen's own period is that same
