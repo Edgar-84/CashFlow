@@ -79,7 +79,7 @@ function progress(overrides: Partial<BudgetProgress> = {}): BudgetProgress {
 }
 
 describe("buildHomeData", () => {
-  it("builds segments in category creation order, ranked rows by spend descending, and the over-budget strip", () => {
+  it("builds segments from the ranked rows (D605), by spend descending, and the over-budget strip", () => {
     const data = buildHomeData({
       categories: CATEGORIES,
       categoryTotals: CATEGORY_TOTALS,
@@ -92,21 +92,112 @@ describe("buildHomeData", () => {
     });
 
     expect(data.totalMinor).toBe(72470);
-    expect(data.segments.map((s) => s.categoryId)).toEqual([
-      "cat-groceries",
-      "cat-transport",
-      "cat-cafe",
-    ]);
     expect(data.rows.map((r) => r.categoryId)).toEqual([
       "cat-groceries",
       "cat-transport",
       "cat-cafe",
     ]);
+    // The donut's slices are the ranked rows, slice for slice — not the
+    // creation-order list this used to read from.
+    expect(data.segments.map((s) => s.categoryId)).toEqual(data.rows.map((r) => r.categoryId));
     expect(data.rows[0].sharePct).toBeCloseTo((41260 / 72470) * 100, 5);
     expect(data.overBudget).toEqual([
       { categoryId: "cat-cafe", label: "Café", overMinor: 2390 },
     ]);
     expect(data.period).toBe(THIS_MONTH);
+  });
+
+  it("gives the donut's first slice to the newest category when it is the biggest spender, and folds the six smallest into Other (D605)", () => {
+    // Seven categories, oldest first; cat-6 is both the newest and by far
+    // the biggest spender, with an explicit (recoloured) slot outside the
+    // 1-6 fallback range — the exact shape the old creation-order fold got
+    // wrong: cat-6 would have been folded into "Other" and its colour would
+    // never have reached the ring.
+    const categories: CategoryResponse[] = [
+      ...Array.from({ length: 6 }, (_, i) =>
+        category(`cat-${i}`, `Cat ${i}`, `2026-01-0${i + 1}T00:00:00Z`),
+      ),
+      { ...category("cat-6", "Cat 6", "2026-01-07T00:00:00Z"), color_slot: 9 },
+    ];
+    const totals: CategoryTotal[] = [
+      { category_id: "cat-0", total: 10 },
+      { category_id: "cat-1", total: 20 },
+      { category_id: "cat-2", total: 30 },
+      { category_id: "cat-3", total: 40 },
+      { category_id: "cat-4", total: 50 },
+      { category_id: "cat-5", total: 60 },
+      { category_id: "cat-6", total: 1000 },
+    ];
+
+    const data = buildHomeData({
+      categories,
+      categoryTotals: totals,
+      periodTotal: { ...PERIOD_TOTAL, total: 1210 },
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+
+    expect(data.rows.map((r) => r.categoryId)).toEqual([
+      "cat-6",
+      "cat-5",
+      "cat-4",
+      "cat-3",
+      "cat-2",
+      "cat-1",
+      "cat-0",
+    ]);
+    expect(data.segments).toHaveLength(7);
+    expect(data.segments[0]).toMatchObject({
+      categoryId: "cat-6",
+      colorVar: "var(--category-slot-9)",
+    });
+    // Slice i pairs with ranked row i for every i below the fold — asserted
+    // together so the two can never disagree again.
+    for (let i = 0; i < 6; i++) {
+      expect(data.segments[i].categoryId).toBe(data.rows[i].categoryId);
+      expect(data.segments[i].colorVar).toBe(data.rows[i].colorVar);
+    }
+    expect(data.segments[6]).toMatchObject({ categoryId: null, label: "Other" });
+  });
+
+  it("recolouring one category changes only that category's slice, not any other slice's (D605)", () => {
+    const before = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+
+    const recoloured = CATEGORIES.map((c) =>
+      c.id === "cat-transport" ? { ...c, color_slot: 11 } : c,
+    );
+    const after = buildHomeData({
+      categories: recoloured,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+
+    for (const row of before.segments) {
+      const match = after.segments.find((s) => s.categoryId === row.categoryId);
+      if (row.categoryId === "cat-transport") {
+        expect(match?.colorVar).not.toBe(row.colorVar);
+        expect(match?.colorVar).toBe("var(--category-slot-11)");
+      } else {
+        expect(match?.colorVar).toBe(row.colorVar);
+      }
+    }
   });
 
   it("ranks all non-zero categories by spend, not just the top three (the old legend cap is gone)", () => {
@@ -138,7 +229,7 @@ describe("buildHomeData", () => {
     ]);
   });
 
-  it("omits a category with a zero total from the ranked rows", () => {
+  it("omits a category with a zero total from the ranked rows and gives it no donut slice (D605)", () => {
     const categories = [
       ...CATEGORIES,
       category("cat-unused", "Unused", "2026-01-05T00:00:00Z"),
@@ -160,6 +251,7 @@ describe("buildHomeData", () => {
     });
 
     expect(data.rows.map((r) => r.categoryId)).not.toContain("cat-unused");
+    expect(data.segments.map((s) => s.categoryId)).not.toContain("cat-unused");
   });
 
   it("folds more than six categories into a trailing Other donut slot, but the ranked rows don't fold", () => {

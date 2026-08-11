@@ -403,7 +403,7 @@ export function budgetToastMessage(
 
 ### M3 — The ring's colour (the user's item 3)
 
-- [ ] **U3.1 The donut's slices are the ranked rows** (D605) — implements
+- [x] **U3.1 The donut's slices are the ranked rows** (D605) — implements
       U0.2's spec. `buildHomeData` builds one ranked list and feeds the donut,
       the collapsed bar and the rows from it.
       AC: with seven categories where the newest is the biggest spender, the
@@ -730,9 +730,27 @@ the actual acceptance gate for M2 and M4.
   most-used category is also the newest). `AddExpenseApi.listCategories`
   widened to accept `{ includeUsage?: boolean }`, matching `ApiClient`'s
   existing signature.
-- **Next:** M3 (`U3.1`, the donut's slices follow the ranking) → M4 in order;
-  M4's three units are the only ones that must stay in sequence (U4.2 builds
-  the component U4.3 triggers).
+- Plus **U3.1** — `buildHomeData` (`webapp/src/screens/home.ts`) now builds
+  `rows` (the ranked list) before the donut, and derives `donutInput` for both
+  `donutSegments` and `donutBarSegments` from `rows` instead of a
+  `created_at`-sorted `orderedCategories` list — slice *i* is ranked row *i*,
+  and each slice's `colorVar` is `rows[i].colorVar` (already resolved through
+  `colorBySlot`), not recomputed. A zero-spend category is excluded from
+  `rows` before it ever reaches the donut, so it can no longer hold a
+  zero-width slice. `assignCategoryColors` and `FALLBACK_MAX_SLOT` are
+  untouched — colour assignment still sorts `created_at` internally, fully
+  independent of the ranked display order (asserted directly: recolouring one
+  category via an explicit `color_slot` changes only that category's slice).
+  `home.test.ts`'s old "builds segments in category creation order" test is
+  rewritten to assert the segment/row pairing instead of a fixture-coincident
+  fixed order; a new seven-category test (newest category is the biggest
+  spender, an explicit `color_slot` outside the fallback 1-6 range) is the
+  regression case the plan called for — it fails against the pre-U3.1 code.
+  The existing "same order, count and colours" bar test and the "top three"
+  a11y label test stay green untouched.
+- **Next:** M4 (`U4.1` → `U4.2` → `U4.3`) in order; those three units are the
+  only ones that must stay in sequence (U4.2 builds the component U4.3
+  triggers).
 - **Spec-authoring notes worth keeping (U0.1–U0.4):**
   - The toast introduces **no new colour token**: it is `--ink` background with
     `--card` text, the existing pair used in reverse, which inverts per theme for
