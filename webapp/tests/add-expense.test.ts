@@ -28,6 +28,7 @@ import {
   nextDatePillFocusIndex,
   renderAddExpense,
   renderForm,
+  sortCategoriesByUsage,
   submitButtonState,
   wireBackButton,
   type AddExpenseApi,
@@ -209,6 +210,49 @@ describe("draftFromExpense", () => {
   });
 });
 
+// -- sortCategoriesByUsage (D604) -----------------------------------------
+
+describe("sortCategoriesByUsage", () => {
+  it("orders by all-time expense_count descending, regardless of creation date", () => {
+    const transport = { ...category("cat-transport", "Transport"), expense_count: 100, created_at: "2026-03-01T00:00:00Z" };
+    const groceries = { ...category("cat-groceries", "Groceries"), expense_count: 50, created_at: "2026-01-01T00:00:00Z" };
+    const housing = { ...category("cat-housing", "Housing"), expense_count: 3, created_at: "2025-06-01T00:00:00Z" };
+
+    const sorted = sortCategoriesByUsage([housing, transport, groceries]);
+
+    expect(sorted.map((c) => c.name)).toEqual(["Transport", "Groceries", "Housing"]);
+  });
+
+  it("sorts a never-used category (0) after every used one, ties broken by created_at ASC", () => {
+    const used = { ...category("cat-used", "Used"), expense_count: 1 };
+    const unusedOlder = { ...category("cat-unused-old", "Old"), expense_count: 0, created_at: "2026-01-01T00:00:00Z" };
+    const unusedNewer = { ...category("cat-unused-new", "New"), expense_count: 0, created_at: "2026-02-01T00:00:00Z" };
+
+    const sorted = sortCategoriesByUsage([unusedNewer, used, unusedOlder]);
+
+    expect(sorted.map((c) => c.name)).toEqual(["Used", "Old", "New"]);
+  });
+
+  it("treats a null or absent expense_count as 0, not a throw or a random order", () => {
+    const used = { ...category("cat-used", "Used"), expense_count: 5 };
+    const nullCount = { ...category("cat-null", "NullCount"), expense_count: null };
+    const absentCount = category("cat-absent", "AbsentCount"); // no expense_count key at all
+
+    const sorted = sortCategoriesByUsage([nullCount, used, absentCount]);
+
+    expect(sorted.map((c) => c.name)).toEqual(["Used", "NullCount", "AbsentCount"]);
+  });
+
+  it("does not mutate its input", () => {
+    const list = [category("cat-a", "A"), category("cat-b", "B")];
+    const before = [...list];
+
+    sortCategoriesByUsage(list);
+
+    expect(list).toEqual(before);
+  });
+});
+
 // -- loadAddExpenseData ---------------------------------------------------
 
 function fakeApi(overrides: Partial<AddExpenseApi> = {}): AddExpenseApi {
@@ -232,6 +276,13 @@ describe("loadAddExpenseData", () => {
       accountName: "Family",
       today: TODAY,
     });
+  });
+
+  it("requests usage counts so the grid can order by frequency (D604), in exactly one GET /categories call", async () => {
+    const api = fakeApi();
+    await loadAddExpenseData(api, createMemoryCache());
+    expect(api.listCategories).toHaveBeenCalledOnce();
+    expect(api.listCategories).toHaveBeenCalledWith({ includeUsage: true });
   });
 
   it("returns empty when the account has no categories", async () => {
@@ -467,6 +518,9 @@ describe("createController submit", () => {
 
     expect(outcome).toEqual({ status: "error", message: "That category no longer exists." });
     expect(api.listCategories).toHaveBeenCalledOnce();
+    // D604: the recovery refetch asks for usage counts too — otherwise the
+    // grid would silently revert to creation order mid-session.
+    expect(api.listCategories).toHaveBeenCalledWith({ includeUsage: true });
     const draft = controller.getDraft();
     expect(draft.categoryId).toBeNull();
     expect(draft.amountInput).toBe("38.40");
@@ -1013,6 +1067,42 @@ describe("renderAddExpense", () => {
     const html = renderAddExpense({ status: "ready", ...READY });
     expect(html).toContain("background:var(--category-slot-1)");
     expect(html).toContain("background:var(--category-slot-2)");
+  });
+
+  // -- D604: the grid orders by usage, not creation order -------------------
+
+  it("renders the grid most-used-first — 100/50/3 Transport/Groceries/Housing, whatever their creation dates", () => {
+    const transport = { ...category("cat-transport", "Transport"), expense_count: 100, created_at: "2026-03-01T00:00:00Z" };
+    const groceries = { ...category("cat-groceries", "Groceries"), expense_count: 50, created_at: "2026-01-01T00:00:00Z" };
+    const housing = { ...category("cat-housing", "Housing"), expense_count: 3, created_at: "2025-06-01T00:00:00Z" };
+    const html = renderForm({ ...READY, categories: [housing, transport, groceries] }, emptyDraft());
+
+    const order = [...html.matchAll(/data-category-id="([^"]+)"/g)].map((m) => m[1]);
+
+    expect(order).toEqual(["cat-transport", "cat-groceries", "cat-housing"]);
+  });
+
+  it("sorts a never-used category after every used one, ties among the unused breaking by created_at ASC", () => {
+    const used = { ...category("cat-used", "Used"), expense_count: 1 };
+    const unusedOlder = { ...category("cat-unused-old", "Old"), expense_count: 0, created_at: "2026-01-01T00:00:00Z" };
+    const unusedNewer = { ...category("cat-unused-new", "New"), expense_count: 0, created_at: "2026-02-01T00:00:00Z" };
+    const html = renderForm({ ...READY, categories: [unusedNewer, used, unusedOlder] }, emptyDraft());
+
+    const order = [...html.matchAll(/data-category-id="([^"]+)"/g)].map((m) => m[1]);
+
+    expect(order).toEqual(["cat-used", "cat-unused-old", "cat-unused-new"]);
+  });
+
+  it("reordering by usage changes no category's colour — the most-used category is also the newest", () => {
+    // `assignCategoryColors` sorts `created_at ASC` internally: cat-groceries
+    // (older) gets slot 1, cat-transport (newer) gets slot 2 — unaffected by
+    // cat-transport's expense_count putting it first in display order.
+    const groceries = { ...category("cat-groceries", "Groceries"), expense_count: 3, created_at: "2026-01-01T00:00:00Z" };
+    const transport = { ...category("cat-transport", "Transport"), expense_count: 100, created_at: "2026-03-01T00:00:00Z" };
+    const html = renderForm({ ...READY, categories: [groceries, transport] }, emptyDraft());
+
+    expect(html).toMatch(/data-category-id="cat-transport"[^>]*>\s*<span class="cp-swatch" style="background:var\(--category-slot-2\)/);
+    expect(html).toMatch(/data-category-id="cat-groceries"[^>]*>\s*<span class="cp-swatch" style="background:var\(--category-slot-1\)/);
   });
 
   it("renders only the '+ Add tag' chip when the account has no tags", () => {
