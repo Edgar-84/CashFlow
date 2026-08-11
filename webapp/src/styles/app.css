@@ -2550,3 +2550,79 @@ body {
     opacity: 0.6;
   }
 }
+
+/* -- toast (V6, D607/D608) -------------------------------------------------
+   components/toast.md. `--ink` background / `--card` text — the card/ink
+   pair used in reverse, no token of its own (design-system.md). Entrance
+   animation plays automatically on mount, same shape as `.side-menu-panel`;
+   the leave animation is added by `toast.ts::showToast`'s `dismiss` (mirrors
+   `.side-menu-closing`) and skipped entirely under prefers-reduced-motion,
+   in JS, because unlike the side menu the toast must disappear *instantly*
+   rather than merely without a slide (component doc's Accessibility
+   section). */
+.toast-root {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--card);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.toast-root:active {
+  opacity: 0.7;
+}
+
+.toast-glyph {
+  flex: none;
+  margin-top: 2px;
+}
+
+.toast-message {
+  font-size: 14px;
+  font-weight: 400;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast-root {
+    animation: toast-in 0.2s ease-out;
+  }
+
+  .toast-root.toast-leaving {
+    animation: toast-out 0.16s ease-in forwards;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
