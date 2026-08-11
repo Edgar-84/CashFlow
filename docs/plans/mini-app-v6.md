@@ -449,7 +449,7 @@ session, and either can be reverted without the other.
       `webapp/src/styles/app.css`.
       Model: sonnet.
 
-- [ ] **U4.2 `components/toast.ts`** (D607) — implements `components/toast.md`
+- [x] **U4.2 `components/toast.ts`** (D607) — implements `components/toast.md`
       as a standalone component with its own tests. **Not yet triggered by
       anything** — U4.3 wires it.
       AC: `renderToast` output matches the spec's anatomy, carries
@@ -771,8 +771,56 @@ the actual acceptance gate for M2 and M4.
   `renderHome` copy/ordering/display-only-markup coverage, all under
   `webapp/tests/home.test.ts`; the two D310 month-gate tests retargeted to
   `budgetAlerts` rather than removed.
-- **Next:** `U4.2` → `U4.3` in order (U4.2 builds the toast component U4.3
-  triggers).
+- Plus **U4.2** — `webapp/src/components/toast.ts` (new): `renderToast`
+  (pure) + `showToast` (DOM glue), matching `components/toast.md`'s
+  `ToastProps`/`renderToast`/`showToast` contract verbatim. `renderToast`
+  outputs one `role="status" aria-live="polite"` root — no close button, the
+  whole root is the tap target — with its own 16px inline warning-glyph SVG
+  (a scaled copy of `home.ts::renderWarningGlyph`'s shape, per this
+  codebase's per-file inline-SVG convention noted in U4.1's STATE) and the
+  message escaped through the file's own `escapeHtml`, matching every other
+  screen/component. `showToast` tracks "one toast per host" via a
+  `WeakMap<HTMLElement, () => void>` of a `forceRemove` callback: a second
+  `showToast` call on the same host invokes the previous toast's
+  `forceRemove` first, which removes it synchronously with no leave
+  animation (component doc's "Replaced" state) and marks its own returned
+  `dismiss` handle dead via a `removed` flag `forceRemove` sets and `dismiss`
+  also checks — kept separate from `dismiss`'s own `dismissing` flag (which
+  only guards against re-entering the animated path twice), so a replacement
+  landing mid-fade still force-removes the node instead of being blocked by
+  an animation already in flight. A stale `dismiss()` reference from a
+  replaced toast, or a second call to the same one, is a no-op, not a throw.
+  Auto-dismiss and the animated (tap/dwell) `dismiss` both go through
+  `setTimeout`, the same hand-timed pattern `home.ts::openSideMenu` already
+  uses for its closing transition, rather than an `animationend` listener.
+  `dismiss` checks `prefers-reduced-motion` the same way `openSideMenu`
+  does (`typeof window.matchMedia === "function"` guard, since jsdom does
+  not implement `matchMedia` at all — confirmed by hand, `w.matchMedia is
+  not a function`) and, when reduced motion is on, removes the node
+  synchronously instead of waiting the 160ms leave duration — a real
+  difference from the side menu's own reduced-motion handling, which the
+  toast spec requires ("appears and disappears instantly... a state change,
+  not an animation") and the side menu's doesn't. `toast.ts` imports
+  nothing from `lib/telegram` — no MainButton/BackButton call, no haptic —
+  satisfying that AC by construction; `toast.test.ts` still mocks the
+  module and spies on it to keep that invariant covered against a future
+  regression. `app.css` gains a `.toast-*` block: `position: fixed`,
+  `left`/`right: 12px` (the spec's "centred, 12px inset each side" written
+  as insets rather than a `width` + `margin`), `bottom: calc(16px +
+  env(safe-area-inset-bottom, 0px))` (the Sizing table's stated value — the
+  spec's own Open question about whether 16px clears MainButton is
+  explicitly deferred to CP2, on a device), `--ink`/`--card` inverted, no
+  shadow, 12px radius; entrance (`toast-in`, 200ms `ease-out`) plays
+  automatically on mount the way `.side-menu-panel`'s does, and the leave
+  animation (`toast-out`, 160ms `ease-in`) is gated by a JS-added
+  `.toast-leaving` class, both wrapped in `@media (prefers-reduced-motion:
+  no-preference)` so reduced motion drops the entrance for free (a CSS-only
+  guarantee, not separately tested — jsdom does not evaluate media queries
+  for animation timing). No new design-system token — the toast reuses
+  `--ink`/`--card` exactly as `design-system.md` already specifies. Not
+  wired into any screen — `main.ts`/`home.ts` are untouched; U4.3 is the
+  trigger.
+- **Next:** `U4.3` (the toast's one trigger, on top of U4.2's component).
 - **Spec-authoring notes worth keeping (U0.1–U0.4):**
   - The toast introduces **no new colour token**: it is `--ink` background with
     `--card` text, the existing pair used in reverse, which inverts per theme for
