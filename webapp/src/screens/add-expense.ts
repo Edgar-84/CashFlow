@@ -491,6 +491,40 @@ export function createController(
   };
 }
 
+/** One entry per free-text input in the form. Every entry's `apply` both
+ * mutates the draft and refreshes the chrome — the invariant the comment
+ * field violated by hand-wiring (D600). `wireForm` iterates this instead of
+ * hand-wiring `amount-input` and `comment-input` separately; a third
+ * free-text field only needs an entry here, not a new hand-wired listener. */
+export interface DraftInputBinding {
+  testId: string;
+  apply(value: string): void;
+}
+
+export function draftInputBindings(
+  controller: AddExpenseController,
+  refreshChrome: () => void,
+  patchAmountError: (message: string) => void,
+): DraftInputBinding[] {
+  return [
+    {
+      testId: "amount-input",
+      apply(value) {
+        controller.setAmountInput(value);
+        patchAmountError(amountError(controller.getDraft().amountInput) ?? "");
+        refreshChrome();
+      },
+    },
+    {
+      testId: "comment-input",
+      apply(value) {
+        controller.setComment(value);
+        refreshChrome();
+      },
+    },
+  ];
+}
+
 // -- chrome ------------------------------------------------------------------
 
 /** Telegram chrome for Add-expense: MainButton is the submit, per
@@ -955,14 +989,17 @@ export function mount(
   };
 
   const wireForm = (): void => {
-    const amountInput = root.querySelector<HTMLInputElement>('[data-testid="amount-input"]');
-    amountInput?.addEventListener("input", () => {
-      controller.setAmountInput(amountInput.value);
+    const patchAmountError = (message: string): void => {
       const errorEl = root.querySelector<HTMLElement>('[data-testid="amount-error"]');
       if (errorEl) {
-        errorEl.textContent = amountError(controller.getDraft().amountInput) ?? "";
+        errorEl.textContent = message;
       }
-      applyChrome();
+    };
+    draftInputBindings(controller, applyChrome, patchAmountError).forEach((binding) => {
+      const input = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-testid="${binding.testId}"]`);
+      input?.addEventListener("input", () => {
+        binding.apply(input.value);
+      });
     });
 
     const pickerSlot = root.querySelector<HTMLElement>(".category-picker-slot");
@@ -1023,9 +1060,6 @@ export function mount(
     });
 
     const commentInput = root.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]');
-    commentInput?.addEventListener("input", () => {
-      controller.setComment(commentInput.value);
-    });
     // AC: focusing the comment field scrolls it clear of the keyboard.
     // `getBoundingClientRect()` is viewport-relative, matching
     // `getViewportStableHeight()`'s coordinate space.

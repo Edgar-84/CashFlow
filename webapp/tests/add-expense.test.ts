@@ -1,3 +1,9 @@
+// @vitest-environment jsdom
+//
+// Whole-file opt-in (U0.5/D603): this file's "mount" describe block below
+// needs a real DOM, and vitest's per-file environment applies to the whole
+// file, not a single describe block — every other test here already worked
+// under jsdom's superset of Node, so nothing else changes behaviour.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import { ApiError, ForbiddenError, NotFoundError, RetryableError } from "../src/api/client";
@@ -11,18 +17,21 @@ import {
   createMemoryCache,
   datePillOptions,
   draftFromExpense,
+  draftInputBindings,
   editButtonState,
   editChanges,
   emptyDraft,
   isDirty,
   isEditDirty,
   loadAddExpenseData,
+  mount,
   nextDatePillFocusIndex,
   renderAddExpense,
   renderForm,
   submitButtonState,
   wireBackButton,
   type AddExpenseApi,
+  type AddExpenseHandlers,
   type Draft,
 } from "../src/screens/add-expense";
 import type { TelegramWebApp } from "../src/lib/telegram";
@@ -873,6 +882,62 @@ describe("editButtonState", () => {
   });
 });
 
+describe("draftInputBindings (D600/D601)", () => {
+  it("returns one binding per free-text input", () => {
+    const controller = createController(fakeApi(), CATEGORIES, "EUR");
+    const bindings = draftInputBindings(controller, vi.fn(), vi.fn());
+    expect(bindings.map((b) => b.testId)).toEqual(["amount-input", "comment-input"]);
+  });
+
+  it("the comment binding mutates the draft's comment and refreshes the chrome — the invariant the shipped bug violated", () => {
+    const controller = createController(fakeApi(), CATEGORIES, "EUR");
+    const refreshChrome = vi.fn();
+    const bindings = draftInputBindings(controller, refreshChrome, vi.fn());
+    const comment = bindings.find((b) => b.testId === "comment-input")!;
+
+    comment.apply("groceries for the week");
+
+    expect(controller.getDraft().comment).toBe("groceries for the week");
+    expect(refreshChrome).toHaveBeenCalledOnce();
+  });
+
+  it("the amount binding mutates the draft's amount, patches the inline error and refreshes the chrome", () => {
+    const controller = createController(fakeApi(), CATEGORIES, "EUR");
+    const refreshChrome = vi.fn();
+    const patchAmountError = vi.fn();
+    const bindings = draftInputBindings(controller, refreshChrome, patchAmountError);
+    const amount = bindings.find((b) => b.testId === "amount-input")!;
+
+    amount.apply("abc");
+
+    expect(controller.getDraft().amountInput).toBe("abc");
+    expect(patchAmountError).toHaveBeenCalledWith("Enter an amount greater than 0.");
+    expect(refreshChrome).toHaveBeenCalledOnce();
+  });
+
+  it("driving the comment binding on an edit draft flips editButtonState from disabled to 'Save changes'", () => {
+    const expense = expenseResponse();
+    const controller = createController(fakeApi(), CATEGORIES, "EUR", draftFromExpense(expense), "edit", expense, TODAY);
+    expect(editButtonState(controller.getDraft(), expense, TODAY)).toEqual({ label: "Save changes", enabled: false });
+
+    const comment = draftInputBindings(controller, vi.fn(), vi.fn()).find((b) => b.testId === "comment-input")!;
+    comment.apply("changed");
+
+    expect(editButtonState(controller.getDraft(), expense, TODAY)).toEqual({ label: "Save changes", enabled: true });
+    expect(editChanges(controller.getDraft(), expense, TODAY)).toEqual({ comment: "changed" });
+  });
+
+  it("clearing an existing comment produces a PATCH with comment: null, not ''", () => {
+    const expense = expenseResponse({ comment: "old note" });
+    const controller = createController(fakeApi(), CATEGORIES, "EUR", draftFromExpense(expense), "edit", expense, TODAY);
+
+    const comment = draftInputBindings(controller, vi.fn(), vi.fn()).find((b) => b.testId === "comment-input")!;
+    comment.apply("");
+
+    expect(editChanges(controller.getDraft(), expense, TODAY)).toEqual({ comment: null });
+  });
+});
+
 // -- renderAddExpense / renderForm ----------------------------------------
 
 const READY = {
@@ -1244,5 +1309,75 @@ describe("wireBackButton", () => {
     await Promise.resolve();
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// -- mount, DOM-level (U1.1/U0.5's jsdom environment; the regression the
+//    pure `draftInputBindings` tests above can't reach — that `wireForm`
+//    actually uses the table) -------------------------------------------
+
+function fakeHandlers(): AddExpenseHandlers {
+  return { onRetry: vi.fn(), onClose: vi.fn(), onSuccess: vi.fn(), onMore: vi.fn(), onAddTag: vi.fn() };
+}
+
+describe("mount — comment-only edit enables Save and PATCHes the comment (U1.1, D600/D602)", () => {
+  it("dispatching one input event on the comment field enables MainButton with the 'Save changes' label — fails if U1.1's fix is reverted", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const expense = expenseResponse();
+    const root = document.createElement("div");
+
+    mount(root, { status: "ready", ...READY }, fakeApi(), fakeHandlers(), draftFromExpense(expense), "edit", expense);
+    const commentInput = root.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]')!;
+    commentInput.value = "changed comment";
+    commentInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(webApp.MainButton.enable).toHaveBeenCalled();
+    expect(webApp.MainButton.setText).toHaveBeenLastCalledWith("Save changes");
+  });
+
+  it("typing in the comment never re-renders the form — the caret-destroying trap D508 warned about", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const expense = expenseResponse();
+    const root = document.createElement("div");
+
+    mount(root, { status: "ready", ...READY }, fakeApi(), fakeHandlers(), draftFromExpense(expense), "edit", expense);
+    const formEl = root.querySelector('[data-testid="add-expense-form"]');
+    const commentInput = root.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]')!;
+    commentInput.value = "changed comment";
+    commentInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(root.querySelector('[data-testid="add-expense-form"]')).toBe(formEl);
+    expect(root.querySelector('[data-testid="comment-input"]')).toBe(commentInput);
+  });
+
+  it("create mode: a comment with no category chosen still reads 'Choose a category' and stays disabled", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const root = document.createElement("div");
+
+    mount(root, { status: "ready", ...READY }, fakeApi(), fakeHandlers());
+    const commentInput = root.querySelector<HTMLTextAreaElement>('[data-testid="comment-input"]')!;
+    commentInput.value = "just a note, no category yet";
+    commentInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(webApp.MainButton.setText).toHaveBeenLastCalledWith("Choose a category");
+    expect(webApp.MainButton.disable).toHaveBeenCalled();
+  });
+
+  it("the amount field's inline error still patches on input, unchanged by the bindings-table refactor", () => {
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const root = document.createElement("div");
+
+    mount(root, { status: "ready", ...READY }, fakeApi(), fakeHandlers());
+    const amountInput = root.querySelector<HTMLInputElement>('[data-testid="amount-input"]')!;
+    amountInput.value = "abc";
+    amountInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(root.querySelector('[data-testid="amount-error"]')?.textContent).toBe(
+      "Enter an amount greater than 0.",
+    );
   });
 });

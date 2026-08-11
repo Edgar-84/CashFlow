@@ -202,6 +202,10 @@ and already implemented server-side.
       an expense from three weeks ago, which takes over the third pill.
 - [ ] MainButton reads "Save changes" and is **disabled** until a field changes.
 - [ ] Toggling a tag off and back on returns MainButton to disabled.
+- [ ] Changing **only the comment** — every other field left as opened —
+      enables MainButton to "Save changes", and the PATCH carries `comment`
+      and nothing else. Clearing an existing comment back to empty sends
+      `comment: null`, not `""`.
 - [ ] Changing only the date and saving updates the expense's day on screen 03a
       without changing its amount.
 - [ ] Saving sends exactly one PATCH no matter how fast MainButton is tapped
