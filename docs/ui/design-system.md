@@ -36,6 +36,14 @@ the same value every row rule uses — a ring with no data is a rule bent into a
 circle, not a new colour role. Adding a `--ring-empty` alias for an identical
 value is the "parallel name" this file exists to prevent.
 
+**The toast has no token of its own either (V6).** It is `--ink` background with
+`--card` text — the card/ink pair used in reverse. Both tokens already carry two
+theme values, so the inversion follows the theme for free: near-black-on-white in
+light, light-on-dark in dark. That inversion is also what separates a floating
+message from the surface under it, which is how the component obeys the
+no-shadows rule below rather than needing an elevation token. Do not add
+`--toast-bg` / `--toast-ink`; see `components/toast.md`.
+
 ### `--accent` — the one declared exception to "chrome is ink"
 
 The Add button on screen 01 is yellow (`docs/ui/refs/01-home/day-tab.jpg`,
@@ -287,6 +295,7 @@ reference screenshots at ~0.73 image-px-to-CSS-px and are approximate.
 | Jump-to-present button (period selector) | 44 × 44px hit target, 20px glyph | [inferred] — reuses the period arrow's target |
 | Settings currency row | 48px tall | [inferred] — same row height as the side menu |
 | Empty donut ring | same 200px box and 30px stroke as the populated donut | [inferred] — see below |
+| Toast (`components/toast.md`) | `calc(100% - 24px)` wide, min 44px tall, `12px 14px` padding, 12px radius, bottom-anchored above `env(safe-area-inset-bottom)` | [inferred] — see that spec's Open questions for the anchor |
 
 **Bottom nav tile (01) — removed.** The six-tile strip is replaced by the side
 menu (2026-08-07, HUMAN); its 32px tile geometry is retained here only as the
@@ -373,7 +382,7 @@ SVG in the module that uses them**, 24px box, 2px stroke, `currentColor`:
 | `+` | Add button (01), Add tag (02), More (02), open the full colour sheet (06b) | two 2.5px strokes, 24px box — 2px strokes in a 16px box at the colour picker's circle size |
 | `‹` `›` | Period arrows (01, 05) | chevron, 2px stroke, 20px box |
 | Calendar | Date row (02), Period tab (01) | rounded square + two ticks |
-| Warning | Over-budget strip | triangle + bar + dot, in `--status-red` |
+| Warning | Budget alert strip (01), toast (`components/toast.md`) | triangle + bar + dot. `--status-red` on an **exceeded** line; `currentColor` on an **approaching** line and inside the toast, so the one shape serves both states without red claiming a state it does not own |
 | `☰` | Menu button (01) | three 2px horizontal strokes, 20px box, 5px apart |
 | Skip-to-present | Period selector's jump control | two `›` chevrons + a 2px vertical bar at the right edge, 20px box — the "skip to end" shape, not a plain double chevron |
 | `✓` | Selected currency (08), selected colour slot (06b) | two 2px strokes, 20px box |
@@ -400,6 +409,9 @@ sprite sheet — rather than a library.
 | Scrim fade | matches the panel it accompanies | `linear`, opacity 0 → 1 |
 | Collapsed chart header in | 160ms | `ease-out`, `translateY(-100%)` → `0` plus opacity. **Out is instant (U5.2)** — the header is torn down as part of a full re-render, leaving nothing to animate an exit on; revisit only if a real device (CP5) shows this as a flicker |
 | Bottom sheet slide up | 200ms | `ease-out`, `translateY(100%)` → `0`. The date-range picker's existing `drp-slide-up`; the colour sheet (06b) reuses it rather than declaring a second identical keyframe |
+| Toast in (`components/toast.md`) | 200ms | `ease-out`, `translateY(100%)` → `0` plus opacity — the bottom-sheet curve reused, not a second one |
+| Toast out | 160ms | `ease-in`, opacity → 0, then the node is removed. Matches the side menu's slide-out duration |
+| **Toast dwell** (not a transition — how long it stays) | 5s | none. `[inferred]`; the only "duration" in this table that is a wait rather than an animation, and the only one `prefers-reduced-motion` does **not** touch — shortening a reading time is not a motion concession |
 
 `prefers-reduced-motion: reduce` disables the skeleton pulse, **the side menu's
 slide and the collapsed header's**: under that setting each appears and

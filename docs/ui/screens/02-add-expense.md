@@ -74,7 +74,12 @@ mirrors it in the same unit. Small, but it is a backend change, not a frontend
 one.
 
 ### Categories
-- Sorted `created_at ASC`, the same order everything else uses.
+- **Sorted most-used first (V6, 2026-08-11, HUMAN):** by all-time expense count
+  for the account, descending, ties by `created_at ASC`. This replaces the
+  original `created_at ASC` rule; the full statement, its rationale and the
+  decision it overturns are in `../components/category-picker.md`'s **Ordering**
+  section, which this screen does not restate. The screen's job is to pass
+  `include_usage=true` on its `GET /categories` so the count exists to sort by.
 - Circle filled with the category's `color_slot` colour; **no glyph, no letter**.
 - **Selected** state: the circle becomes a 12px-radius rounded square of the
   same colour and the name goes 600 weight `[ref]` — the reference marks
@@ -258,7 +263,7 @@ nobody overflows. The cap is enforced silently by `maxlength`.
 | Call | Notes |
 |---|---|
 | `GET /users/me` | currency **and account name** |
-| `GET /categories` | names + `color_slot`; archived excluded (`include_archived=false`, D306) |
+| `GET /categories` | names + `color_slot`; archived excluded (`include_archived=false`, D306). **(V6)** sent with `include_usage=true` so `expense_count` is available for the grid's most-used-first order — an existing parameter (V3 U0.4), no backend delta |
 | `GET /tags` | archived excluded |
 | `POST /expenses` | `amount`, `category_id`, `tag_ids`, `comment`, **`spent_at`** |
 
@@ -323,6 +328,12 @@ nobody overflows. The cap is enforced silently by `maxlength`.
 - [ ] Tapping a category turns its circle into a rounded square of the same
       colour and bolds its name; tapping another moves the selection.
 - [ ] The last grid cell reads "More" and opens the Categories screen.
+- [ ] **(V6)** With 100 all-time Transport expenses, 50 Groceries and 3 Housing,
+      the grid's first three cells are Transport, Groceries, Housing in that
+      order — regardless of which was created first.
+- [ ] **(V6)** A category with no expenses appears after every used category.
+- [ ] **(V6)** Each category's swatch colour is the same before and after the
+      order changes.
 - [ ] The date row shows three pills reading "today", "yesterday" and "two days
       ago" with their dates above, plus a calendar button at the right end.
 - [ ] "today" is selected on open, and the created expense's `spent_at` matches

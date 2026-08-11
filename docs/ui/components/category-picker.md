@@ -10,6 +10,12 @@ underneath** — the pair is the identity, and the two are never separated.
 - `../refs/02-add-expense/filled.jpg` — "Транспорт" selected, shown as a rounded
   square
 - Verbal brief from the user, 2026-08-04
+- Verbal brief from the user, 2026-08-11 (**V6**: ordering by usage — see
+  Ordering below)
+
+**Revised 2026-08-11 (V6, HUMAN)**, one change: **the grid is ordered by how
+often each category is used**, most-used first. This overturns the 2026-08-04
+decision recorded under Resolved.
 
 ## Delta from reference
 - **Taking:** the 4-column grid; circle above centred name; the selected cell
@@ -34,6 +40,33 @@ underneath** — the pair is the identity, and the two are never separated.
      the swatch.
 4. **"More" cell** — always last. Swatch filled `--separator` with a 24px `+`
    in `--ink-secondary`; label "More".
+
+## Ordering (V6)
+**Most-used first.** The grid is sorted by the category's **all-time expense
+count for the account**, descending; ties break by `created_at ASC`.
+
+> "the category list should show the most frequently used categories first,
+> ranked by number of past transactions… if this family account has 100 all-time
+> Transport expenses, 50 Groceries and 3 Housing, the list should show Transport
+> first, then Groceries, then Housing last." (HUMAN, 2026-08-11)
+
+- The count is **all-time and account-wide** — every member's expenses, every
+  period, not the period Home happens to be showing and not only the caller's
+  own. It is `CategoryResponse.expense_count`, which the API already returns for
+  `GET /categories?include_usage=true`; the caller passes that flag.
+- **Never-used categories** (`expense_count` 0, or absent because the caller
+  forgot the flag) sort last, among themselves by `created_at ASC`. A missing
+  count degrades the grid to the old creation order rather than to a random one.
+- The "More" cell is **still last**, after every category, and screen 02b's
+  archived-selected cell is still appended **after every active cell** — neither
+  participates in the sort.
+- **Colour is unaffected by this ordering.** Slot assignment reads a
+  `created_at`-sorted list (`lib/category-colors.ts::assignCategoryColors`),
+  independently of display order, so a category's colour cannot move when its
+  position does. This is the mechanical answer to the first of the two
+  objections the 2026-08-04 decision raised (see Resolved).
+- Ordering is **not** recency, and there is no decay or per-user weighting: the
+  brief says count.
 
 ## Variants
 
@@ -93,7 +126,9 @@ interface CategoryPickerItem {
 }
 
 interface CategoryPickerProps {
-  items: CategoryPickerItem[];   // already sorted created_at ASC, archived excluded
+  // (V6) sorted by expense_count DESC, created_at ASC within a tie;
+  // archived excluded (except 02b's one archived-selected cell, appended last)
+  items: CategoryPickerItem[];
   selectedId: Uuid | null;
   disabled?: boolean;
   onSelect(id: Uuid): void;
@@ -101,8 +136,9 @@ interface CategoryPickerProps {
 }
 ```
 
-The caller resolves `color_slot` → CSS variable (`lib/category-colors.ts`) and
-does the sorting and the archived filter. This component only draws.
+The caller resolves `color_slot` → CSS variable (`lib/category-colors.ts`),
+**does the sorting** (V6: by usage — see Ordering) and applies the archived
+filter. This component only draws, and it must not re-sort what it is given.
 
 ## Acceptance criteria
 - [ ] Renders a 4-column grid of 64px filled circles, each with its category
@@ -121,13 +157,53 @@ does the sorting and the archived filter. This component only draws.
 - [ ] With `disabled`, no tap fires a callback and "More" is not rendered.
 - [ ] Renders correctly in both themes; category colours are identical in
       structure and differ only by token value.
+- [ ] **(V6)** With 100 Transport, 50 Groceries and 3 Housing expenses on the
+      account, the first three cells read Transport, Groceries, Housing — in that
+      order, whatever their creation dates.
+- [ ] **(V6)** A category never used sits after every used one, and two unused
+      categories appear in creation order.
+- [ ] **(V6)** Reordering changes no category's colour: the same category shows
+      the same swatch colour before and after it overtakes another.
+- [ ] **(V6)** "More" is still the last cell, and on screen 02b an
+      archived-selected cell still sits immediately before it.
 
 ## Resolved
-- **Ordering stays `created_at ASC`** (2026-08-04), not recently-used. It is
+- ~~**Ordering stays `created_at ASC`** (2026-08-04), not recently-used. It is
   what keeps the `NULL`-slot colour fallback stable, and a grid that reorders
-  itself between visits destroys the muscle memory that makes this screen fast.
+  itself between visits destroys the muscle memory that makes this screen
+  fast.~~ — **superseded 2026-08-11 (V6, HUMAN)** by Ordering above. Kept, not
+  deleted, because its two objections are this change's risk register and both
+  need an answer:
+  - *Colour-fallback stability* — **answered mechanically.** Display order and
+    slot assignment are two different sorts over the same list;
+    `assignCategoryColors` sorts by `created_at` itself, so a `NULL`-slot
+    category's fallback colour cannot move because the grid reordered. Wiring
+    colour to display order would reintroduce exactly the bug D301 fixed, and
+    is forbidden.
+  - *Muscle memory* — **accepted as a real cost**, judged worth paying: the
+    reference the user is comparing against puts the common categories first,
+    and with a family's spending the head of the grid stabilises quickly (a
+    category at 100 uses does not get overtaken by one at 3). The cost is
+    concentrated in the long tail, where positions were never memorable
+    anyway. To be judged on a device — `docs/plans/mini-app-v6.md`'s CP1 exists
+    for this, and reverting is a one-function change.
 
 ## Open questions
 - [?] With 20+ categories the grid pushes the date row well below the fold.
       Cap the grid at N rows with a "show all"? N undecided. Not blocking —
-      the fold only bites at a category count no account has yet.
+      the fold only bites at a category count no account has yet. **(V6)** Usage
+      ordering makes a cap much safer than it was: the first row would hold the
+      categories that account for most expenses, so "show all" would hide the
+      tail rather than an arbitrary slice of creation history.
+- [?] **(V6) Does the selected category move under the user's finger?** Adding an
+      expense increments the count that produced the order, so a category can
+      overtake its neighbour between two consecutive expenses. This spec does
+      **not** freeze the order for the session `[inferred]` — the grid is
+      rebuilt from a fresh `GET /categories` on each open, and the simplest rule
+      is "what you see is the current truth". If it feels unstable at low counts
+      (3 vs 4 uses), the fix is a session-stable snapshot, not a different sort.
+- [?] **(V6) Ordering is Mini-App-only.** The bot's category keyboard
+      (`bot/handlers/expenses.py`) still lists categories in its own order, so
+      the two surfaces now disagree about what comes first. Deliberate — V6's
+      brief is about the app — but it is the kind of divergence that is cheaper
+      to close early than late.
