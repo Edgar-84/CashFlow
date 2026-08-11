@@ -51,7 +51,7 @@ export type AddExpenseMode = "create" | "edit";
 
 export interface AddExpenseApi {
   getMe(): Promise<{ currency: Currency; account_name: string; today: string }>;
-  listCategories(): Promise<CategoryResponse[]>;
+  listCategories(opts?: { includeUsage?: boolean }): Promise<CategoryResponse[]>;
   listTags(): Promise<TagResponse[]>;
   createExpense(data: ExpenseCreate): Promise<ExpenseResponse>;
   /** Screen 02b's save (U1.4). Optional so a `"create"`-mode caller — every
@@ -114,7 +114,7 @@ export async function loadAddExpenseData(
   try {
     const [me, categories, tags] = await Promise.all([
       api.getMe(),
-      api.listCategories(),
+      api.listCategories({ includeUsage: true }),
       api.listTags(),
     ]);
     const data: AddExpenseFormData = {
@@ -137,6 +137,18 @@ export async function loadAddExpenseData(
     const message = err instanceof Error ? err.message : "Something went wrong.";
     return { status: "error", message };
   }
+}
+
+/** The category grid's order (docs/ui/components/category-picker.md's
+ * "Ordering (V6)", D604): all-time `expense_count` descending, `created_at
+ * ASC` within a tie — the stable order for the long tail of never-used
+ * categories. `expense_count` absent/null counts as 0, so a caller that
+ * forgot `includeUsage` degrades to creation order rather than a random one. */
+export function sortCategoriesByUsage(categories: CategoryResponse[]): CategoryResponse[] {
+  return [...categories].sort((a, b) => {
+    const countDiff = (b.expense_count ?? 0) - (a.expense_count ?? 0);
+    return countDiff !== 0 ? countDiff : a.created_at.localeCompare(b.created_at);
+  });
 }
 
 // -- draft ---------------------------------------------------------------
@@ -476,7 +488,7 @@ export function createController(
         if (!staleExpense && isStaleCategoryError(err)) {
           draft = { ...draft, categoryId: null };
           try {
-            categories = await api.listCategories();
+            categories = await api.listCategories({ includeUsage: true });
           } catch {
             // The refetch itself failing is not this AC's concern — the
             // cleared selection still forces a re-pick, which is the part
@@ -627,7 +639,7 @@ function categoryPickerItems(categories: CategoryResponse[]): CategoryPickerItem
  * archiving one of its siblings must never do. */
 function categoryGridItems(categories: CategoryResponse[], selectedId: Uuid | null): CategoryPickerItem[] {
   const active = categories.filter((c) => c.is_active !== false);
-  const items = categoryPickerItems(active);
+  const items = categoryPickerItems(sortCategoriesByUsage(active));
   const archived = selectedId ? categories.find((c) => c.id === selectedId && c.is_active === false) : undefined;
   if (archived) {
     items.push({

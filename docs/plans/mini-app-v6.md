@@ -379,7 +379,7 @@ export function budgetToastMessage(
 
 ### M2 — The category grid's order (the user's item 2)
 
-- [ ] **U2.1 Add expense orders categories by usage** (D604) — implements
+- [x] **U2.1 Add expense orders categories by usage** (D604) — implements
       U0.3's spec. `loadAddExpenseData` asks for usage counts and the grid
       renders `sortCategoriesByUsage`'s output.
       AC: with counts 100/50/3 for Transport/Groceries/Housing the grid renders
@@ -717,9 +717,22 @@ the actual acceptance gate for M2 and M4.
   `add-expense.test.ts`'s own environment to `jsdom` (D610); `tests/dom-env-
   smoke.test.ts` is deleted, its job done. `docs/ui/screens/02b-edit-expense.md`
   gained the comment-only-save AC row.
-- **Next:** **U2.1** (the category grid's usage order, implementing U0.3's
-  spec). After that M3 → M4 in order; M4's three units are the only ones that
-  must stay in sequence (U4.2 builds the component U4.3 triggers).
+- Plus **U2.1** — `sortCategoriesByUsage` (D604) added to `add-expense.ts`:
+  `expense_count` descending, `created_at` ASC tie-break, `null`/absent
+  counted as 0. `loadAddExpenseData` now calls `api.listCategories({
+  includeUsage: true })`; `createController`'s stale-category recovery
+  refetch does the same, so the grid can't silently revert to creation order
+  mid-session. `categoryGridItems` sorts the active list before building
+  picker items — shared by the initial render and `wireForm`'s re-render, so
+  create and edit mode (02b) get the same order for free. `assignCategoryColors`
+  untouched, still sorts `created_at` internally over its own list, so display
+  order and colour stay independent (asserted with a fixture where the
+  most-used category is also the newest). `AddExpenseApi.listCategories`
+  widened to accept `{ includeUsage?: boolean }`, matching `ApiClient`'s
+  existing signature.
+- **Next:** M3 (`U3.1`, the donut's slices follow the ranking) → M4 in order;
+  M4's three units are the only ones that must stay in sequence (U4.2 builds
+  the component U4.3 triggers).
 - **Spec-authoring notes worth keeping (U0.1–U0.4):**
   - The toast introduces **no new colour token**: it is `--ink` background with
     `--card` text, the existing pair used in reverse, which inverts per theme for
