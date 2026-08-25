@@ -385,7 +385,7 @@ SVG in the module that uses them**, 24px box, 2px stroke, `currentColor`:
 | Warning | Budget alert strip (01), toast (`components/toast.md`) | triangle + bar + dot. `--status-red` on an **exceeded** line; `currentColor` on an **approaching** line and inside the toast, so the one shape serves both states without red claiming a state it does not own |
 | `☰` | Menu button (01) | three 2px horizontal strokes, 20px box, 5px apart |
 | Skip-to-present | Period selector's jump control | two `›` chevrons + a 2px vertical bar at the right edge, 20px box — the "skip to end" shape, not a plain double chevron |
-| `✓` | Selected currency (08), selected colour slot (06b) | two 2px strokes, 20px box |
+| `✓` | Selected currency (08), selected language (09), selected colour slot (06b) | two 2px strokes, 20px box |
 | Trash | Delete expense (03b) | lid + body, 2px stroke, 20px box, in `--status-red` |
 
 No icon file, no sprite sheet, no library. If this list passes about eight

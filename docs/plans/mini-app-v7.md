@@ -196,7 +196,11 @@ class BlockUpdate(BaseModel):
 // webapp/src/lib/i18n.ts — M3.3, new module
 export type Lang = "en" | "ru" | "uk";
 export type Catalogue = typeof en;           // EN is the key registry
-export function setLanguage(lang: Lang): void;      // called once, at boot
+export function setLanguage(lang: Lang): void;      // called at boot (D709),
+                                                     // and again by the
+                                                     // language-picker screen
+                                                     // (09-language.md) after
+                                                     // a successful PATCH
 export function t(key: keyof Catalogue, vars?: Record<string, string | number>): string;
 ```
 
@@ -249,7 +253,7 @@ implementation unit may start before *its own* spec exists.
       component and the grouping toggle; its Copy table has no "This month" /
       "Last month" / "Last 3 months" row left; it states that the client never
       computes period bounds; every value traces to `design-system.md`.
-- [ ] **U0.4** `docs/ui/screens/09-language.md` — **new** — plus the deltas in
+- [x] **U0.4** `docs/ui/screens/09-language.md` — **new** — plus the deltas in
       `components/side-menu.md` and `screens/08-settings.md` that place it.
       *(Gates U3.11.)*
       **AC:** the spec fixes *where* the picker lives (a row inside Settings,
@@ -491,7 +495,12 @@ touching auth or scoping goes through the reviewer subagent.
 - 2026-08-25: **D706** — Where the language picker lives (a row inside
   Settings vs. its own side-menu destination) is decided **in U0.4's spec**,
   not here. Both are defensible; the spec is where that choice belongs and it
-  gates no other unit.
+  gates no other unit. **Resolved in U0.4 (2026-08-25): a row inside
+  Settings**, leading to its own new screen (`docs/ui/screens/09-language.md`).
+  Rejected: an eighth side-menu row — it is exactly the kind of
+  account-preference item Settings already exists to hold (the same reasoning
+  Currency used in V4), and it would push U0.5's Admin row to a ninth
+  position instead of the plan's stated "eighth row, after Settings".
 - 2026-08-25: **D707** — The bot resolves the account language from the
   `GET /users/me` probe `AllowlistMiddleware` already performs, cached beside
   the allow verdict. Rejected: a fetch per update (a round-trip per keystroke
@@ -537,11 +546,13 @@ touching auth or scoping goes through the reviewer subagent.
 - [?] **A "no literals" lint** in `scripts/verify.sh` after M3. Template-literal
   HTML makes a naive grep noisy. If M3's per-unit ACs prove insufficient, this
   becomes its own unit rather than a rushed regex.
-- [?] **Locale-aware number and date formatting.** The catalogues cover words;
-  `formatAmount` and the period selector's `describe` still format in the
-  browser's default. Following the account language there is defensible and is
-  **not** in any unit above — decide during U0.4's spec whether it belongs to
-  V7 or a later plan.
+- ~~[?] **Locale-aware number and date formatting.**~~ — **answered in U0.4's
+  spec (2026-08-25): out of scope for V7.** `formatAmount` and the period
+  selector's `describe` keep the browser's default locale regardless of the
+  account's language; the plan's own Non-goals already draw the "only chrome
+  is translated" line for stored data, and this extends it to formatting.
+  Touches every screen that renders a number or a date, not just the language
+  picker — a decision for its own plan if ever wanted, not a U3.x unit here.
 - [?] **The Mini App's `Language` union vs. the Python enum.** `api/types.ts` is
   hand-written by rule; a third place to add a language code. Accepted for
   V7 (three codes), worth revisiting if the list grows.
@@ -601,12 +612,43 @@ touching auth or scoping goes through the reviewer subagent.
   control not freezing while offline (unlike Home's `disabled` prop). None of
   these blocks M2 — they are pre-existing shipped behaviour, stated so M2
   doesn't have to rediscover them, and none is required by the V7 brief.
-- **Next:** `/clear`, then **U0.4** — `ui-spec` writes
-  `docs/ui/screens/09-language.md` plus the `side-menu.md`/`08-settings.md`
-  deltas that place the language picker, gating U3.11. M0 is entirely
-  `ui-spec` work and its five units are numbered in dependency order; no unit
-  in M1–M4 may start before the spec it decomposes exists.
+- **U0.4 is done**: `docs/ui/screens/09-language.md` is written — a
+  three-row `--card` list (EN/RU/UK by endonym, `models/enums.py::Language`'s
+  order) reached **only** from a new "Language" row inside Settings, never a
+  side-menu destination (D706, resolved this unit). Its interaction model
+  deliberately diverges from Currency's: no MainButton, no confirm popup, no
+  discard flow — a row tap *is* the PATCH, per U3.11's own AC wording
+  ("picking a language PATCHes the account"), because language carries no
+  financial risk the way relabelling every amount does. A successful change
+  calls `i18n.setLanguage()` directly off the PATCH response and re-renders
+  the app's chrome in place — no page reload, and no wait for a `/users/me`
+  refetch (that refetch-driven pattern is Currency's, not this one's). Three
+  files got small deltas in the same change: `08-settings.md` gained a
+  "Language" section (region 4/5, one navigation row, no `✓` of its own —
+  the picker's `radiogroup` lives entirely on the new screen) and its "Anything
+  else in Settings" open question is now answered; `side-menu.md` gained a
+  Resolved entry recording that the drawer stays at seven rows, so U0.5's
+  Admin row is still the literal eighth; `design-system.md`'s `✓` icon usage
+  list now names screen 09 alongside 08 and 06b, keeping that table accurate
+  (same kind of same-change touch U0.3 gave `period-selector.md`). The plan's
+  own open question on locale-aware number/date formatting was also resolved
+  here, as asked: **out of scope for V7** — `formatAmount` and the period
+  selector's `describe` stay in the browser's default locale regardless of
+  the account's language, extending the "only chrome is translated" rule
+  Non-goals already states for stored data.
+- **Next:** `/clear`, then **U0.5** — `ui-spec` writes
+  `docs/ui/screens/10-admin.md` plus the `side-menu.md` delta adding the
+  eighth row (Admin, after Settings), gating all of M4. If picked up in the
+  same session as a re-read of U0.4's work, note `side-menu.md` already
+  carries U0.4's Resolved-section edit — U0.5's edit is a second pass on that
+  file, not a merge of the two (the plan's own Ordering note called this out
+  in advance). M0 is entirely `ui-spec` work; no unit in M1–M4 may start
+  before the spec it decomposes exists.
 - **Gotchas the next session must know:**
+  - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
+    deliberately made the language picker tap-to-apply — a row tap fires the
+    `PATCH` directly. Do not port Currency's select-then-save pattern over by
+    habit; the spec's Delta section explains why the two screens diverge.
   - **Do not "add period support" to `api/statistics.py`.** It is already
     there and already validated. M2 is client wiring; a Python diff in M2 is
     the signal to stop.

@@ -207,6 +207,15 @@ navigating, so there is one place where "the menu is no longer open" is decided.
       category colour or `--accent`.
 
 ## Resolved
+- **The drawer stays at seven rows for V7's language picker** (2026-08-25,
+  D706). The brief said "a language picker in the menu", which this file's
+  own `item.settings` row already satisfies one level down: the picker is
+  reached via Settings → Language (`../screens/08-settings.md`'s new region
+  4/5, `../screens/09-language.md`), not an eighth row here. Rejected: a
+  ninth destination for language — it would put Admin's later row (U0.5,
+  "the eighth row, after Settings") at a ninth position instead, and account
+  language is exactly the kind of account-preference item Settings already
+  exists to hold, the same reasoning Currency used in V4.
 - **Home only** (2026-08-07). The brief places the menu button beside screen
   01's Add button; every other screen owns its BackButton, and a drawer
   reachable from a sub-screen would put two different "go somewhere else"
