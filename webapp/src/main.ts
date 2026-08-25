@@ -1013,6 +1013,9 @@ async function showStatistics(
     onOffsetChange: (offset) => {
       void showStatistics({ ...period, offset: clampOffset(offset) }, grouping);
     },
+    onApplyCustomRange: (range) => {
+      void showStatistics({ unit: "custom", offset: 0, start: range.start, end: range.end }, grouping);
+    },
   };
 
   applyStatisticsChrome(handlers.onBack);

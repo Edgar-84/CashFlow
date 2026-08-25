@@ -34,10 +34,11 @@
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
+import { mount as mountDateRangePicker, type DateRangePickerValue } from "../components/date-range-picker";
 import { mount as mountPeriodSelector, renderPeriodSelector } from "../components/period-selector";
 import { segments as donutSegments } from "../lib/donut";
 import { formatAmount } from "../lib/money";
-import { toQuery, type PeriodQuery, type PeriodUnit, type PeriodValue } from "../lib/period";
+import { MAX_RANGE_DAYS, toQuery, type PeriodQuery, type PeriodUnit, type PeriodValue } from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ForbiddenError } from "../api/client";
 import type {
@@ -424,6 +425,70 @@ export interface StatisticsHandlers {
   onBarTap: (categoryId: Uuid) => void;
   onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
   onOffsetChange: (offset: number) => void; // host clamps at 0
+  onApplyCustomRange: (range: { start: string; end: string }) => void; // date-range picker's Apply — host sets the period and refetches; Cancel/BackButton close the picker without calling this
+}
+
+/** The date-range picker's initial draft when opened from Statistics — the
+ * previously applied custom range if one is in force ("Reopened" in the
+ * component doc's States table), otherwise empty ("Choose a start date").
+ * Pure, mirrors `home.ts`'s own copy of this function exactly (each screen
+ * keeps its own rather than sharing, this module's header comment's
+ * convention). */
+export function pickerValueForPeriod(period: PeriodValue): DateRangePickerValue {
+  return period.unit === "custom" ? { start: period.start, end: period.end } : {};
+}
+
+// Mirrors home.ts's own private toDateString — only needed here for the
+// picker's `maxDate` (today, device-local, turned into a plain calendar-date
+// string). Same "each pure module owns its own" convention as that file's
+// header comment states.
+function toDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// The picker overlays this screen as a plain child of `root`, not a separate
+// DOM root — same shape as home.ts::openPicker, which this mirrors. Any later
+// `render()` call that replaces `root.innerHTML` tears the picker down for
+// free, with no explicit lifecycle to get wrong.
+function openPicker(
+  root: HTMLElement,
+  period: PeriodValue,
+  now: Date,
+  onBack: () => void,
+  onApply: (range: { start: string; end: string }) => void,
+): void {
+  const pickerRoot = document.createElement("div");
+  root.appendChild(pickerRoot);
+
+  // BackButton closes the picker, not the screen (05-statistics.md's
+  // Telegram section: "While the date-range picker is open it closes the
+  // picker instead") — restoring the screen's own onBack (navigate to Home)
+  // afterwards, unlike Home's own openPicker, whose BackButton is otherwise
+  // always null (root screen) so it restores to null instead.
+  const close = (): void => {
+    pickerRoot.remove();
+    setBackButtonHandler(onBack);
+  };
+  setBackButtonHandler(close);
+
+  const renderPicker = (value: DateRangePickerValue): void => {
+    mountDateRangePicker(pickerRoot, {
+      mode: "range",
+      value,
+      maxDate: toDateString(now),
+      maxRangeDays: MAX_RANGE_DAYS,
+      onChange: renderPicker,
+      onApply: (range) => {
+        close();
+        onApply(range);
+      },
+      onCancel: close,
+    });
+  };
+  renderPicker(pickerValueForPeriod(period));
 }
 
 export function mount(root: HTMLElement, state: StatisticsState, handlers: StatisticsHandlers, now: Date): void {
@@ -453,7 +518,7 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
           disabled: false,
           onUnitChange: handlers.onUnitChange,
           onOffsetChange: handlers.onOffsetChange,
-          onOpenPicker: () => {}, // U2.3 wires the date-range picker here
+          onOpenPicker: () => openPicker(root, current.period, now, handlers.onBack, handlers.onApplyCustomRange),
         });
       }
     }
