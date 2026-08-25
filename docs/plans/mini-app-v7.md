@@ -195,7 +195,15 @@ class BlockUpdate(BaseModel):
 ```ts
 // webapp/src/lib/i18n.ts — M3.3, new module
 export type Lang = "en" | "ru" | "uk";
-export type Catalogue = typeof en;           // EN is the key registry
+export type Catalogue = Record<keyof typeof en, string>;   // EN is the key
+                                                             // registry (D717:
+                                                             // string values,
+                                                             // not EN's exact
+                                                             // literals, so
+                                                             // RU/UK can differ)
+export const catalogues: Record<Lang, Catalogue>;    // D717 — exported so
+                                                      // tests can assert
+                                                      // key-identity
 export function setLanguage(lang: Lang): void;      // called at boot (D709),
                                                      // and again by the
                                                      // language-picker screen
@@ -326,7 +334,7 @@ implementation unit may start before *its own* spec exists.
       cache the app already uses for offline snapshots and only reconciled
       against the server response (D709); interpolation is escaped, never
       injected as HTML.
-- [ ] **U3.4** RU + UK catalogues for the keys that exist so far.
+- [x] **U3.4** RU + UK catalogues for the keys that exist so far.
       **AC:** a test asserts all three catalogues have **identical key sets**
       and fails on a missing or extra key; no catalogue contains markup.
 - [ ] **U3.5** Extract `home.ts` + `components/side-menu.ts`.
@@ -560,6 +568,20 @@ touching auth or scoping goes through the reviewer subagent.
   reloads (not in the Contracts section, and the module's in-memory default
   already matches the "cache the app already uses for offline snapshots"
   pattern every other screen's `createMemoryCache` follows).
+
+- 2026-08-25: **D717** — U3.4 widens `Catalogue` from `typeof en` (EN's exact
+  literal string values) to `Record<keyof typeof en, string>`, and exports the
+  previously module-private `catalogues` map. Necessary because the original
+  `typeof en` contract pinned every language to EN's literal string content —
+  workable only while `ru`/`uk` aliased `en` outright, and no longer once they
+  need their own translations. `keyof Catalogue` is unchanged (`Record<K,
+  string>`'s `keyof` still resolves to `K`), so `t()`'s signature and the
+  unknown-key-fails-the-build guarantee both hold; `catalogues` is exported
+  only so `tests/i18n.test.ts` can assert the three catalogues stay
+  key-identical without hand-duplicating EN. Neither change alters `Lang`,
+  `setLanguage`, or `t`'s shape. Flagged by the reviewer as a contract update
+  that hadn't reached this section; fixed here rather than left silently
+  stale for U3.5+ to stumble on.
 
 ## Open questions
 - [?] **A "no literals" lint** in `scripts/verify.sh` after M3. Template-literal
@@ -964,9 +986,28 @@ touching auth or scoping goes through the reviewer subagent.
   agent (no memory of round 2's own run) and got the same failing result,
   confirmed a clean revert, and reran the full diff against round 1's other
   findings: APPROVE, no new findings.
-- **Next:** `/clear`, then **U3.4** (RU + UK catalogues for the keys that
-  exist so far — currently just `i18n.ts`'s three; a test must assert all
-  three catalogues have identical key sets).
+- **U3.4 is done**: `webapp/src/lib/i18n.ts` gained real `ru`/`uk` catalogue
+  objects for the three keys U3.3 shipped (`readonly`, `error.retry`,
+  `offline.banner`), replacing the `ru: en, uk: en` placeholder fallback.
+  `Catalogue` changed from `typeof en` (EN's exact literal string values) to
+  `Record<keyof typeof en, string>` — still keyed off `en` as the registry
+  (D702's "the catalogue key set is EN's"), but with plain `string` values so
+  RU/UK can hold different content under the same keys; `keyof Catalogue` for
+  `t()`'s parameter type is unaffected; this is the only contract-adjacent
+  change and it doesn't touch `t`'s or `setLanguage`'s signatures. A TS excess
+  or missing property on either `const ru`/`const uk` (both explicitly typed
+  `: Catalogue`) already fails `pnpm typecheck` at that assignment; the AC's
+  own runtime test lives in `tests/i18n.test.ts`, which now imports a newly
+  exported `catalogues` map (previously module-private, exported for exactly
+  this test — no other export or signature changed) and asserts, via
+  `it.each`, that all three languages' sorted key arrays equal EN's and that
+  no string in any catalogue contains `<` or `>`. The stale "falls back to EN
+  for ru/uk" test (accurate before this unit, false after) was replaced with
+  two tests asserting the real RU and UK strings render instead of the EN
+  ones. Translations are plain declarative sentences with no markup and no
+  interpolation-syntax changes — `{time}` stays the placeholder token in both.
+- **Next:** `/clear`, then **U3.5** (extract `home.ts` +
+  `components/side-menu.ts` into the catalogue).
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
