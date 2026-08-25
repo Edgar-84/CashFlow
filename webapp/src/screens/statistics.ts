@@ -6,10 +6,11 @@
  * Layers, same split as every other screen:
  *  - data: `loadStatistics`/`buildStatisticsData` — fetches `GET /users/me`,
  *    `/categories`, `/tags`, `/statistics/by-period|by-category|by-tag` for
- *    one `months_back` preset (U0.4) and turns them into a `StatisticsState`.
- *    Never throws, same never-throws/cache-fallback contract as every other
- *    screen's loader. Both groupings' bars are computed in the same call, so
- *    the grouping toggle never needs a second fetch.
+ *    one `PeriodValue` (V7, D704 — replaces the old `months_back` presets)
+ *    and turns them into a `StatisticsState`. Never throws, same
+ *    never-throws/cache-fallback contract as every other screen's loader.
+ *    Both groupings' bars are computed in the same call, so the grouping
+ *    toggle never needs a second fetch.
  *  - presentation: `renderStatistics`/`renderReady` (pure, HTML strings) and
  *    `mount` (thin DOM glue, the one part with no meaningful unit test — same
  *    accepted gap as every other screen's `mount`). `mount` re-renders on a
@@ -35,6 +36,7 @@
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
 import { segments as donutSegments } from "../lib/donut";
 import { formatAmount } from "../lib/money";
+import { toQuery, type PeriodQuery, type PeriodValue } from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ForbiddenError } from "../api/client";
 import type {
@@ -55,19 +57,6 @@ const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 const MAX_DONUT_SLOTS = 6;
 
 export type Grouping = "category" | "tag";
-
-export interface PeriodPreset {
-  monthsBack: number;
-  label: string;
-}
-
-// Labels mirror bot/keyboards.py's statistics period buttons exactly — same
-// three presets, same copy.
-export const PERIOD_PRESETS: readonly PeriodPreset[] = [
-  { monthsBack: 0, label: "This month" },
-  { monthsBack: 1, label: "Last month" },
-  { monthsBack: 2, label: "Last 3 months" },
-];
 
 export interface StatisticsSegment {
   categoryId: Uuid | null;
@@ -91,7 +80,7 @@ export interface StatisticsBar {
 export interface StatisticsData {
   totalMinor: number;
   currency: Currency;
-  monthsBack: number;
+  period: PeriodValue;
   grouping: Grouping;
   segments: StatisticsSegment[];
   categoryBars: StatisticsBar[];
@@ -114,7 +103,7 @@ export function buildStatisticsData(input: {
   tagTotals: TagTotal[];
   periodTotal: PeriodTotal;
   currency: Currency;
-  monthsBack: number;
+  period: PeriodValue;
   grouping: Grouping;
 }): StatisticsData {
   const orderedCategories = [...input.categories].sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -165,7 +154,7 @@ export function buildStatisticsData(input: {
   return {
     totalMinor: input.periodTotal.total,
     currency: input.currency,
-    monthsBack: input.monthsBack,
+    period: input.period,
     grouping: input.grouping,
     segments,
     categoryBars,
@@ -177,9 +166,9 @@ export interface StatisticsApi {
   getMe(): Promise<{ currency: Currency }>;
   listCategories(): Promise<CategoryResponse[]>;
   listTags(): Promise<TagResponse[]>;
-  statisticsByPeriod(opts?: { months_back?: number }): Promise<PeriodTotal>;
-  statisticsByCategory(opts?: { months_back?: number }): Promise<CategoryTotal[]>;
-  statisticsByTag(opts?: { months_back?: number }): Promise<TagTotal[]>;
+  statisticsByPeriod(query: PeriodQuery): Promise<PeriodTotal>;
+  statisticsByCategory(query: PeriodQuery): Promise<CategoryTotal[]>;
+  statisticsByTag(query: PeriodQuery): Promise<TagTotal[]>;
 }
 
 export interface StatisticsSnapshot {
@@ -203,30 +192,33 @@ export function createMemoryCache(): StatisticsCache {
 }
 
 export type StatisticsState =
-  | { status: "loading"; monthsBack: number; grouping: Grouping }
-  | { status: "error"; message: string; monthsBack: number; grouping: Grouping }
+  | { status: "loading"; period: PeriodValue; grouping: Grouping }
+  | { status: "error"; message: string; period: PeriodValue; grouping: Grouping }
   | { status: "forbidden" }
-  | { status: "empty"; monthsBack: number; grouping: Grouping }
+  | { status: "empty"; period: PeriodValue; grouping: Grouping }
   | ({ status: "ready" } & StatisticsData)
   | ({ status: "offline"; lastSyncedAt: string } & StatisticsData);
 
 /** Never throws — every failure resolves to a `StatisticsState` the caller
  * can render directly. Fetches both groupings' totals in one call (AC: the
- * grouping toggle must never trigger a second fetch). */
+ * grouping toggle must never trigger a second fetch). Passes the period arm
+ * of `StatisticsQuery` straight through — it never computes bounds
+ * (D120/D300). */
 export async function loadStatistics(
   api: StatisticsApi,
   cache: StatisticsCache,
-  monthsBack: number,
+  period: PeriodValue,
   grouping: Grouping,
 ): Promise<StatisticsState> {
   try {
+    const query = toQuery(period);
     const [me, categories, tags, periodTotal, categoryTotals, tagTotals] = await Promise.all([
       api.getMe(),
       api.listCategories(),
       api.listTags(),
-      api.statisticsByPeriod({ months_back: monthsBack }),
-      api.statisticsByCategory({ months_back: monthsBack }),
-      api.statisticsByTag({ months_back: monthsBack }),
+      api.statisticsByPeriod(query),
+      api.statisticsByCategory(query),
+      api.statisticsByTag(query),
     ]);
     const data = buildStatisticsData({
       categories,
@@ -235,11 +227,11 @@ export async function loadStatistics(
       tagTotals,
       periodTotal,
       currency: me.currency,
-      monthsBack,
+      period,
       grouping,
     });
     cache.set({ data, syncedAt: new Date().toISOString() });
-    return periodTotal.total === 0 ? { status: "empty", monthsBack, grouping } : { status: "ready", ...data };
+    return periodTotal.total === 0 ? { status: "empty", period, grouping } : { status: "ready", ...data };
   } catch (err) {
     if (err instanceof ForbiddenError) {
       return { status: "forbidden" };
@@ -249,7 +241,7 @@ export async function loadStatistics(
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
     const message = err instanceof Error ? err.message : "Something went wrong.";
-    return { status: "error", message, monthsBack, grouping };
+    return { status: "error", message, period, grouping };
   }
 }
 
@@ -273,13 +265,9 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderPresetChips(monthsBack: number): string {
-  const items = PERIOD_PRESETS.map(
-    (p) =>
-      `<button type="button" class="chip${p.monthsBack === monthsBack ? " active" : ""}" data-testid="preset" data-preset="${p.monthsBack}">${escapeHtml(p.label)}</button>`,
-  ).join("");
-  return `<div class="chip-row" data-testid="period-presets">${items}</div>`;
-}
+// The period-selector region (regions 2a/2b, `../components/period-selector.md`)
+// is wired by U2.2 — this unit only changes the data layer, so region 2 is
+// briefly empty between the two units (M2.1 -> M2.2, mini-app-v7.md).
 
 function renderGroupingToggle(grouping: Grouping): string {
   return `<div class="chip-row" data-testid="grouping-toggle">
@@ -351,7 +339,6 @@ function renderReady(data: StatisticsData, lastSyncedAt: string | undefined): st
   const bars = data.grouping === "category" ? data.categoryBars : data.tagBars;
   return `<div class="statistics-ready" data-testid="ready">
     ${renderOfflineBanner(lastSyncedAt)}
-    ${renderPresetChips(data.monthsBack)}
     ${renderDonut(data)}
     ${renderGroupingToggle(data.grouping)}
     ${renderBars(bars, data.grouping)}
@@ -369,9 +356,8 @@ function renderSkeleton(): string {
   </div>`;
 }
 
-function renderError(message: string, monthsBack: number): string {
+function renderError(message: string): string {
   return `<div class="statistics-error" data-testid="error">
-    ${renderPresetChips(monthsBack)}
     <p>${escapeHtml(message)}</p>
     <button type="button" data-action="retry">Try again</button>
   </div>`;
@@ -383,9 +369,8 @@ function renderForbidden(): string {
   </div>`;
 }
 
-function renderEmpty(monthsBack: number, grouping: Grouping): string {
+function renderEmpty(grouping: Grouping): string {
   return `<div class="statistics-empty" data-testid="empty">
-    ${renderPresetChips(monthsBack)}
     ${renderGroupingToggle(grouping)}
     <p>No expenses in this period.</p>
   </div>`;
@@ -396,11 +381,11 @@ export function renderStatistics(state: StatisticsState): string {
     case "loading":
       return renderSkeleton();
     case "error":
-      return renderError(state.message, state.monthsBack);
+      return renderError(state.message);
     case "forbidden":
       return renderForbidden();
     case "empty":
-      return renderEmpty(state.monthsBack, state.grouping);
+      return renderEmpty(state.grouping);
     case "ready":
       return renderReady(state, undefined);
     case "offline":
@@ -414,7 +399,6 @@ export function renderStatistics(state: StatisticsState): string {
 export interface StatisticsHandlers {
   onRetry: () => void;
   onBack: () => void;
-  onPresetChange: (monthsBack: number) => void;
   onBarTap: (categoryId: Uuid) => void;
 }
 
@@ -430,12 +414,6 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
     root.innerHTML = renderStatistics(current);
 
     root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
-    root.querySelectorAll<HTMLElement>("[data-preset]").forEach((el) => {
-      el.addEventListener("click", () => {
-        haptics.selection();
-        handlers.onPresetChange(Number(el.dataset.preset));
-      });
-    });
 
     if (current.status !== "ready" && current.status !== "offline") {
       return;

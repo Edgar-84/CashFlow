@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { CategoryResponse, CategoryTotal, PeriodTotal, TagResponse, TagTotal } from "../src/api/types";
+import { toQuery, type PeriodValue } from "../src/lib/period";
 import {
   applyStatisticsChrome,
   buildStatisticsData,
   createMemoryCache,
   loadStatistics,
-  PERIOD_PRESETS,
   renderStatistics,
   type StatisticsApi,
 } from "../src/screens/statistics";
@@ -25,6 +25,8 @@ const CATEGORIES: CategoryResponse[] = [
   category("cat-transport", "Transport", "2026-01-02T00:00:00Z"),
 ];
 const TAGS: TagResponse[] = [tag("tag-vacation", "vacation"), tag("tag-work", "work")];
+
+const MONTH_PERIOD: PeriodValue = { unit: "month", offset: 0 };
 
 const PERIOD_TOTAL: PeriodTotal = { start: "2026-01-01T00:00:00Z", end: "2026-02-01T00:00:00Z", total: 30000 };
 const CATEGORY_TOTALS: CategoryTotal[] = [
@@ -47,7 +49,7 @@ describe("buildStatisticsData", () => {
       tagTotals: TAG_TOTALS,
       periodTotal: PERIOD_TOTAL,
       currency: "EUR",
-      monthsBack: 0,
+      period: MONTH_PERIOD,
       grouping: "category",
       ...overrides,
     });
@@ -90,9 +92,10 @@ describe("buildStatisticsData", () => {
     expect(data.totalMinor).toBe(30000);
   });
 
-  it("carries monthsBack and grouping through untouched", () => {
-    const data = build({ monthsBack: 2, grouping: "tag" });
-    expect(data.monthsBack).toBe(2);
+  it("carries period and grouping through untouched", () => {
+    const period: PeriodValue = { unit: "year", offset: -2 };
+    const data = build({ period, grouping: "tag" });
+    expect(data.period).toEqual(period);
     expect(data.grouping).toBe("tag");
   });
 });
@@ -111,31 +114,41 @@ function fakeApi(overrides: Partial<StatisticsApi> = {}): StatisticsApi {
   };
 }
 
+const PERIOD_CASES: readonly PeriodValue[] = [
+  { unit: "day", offset: 0 },
+  { unit: "week", offset: -1 },
+  { unit: "month", offset: 0 },
+  { unit: "year", offset: -2 },
+  { unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" },
+];
+
 describe("loadStatistics", () => {
   it("resolves ready from a successful fetch", async () => {
     const cache = createMemoryCache();
-    const state = await loadStatistics(fakeApi(), cache, 0, "category");
+    const state = await loadStatistics(fakeApi(), cache, MONTH_PERIOD, "category");
     expect(state.status).toBe("ready");
     if (state.status !== "ready") throw new Error("expected ready");
     expect(state.categoryBars).toHaveLength(2);
     expect(state.tagBars).toHaveLength(2);
   });
 
-  it("sends months_back and nothing else to each statistics endpoint, for every preset", async () => {
-    for (const preset of PERIOD_PRESETS) {
+  it("sends period/offset (or custom dates) and never months_back, for each of the five period units", async () => {
+    for (const period of PERIOD_CASES) {
       const api = fakeApi();
       const cache = createMemoryCache();
-      await loadStatistics(api, cache, preset.monthsBack, "category");
-      expect(api.statisticsByPeriod).toHaveBeenCalledWith({ months_back: preset.monthsBack });
-      expect(api.statisticsByCategory).toHaveBeenCalledWith({ months_back: preset.monthsBack });
-      expect(api.statisticsByTag).toHaveBeenCalledWith({ months_back: preset.monthsBack });
+      await loadStatistics(api, cache, period, "category");
+      const query = toQuery(period);
+      expect(api.statisticsByPeriod).toHaveBeenCalledWith(query);
+      expect(api.statisticsByCategory).toHaveBeenCalledWith(query);
+      expect(api.statisticsByTag).toHaveBeenCalledWith(query);
+      expect(query).not.toHaveProperty("months_back");
     }
   });
 
   it("fetches both groupings' totals in one call, so a later grouping switch never needs a second fetch", async () => {
     const api = fakeApi();
     const cache = createMemoryCache();
-    await loadStatistics(api, cache, 0, "category");
+    await loadStatistics(api, cache, MONTH_PERIOD, "category");
     expect(api.statisticsByCategory).toHaveBeenCalledTimes(1);
     expect(api.statisticsByTag).toHaveBeenCalledTimes(1);
   });
@@ -149,10 +162,10 @@ describe("loadStatistics", () => {
         statisticsByTag: vi.fn().mockResolvedValue([]),
       }),
       cache,
-      0,
+      MONTH_PERIOD,
       "category",
     );
-    expect(state).toEqual({ status: "empty", monthsBack: 0, grouping: "category" });
+    expect(state).toEqual({ status: "empty", period: MONTH_PERIOD, grouping: "category" });
   });
 
   it("resolves forbidden on a 403", async () => {
@@ -160,7 +173,7 @@ describe("loadStatistics", () => {
     const state = await loadStatistics(
       fakeApi({ statisticsByPeriod: vi.fn().mockRejectedValue(new ForbiddenError()) }),
       cache,
-      0,
+      MONTH_PERIOD,
       "category",
     );
     expect(state).toEqual({ status: "forbidden" });
@@ -168,11 +181,11 @@ describe("loadStatistics", () => {
 
   it("resolves offline from the cache after a prior successful load", async () => {
     const cache = createMemoryCache();
-    await loadStatistics(fakeApi(), cache, 0, "category");
+    await loadStatistics(fakeApi(), cache, MONTH_PERIOD, "category");
     const state = await loadStatistics(
       fakeApi({ statisticsByPeriod: vi.fn().mockRejectedValue(new RetryableError()) }),
       cache,
-      0,
+      MONTH_PERIOD,
       "category",
     );
     expect(state.status).toBe("offline");
@@ -182,13 +195,14 @@ describe("loadStatistics", () => {
 
   it("resolves error with a human message and no cache", async () => {
     const cache = createMemoryCache();
+    const period: PeriodValue = { unit: "month", offset: -1 };
     const state = await loadStatistics(
       fakeApi({ statisticsByPeriod: vi.fn().mockRejectedValue(new RetryableError()) }),
       cache,
-      1,
+      period,
       "tag",
     );
-    expect(state).toMatchObject({ status: "error", monthsBack: 1, grouping: "tag" });
+    expect(state).toMatchObject({ status: "error", period, grouping: "tag" });
   });
 });
 
@@ -196,26 +210,10 @@ describe("loadStatistics", () => {
 
 describe("renderStatistics", () => {
   it("renders zero-width bar-slot skeletons at loading, matching the ready layout", () => {
-    const html = renderStatistics({ status: "loading", monthsBack: 0, grouping: "category" });
+    const html = renderStatistics({ status: "loading", period: MONTH_PERIOD, grouping: "category" });
     expect(html).toContain('data-testid="loading"');
     expect(html).toContain("stats-bar-skeleton");
     expect(html).not.toContain("stats-bar-fill");
-  });
-
-  it("marks the active preset chip", () => {
-    const data = buildStatisticsData({
-      categories: CATEGORIES,
-      tags: TAGS,
-      categoryTotals: CATEGORY_TOTALS,
-      tagTotals: TAG_TOTALS,
-      periodTotal: PERIOD_TOTAL,
-      currency: "EUR",
-      monthsBack: 1,
-      grouping: "category",
-    });
-    const html = renderStatistics({ status: "ready", ...data });
-    expect(html).toMatch(/class="chip active"[^>]*data-preset="1"/);
-    expect(html).toContain('data-preset="0">This month');
   });
 
   it("prints every category bar's value and the leader at full width", () => {
@@ -226,7 +224,7 @@ describe("renderStatistics", () => {
       tagTotals: TAG_TOTALS,
       periodTotal: PERIOD_TOTAL,
       currency: "EUR",
-      monthsBack: 0,
+      period: MONTH_PERIOD,
       grouping: "category",
     });
     const html = renderStatistics({ status: "ready", ...data });
@@ -244,7 +242,7 @@ describe("renderStatistics", () => {
       tagTotals: TAG_TOTALS,
       periodTotal: PERIOD_TOTAL,
       currency: "EUR",
-      monthsBack: 0,
+      period: MONTH_PERIOD,
       grouping: "tag",
     });
     const html = renderStatistics({ status: "ready", ...data });
@@ -261,7 +259,7 @@ describe("renderStatistics", () => {
       tagTotals: TAG_TOTALS,
       periodTotal: { ...PERIOD_TOTAL, total: 20000 },
       currency: "EUR",
-      monthsBack: 0,
+      period: MONTH_PERIOD,
       grouping: "category",
     });
     const html = renderStatistics({ status: "ready", ...data });
@@ -277,7 +275,7 @@ describe("renderStatistics", () => {
       tagTotals: [],
       periodTotal: PERIOD_TOTAL,
       currency: "EUR",
-      monthsBack: 0,
+      period: MONTH_PERIOD,
       grouping: "tag",
     });
     const html = renderStatistics({ status: "ready", ...data });
@@ -285,15 +283,19 @@ describe("renderStatistics", () => {
     expect(html).toContain("tagged");
   });
 
-  it("renders the empty-period state with presets and grouping toggle still reachable", () => {
-    const html = renderStatistics({ status: "empty", monthsBack: 0, grouping: "category" });
+  it("renders the empty-period state with the grouping toggle still reachable", () => {
+    const html = renderStatistics({ status: "empty", period: MONTH_PERIOD, grouping: "category" });
     expect(html).toContain('data-testid="empty"');
-    expect(html).toContain('data-testid="period-presets"');
     expect(html).toContain('data-testid="grouping-toggle"');
   });
 
   it("renders a retry affordance on error, never a raw status code", () => {
-    const html = renderStatistics({ status: "error", message: "The server is unreachable right now. Please try again.", monthsBack: 0, grouping: "category" });
+    const html = renderStatistics({
+      status: "error",
+      message: "The server is unreachable right now. Please try again.",
+      period: MONTH_PERIOD,
+      grouping: "category",
+    });
     expect(html).toContain('data-action="retry"');
     expect(html).not.toMatch(/\b[45]\d\d\b/);
   });
@@ -311,7 +313,7 @@ describe("renderStatistics", () => {
       tagTotals: TAG_TOTALS,
       periodTotal: PERIOD_TOTAL,
       currency: "EUR",
-      monthsBack: 0,
+      period: MONTH_PERIOD,
       grouping: "category",
     });
     const html = renderStatistics({ status: "offline", lastSyncedAt: "2026-01-05T10:00:00.000Z", ...data });

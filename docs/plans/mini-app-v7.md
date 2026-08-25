@@ -287,7 +287,7 @@ implementation unit may start before *its own* spec exists.
       the chips render in that order; "+ Add tag" is still last.
 
 ### M2 — Statistics period filters (item 4)
-- [ ] **U2.1** `loadStatistics`/`buildStatisticsData` take a `PeriodValue`
+- [x] **U2.1** `loadStatistics`/`buildStatisticsData` take a `PeriodValue`
       instead of `monthsBack`; `PERIOD_PRESETS` is deleted.
       **AC:** the three statistics calls send `period`/`offset` (or
       `start_date`/`end_date`) and never `months_back`; no bound is computed in
@@ -739,15 +739,40 @@ touching auth or scoping goes through the reviewer subagent.
   `loadAddExpenseData` test asserting the `listTags({ includeUsage: true })`
   call, and a `renderForm` test asserting chip order plus "+ Add tag" still
   last. M1 is complete.
-- **Next:** `/clear`, then **U2.1** (`loadStatistics`/`buildStatisticsData`
-  take a `PeriodValue` instead of `monthsBack`; `PERIOD_PRESETS` is deleted —
-  per `05-statistics.md`'s spec from U0.3). M0 is complete: all five spec
-  files (`06-categories.md`/`07-tags.md` revised, `02-add-expense.md`
-  revised, `05-statistics.md` new, `09-language.md` new, `10-admin.md` new)
-  and their `side-menu.md`/`08-settings.md`/`design-system.md`/
-  `period-selector.md` deltas exist. No unit in M1–M4 may start before the
-  spec it decomposes — that gate is satisfied for all four remaining
-  milestones.
+- **U2.1 is done**: `webapp/src/screens/statistics.ts`'s data layer takes a
+  `PeriodValue` end to end — `StatisticsData.period`/`StatisticsState`'s
+  `loading`/`error`/`empty` variants replace `monthsBack`, `StatisticsApi`'s
+  three statistics methods take a `PeriodQuery` instead of `{ months_back? }`,
+  and `loadStatistics(api, cache, period, grouping)` calls `toQuery(period)`
+  once and passes the same query object to all three calls — mirroring
+  `home.ts::loadHome`'s existing shape exactly. `PeriodPreset`/`PERIOD_PRESETS`
+  are deleted, and with them `renderPresetChips` and
+  `StatisticsHandlers.onPresetChange` — region 2 (the period selector) renders
+  nothing between this unit and U2.2, which owns wiring
+  `../components/period-selector.md` there; this unit's contract
+  (mini-app-v7.md's Contracts section) only covers the data layer, so that gap
+  is expected, not a regression. `main.ts`'s `showStatistics` takes
+  `period: PeriodValue = { unit: "month", offset: 0 }` in place of
+  `monthsBack = 0`; its one call site (the side menu's "Statistics" row)
+  already called it with no arguments, so it needed no change. `api/client.ts`'s
+  `StatisticsQuery` docblock was corrected in the same change — it previously
+  said screen 05 "keeps sending `months_back`" (D316), which this unit makes
+  false; the `months_back` alias itself is untouched (kept for the backend's
+  sake, D708 — the bot still sends it). `webapp/tests/statistics.test.ts`
+  updated to match: `loadStatistics`'s preset-loop test became a
+  `day`/`week`/`month`/`year`/`custom` parametrized test asserting each sends
+  `toQuery(period)` and never `months_back` (the AC's "unit tests cover each
+  of the five units"); the "marks the active preset chip" render test was
+  deleted (the chip UI it exercised no longer exists, per the above); every
+  other fixture's `monthsBack: N` became `period: PeriodValue`.
+- **Next:** `/clear`, then **U2.2** (the screen renders `period-selector` and
+  re-fetches on a unit or offset tap, per `05-statistics.md`'s Interactions
+  table). M0 is complete: all five spec files (`06-categories.md`/
+  `07-tags.md` revised, `02-add-expense.md` revised, `05-statistics.md` new,
+  `09-language.md` new, `10-admin.md` new) and their `side-menu.md`/
+  `08-settings.md`/`design-system.md`/`period-selector.md` deltas exist. No
+  unit in M1–M4 may start before the spec it decomposes — that gate is
+  satisfied for all four remaining milestones.
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the

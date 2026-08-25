@@ -112,7 +112,7 @@ const settingsCache = createSettingsCache();
 
 // Home's selected period. Module-level so it survives navigating to screen
 // 02 and back, and a retry (both just call `showHome`/`refreshHome` again,
-// same shape as `showStatistics`'s `monthsBack` closure argument) — it only
+// same shape as `showStatistics`'s `period` closure argument) — it only
 // resets to the cold-open default when the app itself reboots.
 let homePeriod: PeriodValue = { unit: "month", offset: 0 };
 
@@ -977,14 +977,18 @@ async function showTagForm(tagId: Uuid | null): Promise<void> {
 }
 
 /** Mounts Statistics (U2.5, screen 05), reached from the side menu's
- * "Statistics" row. `monthsBack`/`grouping` are carried in the closure across preset
- * taps and retries, same shape as `showExpenses`'s `filter` closure — a
- * preset tap re-fetches (`loadStatistics`), a grouping toggle does not (that
- * re-render happens entirely inside `screens/statistics.ts::mount`). A
- * category-bar tap drills into Expenses filtered to that category (design
- * doc §5's `S -->|bar tap| EF`), reusing the same `showExpenses` Home's
- * donut-segment tap already routes through. */
-async function showStatistics(monthsBack = 0, grouping: Grouping = "category"): Promise<void> {
+ * "Statistics" row. `period`/`grouping` are carried in the closure across
+ * retries, same shape as `showExpenses`'s `filter` closure — a grouping
+ * toggle re-renders without a fetch (that happens entirely inside
+ * `screens/statistics.ts::mount`). A category-bar tap drills into Expenses
+ * filtered to that category (design doc §5's `S -->|bar tap| EF`), reusing
+ * the same `showExpenses` Home's donut-segment tap already routes through.
+ * The period-selector region itself (unit/offset taps) is wired by U2.2 —
+ * this unit's `period` argument only carries the fetch through. */
+async function showStatistics(
+  period: PeriodValue = { unit: "month", offset: 0 },
+  grouping: Grouping = "category",
+): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
@@ -993,13 +997,10 @@ async function showStatistics(monthsBack = 0, grouping: Grouping = "category"): 
 
   const handlers: StatisticsHandlers = {
     onRetry: () => {
-      void showStatistics(monthsBack, grouping);
+      void showStatistics(period, grouping);
     },
     onBack: () => {
       void showHome();
-    },
-    onPresetChange: (nextMonthsBack) => {
-      void showStatistics(nextMonthsBack, grouping);
     },
     onBarTap: (categoryId) => {
       void showExpenses({ categoryId });
@@ -1007,8 +1008,8 @@ async function showStatistics(monthsBack = 0, grouping: Grouping = "category"): 
   };
 
   applyStatisticsChrome(handlers.onBack);
-  mountStatistics(root, { status: "loading", monthsBack, grouping }, handlers);
-  const state = await loadStatistics(client, statisticsCache, monthsBack, grouping);
+  mountStatistics(root, { status: "loading", period, grouping }, handlers);
+  const state = await loadStatistics(client, statisticsCache, period, grouping);
   applyStatisticsChrome(handlers.onBack);
   mountStatistics(root, state, handlers);
 }
