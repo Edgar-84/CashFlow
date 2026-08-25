@@ -277,7 +277,7 @@ implementation unit may start before *its own* spec exists.
       accessible name is the category name alone; `listCategories` is **still**
       called with `includeUsage: true` and the hide-vs-delete branch is
       unchanged (a test asserts both); `verify.sh` green.
-- [ ] **U1.2** Tags screen, same change.
+- [x] **U1.2** Tags screen, same change.
       **AC:** as U1.1, for screen 07 and `listTags`.
 - [ ] **U1.3** Tag chips ordered most-used first.
       **AC:** `sortTagsByUsage` mirrors `sortCategoriesByUsage` exactly —
@@ -702,15 +702,35 @@ touching auth or scoping goes through the reviewer subagent.
   unit's boundary. `webapp/tests/categories.test.ts` updated to match (no
   `monthTotals`/`CategoryTotal` fixtures, aria-label assertions now check the
   bare name).
-- **Next:** `/clear`, then **U1.2** (Tags screen, same change — mirror U1.1's
-  approach in `webapp/src/screens/tags.ts`, including the same call as here
-  on whether `GET /statistics/by-tag` still has a consumer). M0 is complete:
-  all five spec files (`06-categories.md`/`07-tags.md` revised,
-  `02-add-expense.md` revised, `05-statistics.md` new, `09-language.md` new,
-  `10-admin.md` new) and their `side-menu.md`/`08-settings.md`/
-  `design-system.md`/`period-selector.md` deltas exist. No unit in M1–M4 may
-  start before the spec it decomposes — that gate is satisfied for all four
-  remaining milestones.
+- **U1.2 is done**: `webapp/src/screens/tags.ts` mirrors U1.1 exactly — no
+  row on either the active list or the archived row list renders the
+  `{count} · {amount}` caption (`captionText`/`captionAriaLabel`,
+  `.tag-row-caption`) any more; each accessible name is now just the tag name
+  (`aria-label="vacation"`). `GET /tags` still sends `include_usage=true` (a
+  test asserts the exact call args), and `tagDeleteOutcomeKind`/
+  `tagDeleteTriggerLabel` (the hide-vs-delete branch, D305) are untouched —
+  they read `expenseCount`, which stays on `TagRow`. Following the same call
+  U1.1 made (the spec left it as an implementation choice), this unit also
+  dropped `monthTotalMinor` from `TagRow`/`buildTagsData`, the
+  `GET /statistics/by-tag` call from `loadTags`, and `statisticsByTag` from
+  the `TagsApi` interface — that fetch had no remaining consumer once the
+  amount half of the caption was gone. `getMe()`/`TagsData.currency` were
+  left alone for the same reason as `categories.ts`: the spec's Data table
+  doesn't flag `GET /users/me` as removable. `webapp/tests/tags.test.ts`
+  updated to match (no `monthTotals`/`TagTotal` fixtures, aria-label
+  assertions now check the bare name). `TagTotal` and `client.ts`'s
+  `statisticsByTag` themselves are untouched — `statistics.ts` still consumes
+  both.
+- **Next:** `/clear`, then **U1.3** (tag chips ordered most-used first —
+  mirror `sortCategoriesByUsage` at `add-expense.ts:147` into a
+  `sortTagsByUsage`, per U0.2's spec; `loadAddExpenseData` passes
+  `{ includeUsage: true }` to `listTags`). M0 is complete: all five spec
+  files (`06-categories.md`/`07-tags.md` revised, `02-add-expense.md`
+  revised, `05-statistics.md` new, `09-language.md` new, `10-admin.md` new)
+  and their `side-menu.md`/`08-settings.md`/`design-system.md`/
+  `period-selector.md` deltas exist. No unit in M1–M4 may start before the
+  spec it decomposes — that gate is satisfied for all four remaining
+  milestones.
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
