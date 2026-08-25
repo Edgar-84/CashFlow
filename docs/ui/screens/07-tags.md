@@ -15,27 +15,28 @@ separate unit; this screen's row tap and its "Add tag" affordance are stubbed
   - `docs/plans/mini-app-v3.md` U2.4 — the already-approved acceptance criteria
     this spec must satisfy ("mirror of U2.1 without colour").
   - `docs/ui/screens/06-categories.md` (06a) — the sibling spec this mirrors:
-    same five states, same archived-section shape, same
-    `include_usage=true` + per-period-total data pattern, same stub-tap
-    convention for the not-yet-built destination screen.
+    same five states, same archived-section shape, same `include_usage=true`
+    fetch (rendered nowhere, per D703, but still driving hide-vs-delete),
+    same stub-tap convention for the not-yet-built destination screen.
 
 ## Delta from reference
 There is no visual reference image to delta against; the delta here is against
 **06a**, the screen this one parallels:
 - **Taking:** the list shape as a whole — active items, a collapsible archived
-  section with a plain-words explanation, the same five states, per-item
-  `{count} · {amount}` caption sourced from `include_usage=true` plus a
-  by-period totals call, the same stub-tap convention for the not-yet-built
-  create/edit destination.
+  section with a plain-words explanation, the same five states, the same
+  stub-tap convention for the not-yet-built create/edit destination. **No
+  caption** — this file originally mirrored 06a's per-item `{count} ·
+  {amount}` caption (sourced from `include_usage=true` plus a by-period
+  totals call), but that was removed from both screens in the same revision
+  that removed it from 06a, per D703 (2026-08-25, see Resolved).
 - **Changing:** **rows, not a 4-column grid.** 06a's grid exists to hold a
   64px colour swatch — the one thing this screen doesn't have (tags carry no
   `color_slot`). A grid of blank cells has nothing to justify the fourth
-  column, so this screen reuses Home's plain `.row`/`.nm`/`.val` row shape
-  instead (`app.css`'s existing `.row`, `home.ts::renderRankedRows`), with the
-  caption taking the `.val` position instead of a formatted amount and no
-  `.swatch` at all — the first place in the app a row renders with **no**
-  leading dot, so identity here is carried by name and position alone (there is
-  nothing colour ever carried on this screen to begin with).
+  column, so this screen reuses Home's plain `.row`/`.nm` row shape instead
+  (`app.css`'s existing `.row`, `home.ts::renderRankedRows`), with no `.val`
+  and no `.swatch` at all — the first place in the app a row renders with
+  **no** leading dot, so identity here is carried by name and position alone
+  (there is nothing colour ever carried on this screen to begin with).
 - **Explicitly not taking:** 06a's swatch, its 4-column keyboard navigation
   (`nextGridFocusIndex`/`GRID_COLUMNS`) — a single-column list needs only
   Up/Down, which is native `<div role="button">` tab order, nothing bespoke;
@@ -60,8 +61,8 @@ Home's ranked rows and 06a's archived rows):
 1. **Name** — 13.5px 600 `--ink` (Row title role), left-aligned, ellipsis on
    overflow, single line (unlike 06a's swatch cells, a row has no reserved
    two-line height to protect — nothing beneath the name would misalign).
-2. **Caption** — 12px `--ink-secondary` (Meta role), right-aligned, same
-   `"{count} · {amount}"` format as 06a's cell caption, e.g. `"12 · $340"`.
+
+No second element. No caption (D703) — the row is the name alone.
 
 ### "Add tag" row (region 3)
 Same `.row` shape as an active row: a 24px `+` (the project's one shared `+`
@@ -133,24 +134,21 @@ grid has.
 | `add.aria` | "Add tag" | accessible name; the `+` glyph alone is not one |
 | `archived.header` | "Archived ({n})" | `n` = archived count, matches 06a |
 | `archived.explain` | "Archived tags keep their history in reports, but you can't pick them for new expenses." | `[inferred]`, mirrors 06a's `archived.explain` with "tags" swapped for "categories" |
-| `row.caption.one` | "1 · {amount}" | singular count, matches 06a's `cell.caption.one` |
-| `row.caption.many` | "{count} · {amount}" | plural count, matches 06a's `cell.caption.many` |
 
 ## Data
 
 | Call | Params | Notes |
 |---|---|---|
-| `GET /tags` | `include_usage=true`, `include_archived=true` | names, `is_active`, `expense_count` (all-time count — `repositories/tag_repo.py::list_with_usage` mirrors the category one, no date filter on the join, D305). **Backend already returns both fields** (`models/tag.py::TagResponse`); `webapp/src/api/client.ts::listTags()` takes no options and `webapp/src/api/types.ts::TagResponse` does not yet expose `is_active`/`expense_count` — extending both to match `listCategories`'s existing `{ includeUsage, includeArchived }` shape is in scope for this unit, not a backend change. |
-| `GET /statistics/by-tag` | `period=month`, `offset=0` | this-month total per tag (`TagTotal[]`). Same zero-omission risk 06a already flagged for `/statistics/by-category`: a tag with no expenses this month may be **absent** from the array rather than present with `total: 0` — this screen must treat "tag id not present in the response" as `0`, not as an error or a missing row. Confirm against `services/statistics_service.py::by_tag` before assuming, same as 06a did. |
+| `GET /tags` | `include_usage=true`, `include_archived=true` | names, `is_active`, `expense_count` (all-time count — `repositories/tag_repo.py::list_with_usage` mirrors the category one, no date filter on the join, D305). **Backend already returns both fields** (`models/tag.py::TagResponse`); `webapp/src/api/client.ts::listTags()` takes no options and `webapp/src/api/types.ts::TagResponse` does not yet expose `is_active`/`expense_count` — extending both to match `listCategories`'s existing `{ includeUsage, includeArchived }` shape is in scope for this unit, not a backend change. **`include_usage=true` stays on this call even though `expense_count` is never rendered here (D703)** — same reason as 06a: it drives the hide-vs-delete branch on the eventual edit/delete surface (07b, D305), unrelated to what renders. |
+| `GET /statistics/by-tag` | `period=month`, `offset=0` | this-month total per tag (`TagTotal[]`). **No longer has a consumer on this screen (D703)** — same as 06a's `/statistics/by-category`, its only purpose was the removed caption's amount half. Whether the implementing unit keeps this call (unused) or drops it is an implementation choice, not decided here. |
 | `GET /users/me` | — | `currency`, for `formatAmount` |
 
 ## Accessibility
 - The list is a set of **navigation buttons**, not a `radiogroup` — a row tap
   navigates away rather than selecting in place, same as 06a's active cells.
-- Each active row's accessible name includes the tag name **and** its caption
-  (count + this-month total) — e.g. "vacation, 12 expenses, $340 this month" —
-  matching 06a's pattern of putting the full mini-report in the accessible
-  name even though sighted users read it as a compact right-aligned caption.
+- Each active row's accessible name is the tag name **alone** — e.g.
+  "vacation" — matching what a sighted user sees; count and this-month total
+  are not surfaced anywhere on this screen (D703), same as 06a.
 - The "Add tag" row's accessible name is "Add tag"; its `+` is decorative and
   `aria-hidden`.
 - The archived-section header is a real button with `aria-expanded`.
@@ -162,16 +160,14 @@ grid has.
   transition (instant show/hide instead), matching 06a.
 
 ## Edge cases
-- **Long tag name** — ellipses on its single line; the caption never moves
-  (matches Home's ranked-row `.nm` ellipsis rule). Unlike 06a's two-line
-  reserved name area, a row has no sibling geometry below the name to protect,
-  so a single-line ellipsis is enough.
-- **Unused tag (0 expenses)** — caption reads "0 · $0.00", rendered as a plain
-  fact, not an error state (plan U2.4 AC, mirrors `docs/design/mini-app-ux.md`
-  §4's "unused tag (count 0, rendered as a fact, not as an error)").
-- **Tag active with 0 expenses this month, but has history** — same
-  two-independent-numbers rule as 06a: a tag with 5 all-time expenses and none
-  this month reads "5 · $0.00", never "0 · $0.00".
+- **Long tag name** — ellipses on its single line (matches Home's ranked-row
+  `.nm` ellipsis rule). Unlike 06a's two-line reserved name area, a row has
+  no sibling geometry below the name to protect, so a single-line ellipsis is
+  enough.
+- **Unused tag (0 expenses)** — renders identically to any other tag row
+  (name only, D703); `expense_count = 0` is still fetched and, once 07b
+  ships, drives that surface's delete-not-hide branch (D305) — it just has
+  nothing to render here.
 - **No archived tags** — the archived section (region 4) does not render at
   all, not even collapsed-and-empty.
 - **All tags archived, none active** — the list shows `empty.explain` and the
@@ -182,16 +178,14 @@ grid has.
 ## Acceptance criteria
 - [ ] The Home "Tags" tile navigates to this screen; BackButton returns to
       Home (the previously dead tile, closed).
-- [ ] Active tags render as a list of rows, each with its name and a caption
-      reading its all-time expense count and this-month total, sourced from
-      `include_usage=true` and `GET /statistics/by-tag`.
-- [ ] A tag absent from the by-tag response renders a `$0.00` caption, not an
-      error and not a missing row.
+- [ ] Active tags render as a list of rows, each showing its name only. No
+      count or amount is shown anywhere on this screen (D703).
+- [ ] `GET /tags` still sends `include_usage=true` even though `expense_count`
+      is never rendered here — it drives the hide-vs-delete branch on the
+      eventual edit/delete surface (D305), unchanged by D703.
 - [ ] With zero tags, the list shows only the "Add tag" row, plus
       `empty.explain` above it, explaining what a tag is for **before** the
       row that offers to create one.
-- [ ] An unused tag (0 expenses) renders its count as a plain "0", not as an
-      error state or a dash.
 - [ ] On a fetch failure with no cache, the screen shows "Couldn't load your
       tags." with a working "Try again", never a status code.
 - [ ] On a 403 from the tags fetch, the screen shows the read-only message in
@@ -203,12 +197,19 @@ grid has.
       shows a plain-words explanation plus the archived rows when expanded.
 - [ ] Loading shows 6 skeleton rows at the real row height, with no reflow
       when data lands.
-- [ ] A tag name of 30 characters ellipses on one line without moving the
-      caption or misaligning the row.
+- [ ] A tag name of 30 characters ellipses on one line without misaligning
+      the row.
+- [ ] Each active row's accessible name is the tag name alone (D703).
 - [ ] Rendering is correct in both light and dark, with every colour resolved
       from `tokens.css`.
 
 ## Resolved
+- **The per-row caption is removed entirely — count included, not just the
+  amount** (2026-08-25, HUMAN, D703). This file originally mirrored 06a's
+  caption when first written; both screens drop it in the same revision. The
+  row is the name alone. `include_usage=true` keeps being sent on `GET /tags`
+  regardless — it drives hide-vs-delete (D305), a concern unrelated to what
+  renders.
 - **Rows, not a grid** (this session). 06a's 4-column grid exists to hold a
   colour swatch; tags have no `color_slot`, so a grid here would have an empty
   fourth column with nothing to justify it. Reuses Home's existing `.row`
@@ -234,7 +235,6 @@ grid has.
       Sanity-check on a real device.
 - [?] **`empty.explain` exact wording** — `[inferred]`, easy to change in the
       Copy table.
-- [?] **Zero-omission on `/statistics/by-tag`** — needs a quick check against
-      the actual endpoint/service before implementation, same open item 06a
-      flagged for `/statistics/by-category` and never closed out in code (only
-      handled defensively).
+- ~~[?] **Zero-omission on `/statistics/by-tag`**~~ — **moot (2026-08-25,
+      D703)**: the caption that consumed this data is removed; nothing on
+      screen renders a monthly total for this to affect.
