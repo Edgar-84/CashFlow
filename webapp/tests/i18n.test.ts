@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { setLanguage, t } from "../src/lib/i18n";
+import { catalogues, setLanguage, t } from "../src/lib/i18n";
 
 afterEach(() => {
   setLanguage("en");
@@ -24,16 +24,36 @@ describe("t", () => {
     expect(t("offline.banner", {})).toBe("Offline — showing data from {time}");
   });
 
-  it("falls back to EN for ru/uk — no catalogue ships for either until U3.4", () => {
+  it("renders real RU content, not an EN fallback", () => {
     setLanguage("ru");
-    expect(t("readonly")).toBe("You have read-only access to this account.");
+    expect(t("readonly")).toBe("У вас доступ только для чтения к этому аккаунту.");
+    expect(t("error.retry")).toBe("Повторить");
+  });
+
+  it("renders real UK content, not an EN fallback", () => {
     setLanguage("uk");
-    expect(t("readonly")).toBe("You have read-only access to this account.");
+    expect(t("readonly")).toBe("У вас є доступ лише для перегляду цього акаунта.");
+    expect(t("error.retry")).toBe("Повторити");
   });
 
   it("rejects an unknown key at compile time, never at runtime", () => {
     // @ts-expect-error — "nonexistent.key" is not in Catalogue; a typo here
     // must fail `pnpm typecheck`, not silently render "undefined".
     t("nonexistent.key");
+  });
+});
+
+describe("catalogues", () => {
+  const langs = Object.keys(catalogues) as (keyof typeof catalogues)[];
+  const enKeys = Object.keys(catalogues.en).sort();
+
+  it.each(langs)("%s has exactly EN's key set — no missing or extra key", (lang) => {
+    expect(Object.keys(catalogues[lang]).sort()).toEqual(enKeys);
+  });
+
+  it.each(langs)("%s contains no markup in any string", (lang) => {
+    for (const value of Object.values(catalogues[lang])) {
+      expect(value).not.toMatch(/[<>]/);
+    }
   });
 });
