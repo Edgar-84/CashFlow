@@ -1,7 +1,7 @@
 /** Screen 07 — Tags. "07a" (docs/ui/screens/07-tags.md), the list: a plain
- * row list of every active tag (name, a small "{count} · {amount}" caption)
- * plus an "Add tag" row, and a collapsible archived section below. Tapping an
- * active row or the "Add tag" row navigates to "07b" — the
+ * row list of every active tag (name — no per-row count/amount caption,
+ * D703) plus an "Add tag" row, and a collapsible archived section below.
+ * Tapping an active row or the "Add tag" row navigates to "07b" — the
  * create/rename/delete-or-hide form (docs/ui/screens/07b-tag-form.md, plan
  * unit U2.5), also in this file below the "-- form --" marker.
  *
@@ -21,17 +21,11 @@
  * single-column list's native tab order is enough. 07b mirrors this same
  * no-colour absence: its form has no swatch picker either
  * (docs/ui/screens/07b-tag-form.md's Delta).
- *
- * `GET /statistics/by-tag` only returns tags with at least one expense in
- * the period (`services/statistics_service.py::by_tag` builds its result
- * from a `defaultdict` over actual expenses) — a tag absent from that
- * response has spent 0 this month, not "unknown"; see `monthTotalFor` below.
  */
 
-import { formatAmount } from "../lib/money";
 import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ApiError, ForbiddenError } from "../api/client";
-import type { Currency, TagResponse, TagTotal, Uuid } from "../api/types";
+import type { Currency, TagResponse, Uuid } from "../api/types";
 
 // -- data ---------------------------------------------------------------
 
@@ -39,7 +33,6 @@ export interface TagRow {
   id: Uuid;
   name: string;
   expenseCount: number;
-  monthTotalMinor: number;
 }
 
 export interface TagsData {
@@ -48,11 +41,7 @@ export interface TagsData {
   archived: TagRow[];
 }
 
-function monthTotalFor(tagId: Uuid, totals: TagTotal[]): number {
-  return totals.find((t) => t.tag_id === tagId)?.total ?? 0;
-}
-
-export function buildTagsData(input: { tags: TagResponse[]; monthTotals: TagTotal[]; currency: Currency }): TagsData {
+export function buildTagsData(input: { tags: TagResponse[]; currency: Currency }): TagsData {
   const ordered = [...input.tags].sort((a, b) => a.created_at.localeCompare(b.created_at));
 
   const active: TagRow[] = [];
@@ -62,7 +51,6 @@ export function buildTagsData(input: { tags: TagResponse[]; monthTotals: TagTota
       id: tag.id,
       name: tag.name,
       expenseCount: tag.expense_count ?? 0,
-      monthTotalMinor: monthTotalFor(tag.id, input.monthTotals),
     };
     (tag.is_active === false ? archived : active).push(row);
   }
@@ -142,7 +130,6 @@ export function revertTagDeleteOutcome(data: TagsData, row: TagRow, outcome: Tag
 export interface TagsApi {
   getMe(): Promise<{ currency: Currency }>;
   listTags(opts: { includeUsage?: boolean; includeArchived?: boolean }): Promise<TagResponse[]>;
-  statisticsByTag(query: { period: "month"; offset: number }): Promise<TagTotal[]>;
 }
 
 export interface TagsSnapshot {
@@ -180,8 +167,7 @@ export type TagsState =
 export async function loadTags(api: TagsApi, cache: TagsCache): Promise<TagsState> {
   try {
     const [me, tags] = await Promise.all([api.getMe(), api.listTags({ includeUsage: true, includeArchived: true })]);
-    const monthTotals = await api.statisticsByTag({ period: "month", offset: 0 });
-    const data = buildTagsData({ tags, monthTotals, currency: me.currency });
+    const data = buildTagsData({ tags, currency: me.currency });
     cache.set({ data, syncedAt: new Date().toISOString() });
     return { status: "ready", ...data };
   } catch (err) {
@@ -217,19 +203,9 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function captionText(row: TagRow): string {
-  return `${row.expenseCount} · ${formatAmount(row.monthTotalMinor)}`;
-}
-
-function captionAriaLabel(row: TagRow): string {
-  const expenseWord = row.expenseCount === 1 ? "1 expense" : `${row.expenseCount} expenses`;
-  return `${row.name}, ${expenseWord}, ${formatAmount(row.monthTotalMinor)} this month`;
-}
-
 function renderRow(row: TagRow): string {
-  return `<div class="card row tag-row" data-testid="tag-row" data-tag-id="${row.id}" role="button" tabindex="0" aria-label="${escapeHtml(captionAriaLabel(row))}">
+  return `<div class="card row tag-row" data-testid="tag-row" data-tag-id="${row.id}" role="button" tabindex="0" aria-label="${escapeHtml(row.name)}">
     <span class="nm" aria-hidden="true">${escapeHtml(row.name)}</span>
-    <span class="tag-row-caption" aria-hidden="true">${escapeHtml(captionText(row))}</span>
   </div>`;
 }
 
@@ -256,9 +232,8 @@ function renderList(active: TagRow[]): string {
  * `categories.ts::renderArchivedRow`, not a native `<button>` (which would
  * need its own border/background/font resets `.row` doesn't carry). */
 function renderArchivedRow(row: TagRow): string {
-  return `<div class="row tag-archived-row" data-testid="tag-archived-row" role="button" tabindex="0" aria-label="${escapeHtml(captionAriaLabel(row))}">
+  return `<div class="row tag-archived-row" data-testid="tag-archived-row" role="button" tabindex="0" aria-label="${escapeHtml(row.name)}">
     <span class="nm" aria-hidden="true">${escapeHtml(row.name)}</span>
-    <span class="tag-row-caption" aria-hidden="true">${escapeHtml(captionText(row))}</span>
   </div>`;
 }
 
@@ -303,6 +278,9 @@ function renderDeleteFailureBanner(failure: TagDeleteFailure): string {
   </div>`;
 }
 
+// `TagsData.currency` is not rendered here — no amount is shown on this
+// screen at all (D703). It stays on the data model since `GET /users/me` is
+// fetched regardless and callers/tests still expect the shape.
 export function renderTagsView(state: TagsViewState): string {
   const { active, archived } = state.data;
   return `<div class="tags-ready" data-testid="ready">

@@ -2070,20 +2070,12 @@ body {
 
 /* -- tags (07a, docs/ui/screens/07-tags.md) ---------------------------------
    Plain rows, not a grid — tags carry no color_slot, so there is no swatch
-   to justify 06a's 4-column shape. Reuses `.row`/`.nm` (`.nm`'s flex:1
-   already pushes the trailing caption to the right, same as `.card row` in
-   home.ts). */
+   to justify 06a's 4-column shape. Reuses `.row`/`.nm`. No caption line — a
+   row is the name alone (D703, U1.2). */
 .tag-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.tag-row-caption {
-  flex: none;
-  font-size: 12px;
-  color: var(--ink-secondary);
-  font-variant-numeric: tabular-nums;
 }
 
 .tag-row-add-icon {
