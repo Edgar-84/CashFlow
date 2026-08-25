@@ -279,7 +279,7 @@ implementation unit may start before *its own* spec exists.
       unchanged (a test asserts both); `verify.sh` green.
 - [x] **U1.2** Tags screen, same change.
       **AC:** as U1.1, for screen 07 and `listTags`.
-- [ ] **U1.3** Tag chips ordered most-used first.
+- [x] **U1.3** Tag chips ordered most-used first.
       **AC:** `sortTagsByUsage` mirrors `sortCategoriesByUsage` exactly —
       `expense_count` descending, `created_at ASC` tiebreak, absent/null
       counts as 0, no throw; `loadAddExpenseData` passes
@@ -721,10 +721,27 @@ touching auth or scoping goes through the reviewer subagent.
   assertions now check the bare name). `TagTotal` and `client.ts`'s
   `statisticsByTag` themselves are untouched — `statistics.ts` still consumes
   both.
-- **Next:** `/clear`, then **U1.3** (tag chips ordered most-used first —
-  mirror `sortCategoriesByUsage` at `add-expense.ts:147` into a
-  `sortTagsByUsage`, per U0.2's spec; `loadAddExpenseData` passes
-  `{ includeUsage: true }` to `listTags`). M0 is complete: all five spec
+- **U1.3 is done**: `webapp/src/screens/add-expense.ts` gained
+  `sortTagsByUsage`, mirroring `sortCategoriesByUsage` (`add-expense.ts:147`)
+  exactly — all-time `expense_count` descending, `created_at ASC` tiebreak,
+  absent/null count treated as 0, no throw, no shared generic across the two
+  (per the file's own comment: `CategoryResponse`/`TagResponse` are separate
+  hand-written mirrors by rule). `renderTagChips` now sorts through it before
+  mapping to chip markup, so "+ Add tag" — appended after the sorted chips,
+  untouched — stays the last chip regardless of order. `AddExpenseApi.listTags`
+  gained the same optional `opts: { includeUsage?: boolean }` `listCategories`
+  already had (the `ApiClient` implementation already accepted it, per U0.2's
+  finding that this unit was "nearly free"), and `loadAddExpenseData` now
+  calls it with `{ includeUsage: true }` instead of no args.
+  `webapp/tests/add-expense.test.ts` gained a `sortTagsByUsage` describe block
+  mirroring `sortCategoriesByUsage`'s four cases (including the exact
+  Taxi=100/Entertainment=30/Fast Food=5 fixture named in the plan's AC), a
+  `loadAddExpenseData` test asserting the `listTags({ includeUsage: true })`
+  call, and a `renderForm` test asserting chip order plus "+ Add tag" still
+  last. M1 is complete.
+- **Next:** `/clear`, then **U2.1** (`loadStatistics`/`buildStatisticsData`
+  take a `PeriodValue` instead of `monthsBack`; `PERIOD_PRESETS` is deleted —
+  per `05-statistics.md`'s spec from U0.3). M0 is complete: all five spec
   files (`06-categories.md`/`07-tags.md` revised, `02-add-expense.md`
   revised, `05-statistics.md` new, `09-language.md` new, `10-admin.md` new)
   and their `side-menu.md`/`08-settings.md`/`design-system.md`/

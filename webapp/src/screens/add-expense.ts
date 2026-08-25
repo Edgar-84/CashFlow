@@ -52,7 +52,7 @@ export type AddExpenseMode = "create" | "edit";
 export interface AddExpenseApi {
   getMe(): Promise<{ currency: Currency; account_name: string; today: string }>;
   listCategories(opts?: { includeUsage?: boolean }): Promise<CategoryResponse[]>;
-  listTags(): Promise<TagResponse[]>;
+  listTags(opts?: { includeUsage?: boolean }): Promise<TagResponse[]>;
   createExpense(data: ExpenseCreate): Promise<ExpenseResponse>;
   /** Screen 02b's save (U1.4). Optional so a `"create"`-mode caller — every
    * existing fake in this unit's tests — needs no change. */
@@ -115,7 +115,7 @@ export async function loadAddExpenseData(
     const [me, categories, tags] = await Promise.all([
       api.getMe(),
       api.listCategories({ includeUsage: true }),
-      api.listTags(),
+      api.listTags({ includeUsage: true }),
     ]);
     const data: AddExpenseFormData = {
       categories,
@@ -146,6 +146,18 @@ export async function loadAddExpenseData(
  * forgot `includeUsage` degrades to creation order rather than a random one. */
 export function sortCategoriesByUsage(categories: CategoryResponse[]): CategoryResponse[] {
   return [...categories].sort((a, b) => {
+    const countDiff = (b.expense_count ?? 0) - (a.expense_count ?? 0);
+    return countDiff !== 0 ? countDiff : a.created_at.localeCompare(b.created_at);
+  });
+}
+
+/** The tag chip row's order (docs/ui/screens/02-add-expense.md's Tags
+ * section, D705): the same rule `sortCategoriesByUsage` gives the category
+ * grid, mirrored rather than shared — `CategoryResponse`/`TagResponse` are
+ * separate hand-written mirrors by rule (`webapp/CLAUDE.md`), and a generic
+ * over the two would outlive its usefulness in this one file. */
+export function sortTagsByUsage(tags: TagResponse[]): TagResponse[] {
+  return [...tags].sort((a, b) => {
     const countDiff = (b.expense_count ?? 0) - (a.expense_count ?? 0);
     return countDiff !== 0 ? countDiff : a.created_at.localeCompare(b.created_at);
   });
@@ -774,7 +786,7 @@ function renderDateRow(today: string, spentAt: string | null): string {
 // case: "the Tags section shows only '+ Add tag'") — so this never early-
 // returns empty markup the way the pre-U3.4 version did.
 function renderTagChips(tags: TagResponse[], selectedIds: Uuid[]): string {
-  const chips = tags
+  const chips = sortTagsByUsage(tags)
     .map((t) => renderChip({ id: t.id, label: t.name, selected: selectedIds.includes(t.id), attr: "tag-id" }))
     .join("");
   const addChip = '<button type="button" class="chip" data-testid="tag-add-chip">+ Add tag</button>';
