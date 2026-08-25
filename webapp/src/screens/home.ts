@@ -39,9 +39,11 @@ import type {
   CategoryResponse,
   CategoryTotal,
   Currency,
+  Language,
   PeriodTotal,
   Uuid,
 } from "../api/types";
+import { setLanguage } from "../lib/i18n";
 
 // docs/ui/screens/01-home.md's Copy table: `mb.add` and `add.aria` are both
 // this string — MainButton's label and the yellow Add button's accessible
@@ -292,7 +294,7 @@ export function buildHomeData(input: {
 }
 
 export interface HomeApi {
-  getMe(): Promise<{ currency: Currency; today: string; account_name: string }>;
+  getMe(): Promise<{ currency: Currency; today: string; account_name: string; language: Language }>;
   listCategories(): Promise<CategoryResponse[]>;
   statisticsByCategory(query: PeriodQuery): Promise<CategoryTotal[]>;
   statisticsByPeriod(query: PeriodQuery): Promise<PeriodTotal>;
@@ -332,6 +334,13 @@ export async function loadHome(api: HomeApi, cache: HomeCache, period: PeriodVal
       api.statisticsByPeriod(query),
       api.listBudgetPlans(),
     ]);
+    // Reconciles the boot-time default (`main.ts::boot`, D709) against the
+    // account's real language, off the same GET /users/me call this loader
+    // already makes — never a second fetch (D716). A side effect, not part
+    // of `HomeData`: no screen consumes it yet, so it stays out of
+    // `HomeState`'s shape rather than touching every exact-equality fixture
+    // in home.test.ts for a field nothing renders.
+    setLanguage(me.language);
     const budgetProgress = await Promise.all(
       budgetPlans.map((plan) => api.getBudgetPlanProgress(plan.id)),
     );

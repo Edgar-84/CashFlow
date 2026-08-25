@@ -20,9 +20,12 @@ import {
   type HomeApi,
   type HomeState,
 } from "../src/screens/home";
+import { setLanguage } from "../src/lib/i18n";
 import type { PeriodValue } from "../src/lib/period";
 import { formatAmount } from "../src/lib/money";
 import type { TelegramWebApp } from "../src/lib/telegram";
+
+vi.mock("../src/lib/i18n", () => ({ setLanguage: vi.fn() }));
 
 const THIS_MONTH: PeriodValue = { unit: "month", offset: 0 };
 const NOW = new Date(2026, 7, 4); // August 4, 2026 (local) — matches PERIOD_TOTAL/describe's own fixtures
@@ -455,7 +458,7 @@ describe("buildHomeData", () => {
 
 function fakeApi(overrides: Partial<HomeApi> = {}): HomeApi {
   return {
-    getMe: vi.fn().mockResolvedValue({ currency: "EUR", today: TODAY, account_name: ACCOUNT_NAME }),
+    getMe: vi.fn().mockResolvedValue({ currency: "EUR", today: TODAY, account_name: ACCOUNT_NAME, language: "en" }),
     listCategories: vi.fn().mockResolvedValue(CATEGORIES),
     statisticsByCategory: vi.fn().mockResolvedValue(CATEGORY_TOTALS),
     statisticsByPeriod: vi.fn().mockResolvedValue(PERIOD_TOTAL),
@@ -480,6 +483,27 @@ describe("loadHome", () => {
     await loadHome(api, createMemoryCache(), { unit: "week", offset: -2 });
     expect(api.statisticsByCategory).toHaveBeenCalledWith({ period: "week", offset: -2 });
     expect(api.statisticsByPeriod).toHaveBeenCalledWith({ period: "week", offset: -2 });
+  });
+
+  it("reconciles i18n against the account's language from the same GET /users/me call, never a second fetch (D716)", async () => {
+    const api = fakeApi({
+      getMe: vi.fn().mockResolvedValue({ currency: "EUR", today: TODAY, account_name: ACCOUNT_NAME, language: "ru" }),
+    });
+    await loadHome(api, createMemoryCache(), THIS_MONTH);
+    expect(setLanguage).toHaveBeenCalledWith("ru");
+    expect(api.getMe).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reconcile i18n on the offline fallback — no fresh server response to reconcile against", async () => {
+    const cache = createMemoryCache();
+    await loadHome(fakeApi(), cache, THIS_MONTH);
+    vi.clearAllMocks();
+    await loadHome(
+      fakeApi({ statisticsByCategory: vi.fn().mockRejectedValue(new RetryableError()) }),
+      cache,
+      THIS_MONTH,
+    );
+    expect(setLanguage).not.toHaveBeenCalled();
   });
 
   it("returns empty when the period total is zero, carrying the account name for the side menu", async () => {
@@ -629,6 +653,7 @@ function installWebApp(webApp: TelegramWebApp): void {
 
 afterEach(() => {
   delete (globalThis as { window?: Window }).window;
+  vi.clearAllMocks();
 });
 
 describe("resolveDayDate", () => {

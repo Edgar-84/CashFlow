@@ -33,6 +33,14 @@ export type Currency =
   | "AUD"
   | "TRY";
 
+/** `models.enums.Language` (D701/D702) — kept in lockstep with
+ * `models/enums.py::Language`. `lib/i18n.ts`'s `Lang` is the same value set,
+ * kept as its own literal union rather than importing this one (D716) — the
+ * two modules serve different concerns (an account setting vs. the active
+ * rendering language) and a structural literal union needs no import to
+ * type-check against this one. */
+export type Language = "en" | "ru" | "uk";
+
 export interface UserResponse {
   id: Uuid;
   tg_id: number;
@@ -43,13 +51,15 @@ export interface UserResponse {
 }
 
 /** `models.user.UserMeResponse` — `GET /users/me` only, adds the caller's
- * account currency (D211), name (U0.2c) and today's date in `family_tz`
- * (U3.3, `YYYY-MM-DD` — the Add-expense date row's anchor, never the device
- * clock). Every other `users` route returns `UserResponse`. */
+ * account currency (D211), name (U0.2c), today's date in `family_tz`
+ * (`YYYY-MM-DD` — the Add-expense date row's anchor, never the device clock)
+ * and the account's UI language (U3.1, D701/D702). Every other `users`
+ * route returns `UserResponse`. */
 export interface UserMeResponse extends UserResponse {
   currency: Currency;
   account_name: string;
   today: string;
+  language: Language;
 }
 
 export interface CategoryResponse {

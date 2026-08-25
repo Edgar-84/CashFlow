@@ -1,4 +1,5 @@
 import { ApiClient, ForbiddenError } from "./api/client";
+import { setLanguage } from "./lib/i18n";
 import { applyTheme, getInitData } from "./lib/telegram";
 import {
   createMemoryCache as createAddExpenseCache,
@@ -1064,6 +1065,11 @@ export async function boot(): Promise<void> {
   if (typeof document === "undefined") {
     return;
   }
+  // D709: paints before GET /users/me resolves, so the first paint uses the
+  // only content that ships this unit; `showHome`'s loader reconciles it
+  // against the account's real language once that response lands
+  // (`screens/home.ts::loadHome`, D716).
+  setLanguage("en");
   applyTheme();
   await showHome();
 }

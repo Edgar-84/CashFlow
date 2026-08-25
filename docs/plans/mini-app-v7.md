@@ -317,7 +317,7 @@ implementation unit may start before *its own* spec exists.
       **AC:** the PATCH is admin-only, the same gate the currency change uses;
       an unknown code is 422, not a 500; changing the language leaves currency
       untouched and vice versa; tests cover both fields in one PATCH.
-- [ ] **U3.3** `webapp/src/lib/i18n.ts` + boot wiring, EN catalogue only.
+- [x] **U3.3** `webapp/src/lib/i18n.ts` + boot wiring, EN catalogue only.
       **AC:** `t()` returns the EN string; an unknown key fails the build
       (typed key union), never renders at runtime; `setLanguage` runs **before
       any screen renders**, not when `GET /users/me` resolves — `boot()` paints
@@ -541,6 +541,25 @@ touching auth or scoping goes through the reviewer subagent.
   so the window costs a confusing error message, never access. Rejected:
   dropping `ttl_ok` to zero (a `/users/me` per update) and a cache-invalidation
   channel from backend to bot (a message bus this project does not have).
+- 2026-08-25: **D716** — U3.3's boot wiring calls `setLanguage` in exactly two
+  places: `main.ts::boot` seeds `"en"` (the only content this unit ships)
+  before any screen renders (D709), and `screens/home.ts::loadHome` reconciles
+  it against the account's real language right where it already destructures
+  the same `GET /users/me` response for `currency`/`today`/`account_name` —
+  reusing that call rather than adding a second fetch (the plan's own
+  gotcha). The reconciled value is a side effect only, deliberately **not**
+  added to `HomeData`/`HomeState`'s shape — `loadHome` already has one
+  precedent for a side effect (`cache.set`), and no screen consumes `language`
+  yet, so widening the shape would only cascade into every exact-equality
+  fixture in `home.test.ts` that has nothing to do with language. A screen
+  that later needs to react to a language change (starting with U3.11's
+  picker) calls `setLanguage` itself off its own response, per the contract's
+  own two documented call sites. Rejected: widening `HomeData` now (large,
+  premature test churn for an unconsumed field); a dedicated `/users/me` fetch
+  for language alone (explicitly forbidden); `localStorage` persistence across
+  reloads (not in the Contracts section, and the module's in-memory default
+  already matches the "cache the app already uses for offline snapshots"
+  pattern every other screen's `createMemoryCache` follows).
 
 ## Open questions
 - [?] **A "no literals" lint** in `scripts/verify.sh` after M3. Template-literal
@@ -887,9 +906,67 @@ touching auth or scoping goes through the reviewer subagent.
   `test_update_currency_leaves_language_untouched`, and
   `test_update_currency_and_language_in_one_patch` — mirroring the existing
   currency tests in the same file one-for-one.
-- **Next:** `/clear`, then **U3.3** (`webapp/src/lib/i18n.ts` + boot wiring,
-  EN catalogue only — see that unit's AC for the typed-key-union build
-  failure and the "before any screen renders" ordering requirement, D709).
+- **U3.3 is done.** New `webapp/src/lib/i18n.ts`: `Lang` (`"en"|"ru"|"uk"`),
+  an `en` catalogue (three keys pulled verbatim from already-shipped screens'
+  Copy tables — `readonly`, `error.retry`, `offline.banner` — chosen because
+  they're real, provenance-backed strings rather than invented test content;
+  no screen consumes `t()` yet, that starts at U3.5), `Catalogue = typeof en`,
+  `setLanguage`/`t`. `ru`/`uk` both map to the `en` object in `catalogues`
+  until U3.4 ships real content, so a `Language` the backend already accepts
+  (U3.1/U3.2) never throws or blanks the UI here — it just falls back to EN.
+  `t()` HTML-escapes an interpolated string value (a local `escapeHtml`,
+  mirroring every screen's own copy of it) and passes a number through as-is;
+  a `{var}` with no matching key is left untouched rather than dropped. The
+  typed-key-union AC ("an unknown key fails the build") is enforced by
+  `keyof Catalogue` and pinned by a `// @ts-expect-error` test in
+  `tests/i18n.test.ts` — if the typing is ever weakened that test itself
+  fails to compile-check, catching the regression.
+  Boot wiring (D716, see Decision log): `main.ts::boot` calls
+  `setLanguage("en")` before `await showHome()`; `screens/home.ts::loadHome`
+  calls `setLanguage(me.language)` off the same `GET /users/me` response it
+  already destructures for `currency`/`today`/`account_name` (no second
+  fetch), as a side effect **not** added to `HomeData`/`HomeState`'s shape —
+  avoids cascading into home.test.ts's many exact-equality fixtures for a
+  field nothing renders yet. `webapp/src/api/types.ts::UserMeResponse` gained
+  `language: Language` (a new `Language` type, mirroring `Currency`'s
+  literal-union style, matching `models/enums.py::Language` — U3.1's backend
+  contract had no webapp-side counterpart until now); `HomeApi.getMe()`'s
+  return type gained `language` to match. `tests/home.test.ts`: `vi.mock`s
+  `lib/i18n` and asserts `loadHome` reconciles with the account's language
+  from that one call, and does **not** call `setLanguage` on the offline
+  fallback (no fresh response to reconcile against); `tests/client.test.ts`'s
+  one hand-built `UserMeResponse` fixture gained `language: "en"`. **Reviewer
+  round 1** flagged one WARN, fixed in this unit: `boot()`'s `setLanguage("en")`
+  call had no test — `main.test.ts`'s existing `boot()` test only exercises
+  the Node-environment `typeof document === "undefined"` guard, never the
+  real path. New `tests/main.boot.test.ts` (jsdom, its own file per D603's
+  precedent) mocks `screens/home`'s `createHomeController` — not
+  `globalThis.fetch` — because `main.ts`'s module-level `client`/
+  `homeController` singletons are constructed at import time, before a plain
+  `vi.stubGlobal` call could ever run; `vi.mock` factories are hoisted above
+  the triggering `import`, and `vi.hoisted` shares the mock's pending-promise
+  handle with the test body. **Reviewer round 2** found that first version of
+  the test was vacuous: `main.ts`'s own module bottom auto-invokes `boot()`
+  on import (`if (typeof document !== "undefined") { void boot(); }`), and
+  under this file's jsdom environment `document` already exists at import
+  time — before the test body attaches `#app` — so that auto-boot already
+  ran once, calling the shared mocked `setLanguage` on its own before the
+  test's own explicit `boot()` call, satisfying the assertion regardless of
+  ordering. Fixed by calling `vi.clearAllMocks()` right after attaching
+  `#app` and before capturing the test's own `bootPromise`, discarding the
+  auto-boot's contaminating call, plus a `toHaveBeenCalledTimes(1)`
+  assertion. Verified empirically (not just argued): reintroduced round 1's
+  bug in a scratch copy of `main.ts` (moved `setLanguage("en")` to after
+  `await showHome()`) and confirmed the fixed test fails
+  (`expected "spy" to be called 1 times, but got 0 times`); reverted the
+  scratch copy and reran `verify.sh` green before continuing. **Round 3**
+  independently re-ran the same reintroduce-the-bug experiment from a clean
+  agent (no memory of round 2's own run) and got the same failing result,
+  confirmed a clean revert, and reran the full diff against round 1's other
+  findings: APPROVE, no new findings.
+- **Next:** `/clear`, then **U3.4** (RU + UK catalogues for the keys that
+  exist so far — currently just `i18n.ts`'s three; a test must assert all
+  three catalogues have identical key sets).
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
@@ -910,11 +987,11 @@ touching auth or scoping goes through the reviewer subagent.
     Every M4 unit that adds a role check reads that line first.
   - **Two "ask the human first" migrations** (U3.1, U4.1). `migrations/versions/`
     is under the do-not-edit-without-asking rule.
-  - **The language is not available at first paint** (U3.3). `boot()` renders
-    Home's skeleton immediately and only `loadHome` fetches `/users/me`, so
-    waiting for the response means a frame of English chrome on every cold
-    open. Read it from the cache at boot, reconcile after (D709) — and do not
-    add a second `/users/me` fetch to work around it.
+  - **The language is not available at first paint** — implemented in U3.3,
+    still binding on every unit that touches boot ordering. `boot()` seeds
+    `"en"` before `showHome()` renders; `loadHome` reconciles once
+    `GET /users/me` resolves (D709/D716). Do not add a second `/users/me`
+    fetch to read `language` sooner — reuse the one `loadHome` already makes.
   - **Do not touch `assignCategoryColors`** (V6's gotcha, still true) and **do
     not batch `GET /budgets`' progress** (V5's gotcha, still true).
   - The webapp's vitest DOM tests need the per-file
