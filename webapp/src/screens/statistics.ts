@@ -34,9 +34,10 @@
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
+import { mount as mountPeriodSelector, renderPeriodSelector } from "../components/period-selector";
 import { segments as donutSegments } from "../lib/donut";
 import { formatAmount } from "../lib/money";
-import { toQuery, type PeriodQuery, type PeriodValue } from "../lib/period";
+import { toQuery, type PeriodQuery, type PeriodUnit, type PeriodValue } from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ForbiddenError } from "../api/client";
 import type {
@@ -265,9 +266,27 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// The period-selector region (regions 2a/2b, `../components/period-selector.md`)
-// is wired by U2.2 — this unit only changes the data layer, so region 2 is
-// briefly empty between the two units (M2.1 -> M2.2, mini-app-v7.md).
+// No-op stand-ins for the callbacks `PeriodSelectorProps` requires — the pure
+// render never invokes them, only `mount` (below) wires the real handlers.
+// Same shape as `home.ts`'s own `noop` (`PeriodUnit`/`number`/`void` params
+// are all assignable from a bare `() => {}`).
+const noop = () => {};
+
+// Regions 2a/2b (`../components/period-selector.md`). Unlike Home, this
+// screen keeps the control bare on the page background — no `.card`/
+// `.chart-card` wrapper (05-statistics.md's Layout table, region 2) — and
+// never disables it while offline (the screen doc's Edge cases: "the period
+// control is not frozen", a pre-existing gap this delta doesn't fix).
+function renderPeriodControl(period: PeriodValue, now: Date): string {
+  return `<div class="period-selector-slot">${renderPeriodSelector({
+    value: period,
+    now,
+    disabled: false,
+    onUnitChange: noop,
+    onOffsetChange: noop,
+    onOpenPicker: noop,
+  })}</div>`;
+}
 
 function renderGroupingToggle(grouping: Grouping): string {
   return `<div class="chip-row" data-testid="grouping-toggle">
@@ -335,10 +354,11 @@ function renderOfflineBanner(lastSyncedAt: string | undefined): string {
   return `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(lastSyncedAt)}</div>`;
 }
 
-function renderReady(data: StatisticsData, lastSyncedAt: string | undefined): string {
+function renderReady(data: StatisticsData, lastSyncedAt: string | undefined, now: Date): string {
   const bars = data.grouping === "category" ? data.categoryBars : data.tagBars;
   return `<div class="statistics-ready" data-testid="ready">
     ${renderOfflineBanner(lastSyncedAt)}
+    ${renderPeriodControl(data.period, now)}
     ${renderDonut(data)}
     ${renderGroupingToggle(data.grouping)}
     ${renderBars(bars, data.grouping)}
@@ -356,8 +376,9 @@ function renderSkeleton(): string {
   </div>`;
 }
 
-function renderError(message: string): string {
+function renderError(message: string, period: PeriodValue, now: Date): string {
   return `<div class="statistics-error" data-testid="error">
+    ${renderPeriodControl(period, now)}
     <p>${escapeHtml(message)}</p>
     <button type="button" data-action="retry">Try again</button>
   </div>`;
@@ -369,27 +390,28 @@ function renderForbidden(): string {
   </div>`;
 }
 
-function renderEmpty(grouping: Grouping): string {
+function renderEmpty(grouping: Grouping, period: PeriodValue, now: Date): string {
   return `<div class="statistics-empty" data-testid="empty">
+    ${renderPeriodControl(period, now)}
     ${renderGroupingToggle(grouping)}
     <p>No expenses in this period.</p>
   </div>`;
 }
 
-export function renderStatistics(state: StatisticsState): string {
+export function renderStatistics(state: StatisticsState, now: Date): string {
   switch (state.status) {
     case "loading":
       return renderSkeleton();
     case "error":
-      return renderError(state.message);
+      return renderError(state.message, state.period, now);
     case "forbidden":
       return renderForbidden();
     case "empty":
-      return renderEmpty(state.grouping);
+      return renderEmpty(state.grouping, state.period, now);
     case "ready":
-      return renderReady(state, undefined);
+      return renderReady(state, undefined, now);
     case "offline":
-      return renderReady(state, state.lastSyncedAt);
+      return renderReady(state, state.lastSyncedAt, now);
   }
 }
 
@@ -400,9 +422,11 @@ export interface StatisticsHandlers {
   onRetry: () => void;
   onBack: () => void;
   onBarTap: (categoryId: Uuid) => void;
+  onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
+  onOffsetChange: (offset: number) => void; // host clamps at 0
 }
 
-export function mount(root: HTMLElement, state: StatisticsState, handlers: StatisticsHandlers): void {
+export function mount(root: HTMLElement, state: StatisticsState, handlers: StatisticsHandlers, now: Date): void {
   if (typeof document === "undefined") {
     return;
   }
@@ -411,9 +435,28 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
     if (!root) {
       return;
     }
-    root.innerHTML = renderStatistics(current);
+    root.innerHTML = renderStatistics(current, now);
 
     root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
+
+    if (
+      current.status === "ready" ||
+      current.status === "offline" ||
+      current.status === "empty" ||
+      current.status === "error"
+    ) {
+      const slot = root.querySelector<HTMLElement>(".period-selector-slot");
+      if (slot) {
+        mountPeriodSelector(slot, {
+          value: current.period,
+          now,
+          disabled: false,
+          onUnitChange: handlers.onUnitChange,
+          onOffsetChange: handlers.onOffsetChange,
+          onOpenPicker: () => {}, // U2.3 wires the date-range picker here
+        });
+      }
+    }
 
     if (current.status !== "ready" && current.status !== "offline") {
       return;

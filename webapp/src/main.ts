@@ -983,8 +983,10 @@ async function showTagForm(tagId: Uuid | null): Promise<void> {
  * `screens/statistics.ts::mount`). A category-bar tap drills into Expenses
  * filtered to that category (design doc §5's `S -->|bar tap| EF`), reusing
  * the same `showExpenses` Home's donut-segment tap already routes through.
- * The period-selector region itself (unit/offset taps) is wired by U2.2 —
- * this unit's `period` argument only carries the fetch through. */
+ * The period-selector region (U2.2) recurses into a fresh `showStatistics`
+ * call with the new period, same shape `onRetry` already used — a unit tap
+ * resets offset to 0, an offset tap clamps at 0 (`clampOffset`, no future
+ * period); the grouping selection carries through untouched either way. */
 async function showStatistics(
   period: PeriodValue = { unit: "month", offset: 0 },
   grouping: Grouping = "category",
@@ -1005,13 +1007,19 @@ async function showStatistics(
     onBarTap: (categoryId) => {
       void showExpenses({ categoryId });
     },
+    onUnitChange: (unit) => {
+      void showStatistics({ unit, offset: 0 }, grouping);
+    },
+    onOffsetChange: (offset) => {
+      void showStatistics({ ...period, offset: clampOffset(offset) }, grouping);
+    },
   };
 
   applyStatisticsChrome(handlers.onBack);
-  mountStatistics(root, { status: "loading", period, grouping }, handlers);
+  mountStatistics(root, { status: "loading", period, grouping }, handlers, new Date());
   const state = await loadStatistics(client, statisticsCache, period, grouping);
   applyStatisticsChrome(handlers.onBack);
-  mountStatistics(root, state, handlers);
+  mountStatistics(root, state, handlers, new Date());
 }
 
 /** Mounts Settings (U3.3, screen 08), reached from the side menu's seventh

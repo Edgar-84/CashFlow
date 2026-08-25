@@ -27,6 +27,7 @@ const CATEGORIES: CategoryResponse[] = [
 const TAGS: TagResponse[] = [tag("tag-vacation", "vacation"), tag("tag-work", "work")];
 
 const MONTH_PERIOD: PeriodValue = { unit: "month", offset: 0 };
+const NOW = new Date(2026, 0, 15); // January 15, 2026 (local)
 
 const PERIOD_TOTAL: PeriodTotal = { start: "2026-01-01T00:00:00Z", end: "2026-02-01T00:00:00Z", total: 30000 };
 const CATEGORY_TOTALS: CategoryTotal[] = [
@@ -210,7 +211,7 @@ describe("loadStatistics", () => {
 
 describe("renderStatistics", () => {
   it("renders zero-width bar-slot skeletons at loading, matching the ready layout", () => {
-    const html = renderStatistics({ status: "loading", period: MONTH_PERIOD, grouping: "category" });
+    const html = renderStatistics({ status: "loading", period: MONTH_PERIOD, grouping: "category" }, NOW);
     expect(html).toContain('data-testid="loading"');
     expect(html).toContain("stats-bar-skeleton");
     expect(html).not.toContain("stats-bar-fill");
@@ -227,7 +228,7 @@ describe("renderStatistics", () => {
       period: MONTH_PERIOD,
       grouping: "category",
     });
-    const html = renderStatistics({ status: "ready", ...data });
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
     expect(html).toContain("200.00");
     expect(html).toContain("100.00");
     expect(html).toContain("width:100%");
@@ -245,7 +246,7 @@ describe("renderStatistics", () => {
       period: MONTH_PERIOD,
       grouping: "tag",
     });
-    const html = renderStatistics({ status: "ready", ...data });
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
     expect(html).toContain("vacation");
     expect(html).toContain("work");
     expect(html).not.toContain("Groceries");
@@ -262,7 +263,7 @@ describe("renderStatistics", () => {
       period: MONTH_PERIOD,
       grouping: "category",
     });
-    const html = renderStatistics({ status: "ready", ...data });
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
     expect(html).not.toContain('data-testid="stats-bars"');
     expect(html).toContain('data-testid="donut"');
   });
@@ -278,30 +279,33 @@ describe("renderStatistics", () => {
       period: MONTH_PERIOD,
       grouping: "tag",
     });
-    const html = renderStatistics({ status: "ready", ...data });
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-testid="bars-empty"');
     expect(html).toContain("tagged");
   });
 
   it("renders the empty-period state with the grouping toggle still reachable", () => {
-    const html = renderStatistics({ status: "empty", period: MONTH_PERIOD, grouping: "category" });
+    const html = renderStatistics({ status: "empty", period: MONTH_PERIOD, grouping: "category" }, NOW);
     expect(html).toContain('data-testid="empty"');
     expect(html).toContain('data-testid="grouping-toggle"');
   });
 
   it("renders a retry affordance on error, never a raw status code", () => {
-    const html = renderStatistics({
-      status: "error",
-      message: "The server is unreachable right now. Please try again.",
-      period: MONTH_PERIOD,
-      grouping: "category",
-    });
+    const html = renderStatistics(
+      {
+        status: "error",
+        message: "The server is unreachable right now. Please try again.",
+        period: MONTH_PERIOD,
+        grouping: "category",
+      },
+      NOW,
+    );
     expect(html).toContain('data-action="retry"');
     expect(html).not.toMatch(/\b[45]\d\d\b/);
   });
 
   it("renders a read-only message on forbidden", () => {
-    const html = renderStatistics({ status: "forbidden" });
+    const html = renderStatistics({ status: "forbidden" }, NOW);
     expect(html).toContain('data-testid="forbidden"');
   });
 
@@ -316,9 +320,93 @@ describe("renderStatistics", () => {
       period: MONTH_PERIOD,
       grouping: "category",
     });
-    const html = renderStatistics({ status: "offline", lastSyncedAt: "2026-01-05T10:00:00.000Z", ...data });
+    const html = renderStatistics(
+      { status: "offline", lastSyncedAt: "2026-01-05T10:00:00.000Z", ...data },
+      NOW,
+    );
     expect(html).toContain('data-testid="offline"');
     expect(html).toContain("2026-01-05T10:00:00.000Z");
+  });
+
+  // -- period selector (U2.2) -------------------------------------------------
+
+  it("renders the five period tabs in order, with the current unit active", () => {
+    const data = buildStatisticsData({
+      categories: CATEGORIES,
+      tags: TAGS,
+      categoryTotals: CATEGORY_TOTALS,
+      tagTotals: TAG_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      period: MONTH_PERIOD,
+      grouping: "category",
+    });
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
+    const order = ["day", "week", "month", "year", "custom"];
+    const positions = order.map((unit) => html.indexOf(`data-testid="period-tab-${unit}"`));
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    expect(html).toMatch(/period-tab active"[^>]*data-unit="month"/);
+  });
+
+  it("clamps the next-period arrow at offset 0 for every live state", () => {
+    const nextArrowDisabled = /data-action="next"[^>]*aria-disabled="true"[^>]*data-testid="period-arrow-next"/;
+    const data = buildStatisticsData({
+      categories: CATEGORIES,
+      tags: TAGS,
+      categoryTotals: CATEGORY_TOTALS,
+      tagTotals: TAG_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      period: MONTH_PERIOD,
+      grouping: "category",
+    });
+
+    const empty = renderStatistics({ status: "empty", period: MONTH_PERIOD, grouping: "category" }, NOW);
+    expect(empty).toMatch(nextArrowDisabled);
+
+    const error = renderStatistics(
+      { status: "error", message: "Offline.", period: MONTH_PERIOD, grouping: "category" },
+      NOW,
+    );
+    expect(error).toMatch(nextArrowDisabled);
+
+    const ready = renderStatistics({ status: "ready", ...data }, NOW);
+    expect(ready).toMatch(nextArrowDisabled);
+
+    const offline = renderStatistics({ status: "offline", lastSyncedAt: "2026-01-05T10:00:00.000Z", ...data }, NOW);
+    expect(offline).toMatch(nextArrowDisabled);
+  });
+
+  it("does not disable the period selector while offline, unlike Home", () => {
+    const data = buildStatisticsData({
+      categories: CATEGORIES,
+      tags: TAGS,
+      categoryTotals: CATEGORY_TOTALS,
+      tagTotals: TAG_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      period: MONTH_PERIOD,
+      grouping: "category",
+    });
+    const html = renderStatistics({ status: "offline", lastSyncedAt: "2026-01-05T10:00:00.000Z", ...data }, NOW);
+    expect(html).toMatch(/class="period-selector"[^>]*data-testid="period-selector"/);
+    expect(html).not.toContain('class="period-selector disabled"');
+  });
+
+  it("keeps the period selector bare — no card wrapper around region 2", () => {
+    const data = buildStatisticsData({
+      categories: CATEGORIES,
+      tags: TAGS,
+      categoryTotals: CATEGORY_TOTALS,
+      tagTotals: TAG_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      period: MONTH_PERIOD,
+      grouping: "category",
+    });
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
+    expect(html).not.toContain('class="chart-card"');
   });
 });
 
