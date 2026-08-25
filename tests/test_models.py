@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from models.account import AccountResponse
 from models.budget_plan import BudgetPlanCreate, BudgetPlanResponse, BudgetPlanUpdate
 from models.category import CategoryCreate, CategoryResponse, CategoryUpdate
-from models.enums import Action, Currency, Resource, Role
+from models.enums import Action, Currency, Language, Resource, Role
 from models.errors import (
     DomainError,
     LimitExceededWarning,
@@ -46,10 +46,12 @@ def test_account_response_and_user_me_response() -> None:
         id=account_id,
         name="Smith Family",
         currency=Currency.PLN,
+        language=Language.RU,
         owner_id=None,
         created_at=datetime.now(UTC),
     )
     assert account.currency == Currency.PLN
+    assert account.language == Language.RU
 
     me = UserMeResponse(
         id=uuid4(),
@@ -59,10 +61,12 @@ def test_account_response_and_user_me_response() -> None:
         account_id=account_id,
         created_at=datetime.now(UTC),
         currency=account.currency,
+        language=account.language,
         account_name=account.name,
         today=date(2026, 8, 4),
     )
     assert me.currency == Currency.PLN
+    assert me.language == Language.RU
     assert me.account_name == "Smith Family"
     assert me.today == date(2026, 8, 4)
 
@@ -75,6 +79,7 @@ def test_account_response_rejects_unsupported_currency() -> None:
             id=uuid4(),
             name="Smith Family",
             currency=cast(Currency, "XYZ"),
+            language=Language.EN,
             owner_id=None,
             created_at=datetime.now(UTC),
         )
@@ -298,6 +303,7 @@ def test_enums_have_expected_members() -> None:
     }
     assert set(Action) == {Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}
     assert len(set(Currency)) == 15
+    assert set(Language) == {Language.EN, Language.RU, Language.UK}
 
 
 def test_domain_errors_are_typed_and_distinct() -> None:

@@ -34,6 +34,15 @@ class PeriodUnit(StrEnum):
     CUSTOM = "custom"  # requires start_date AND end_date, forbids offset
 
 
+class Language(StrEnum):
+    """Account UI language (D701, D702). The catalogue key set is EN's;
+    every other catalogue is checked against it by a test, not by hand."""
+
+    EN = "en"
+    RU = "ru"
+    UK = "uk"
+
+
 class Currency(StrEnum):
     """ISO 4217 codes for the 15 currencies offered at account creation (D211)."""
 

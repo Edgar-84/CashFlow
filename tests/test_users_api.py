@@ -18,7 +18,7 @@ from test_user_service import FakeUserRepo
 from api import deps
 from config import get_settings
 from models.account import AccountResponse
-from models.enums import Currency, Role
+from models.enums import Currency, Language, Role
 from models.user import UserResponse
 
 
@@ -69,6 +69,7 @@ def account(account_id: UUID) -> AccountResponse:
         id=account_id,
         name="Test Account",
         currency=Currency.PLN,
+        language=Language.EN,
         owner_id=None,
         created_at=datetime.now(UTC),
     )

@@ -17,9 +17,9 @@ check defaults/validation. No DB, no network.
 | `test_expense_models_require_category_id` | `ExpenseCreate.category_id` is required (rejects a payload missing it); `ExpenseResponse` carries nested `tags`; `user_name` defaults `None` and round-trips when supplied; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6); `spent_at` round-trips on `Response` (U0.3, not yet on `Create`/`Update` — that's U0.2b) | [`models/expense.py`](../models/expense.py) |
 | `test_budget_plan_models` | Defaults (`period="monthly"`, `notify_threshold=70` — D507, was 80); a `Response` built with an explicit `notify_threshold=80` (a pre-D507 row) still reads 80; `notify_threshold` accepts 0/100 and rejects >100; `amount<=0` (zero and negative) rejected on both `Create` and `Update` (U1.6 added `Update`); `updated_at` required on `Response` | [`models/budget_plan.py`](../models/budget_plan.py) |
 | `test_permission_models` | `PermissionCreate.own_only` defaults `True`; `PermissionUpdate` fields optional | [`models/permission.py`](../models/permission.py) |
-| `test_account_response_and_user_me_response` | `AccountResponse` carries `currency`/`name`; `UserMeResponse` (D211, U0.2c) extends `UserResponse` with `currency` and `account_name` | [`models/account.py`](../models/account.py), [`models/user.py`](../models/user.py) |
+| `test_account_response_and_user_me_response` | `AccountResponse` carries `currency`/`language`/`name`; `UserMeResponse` (D211, U0.2c, D701/U3.1) extends `UserResponse` with `currency`, `language` and `account_name` | [`models/account.py`](../models/account.py), [`models/user.py`](../models/user.py) |
 | `test_account_response_rejects_unsupported_currency` | A currency outside the 15-code `Currency` enum fails Pydantic validation, not a raw DB error | [`models/account.py`](../models/account.py) |
-| `test_enums_have_expected_members` | `Role`/`Resource`/`Action` enum membership matches spec; `Currency` has exactly 15 codes (D211) | [`models/enums.py`](../models/enums.py) |
+| `test_enums_have_expected_members` | `Role`/`Resource`/`Action` enum membership matches spec; `Currency` has exactly 15 codes (D211); `Language` is exactly `{EN, RU, UK}` (D702, U3.1) | [`models/enums.py`](../models/enums.py) |
 | `test_domain_errors_are_typed_and_distinct` | `NotFoundError`/`PermissionDeniedError`/`LimitExceededWarning` are distinct `DomainError` subclasses | [`models/errors.py`](../models/errors.py) |
 
 ## Category palette ramp generator (`test_gen_palette.py`) → [`scripts/gen_palette.py`](../scripts/gen_palette.py)
@@ -71,6 +71,7 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 |---|---|
 | `test_get_returns_account_with_default_currency` | An account created without an explicit currency gets the schema default (`USD`) |
 | `test_get_returns_account_with_explicit_currency` | `currency` set at creation round-trips through `get()` |
+| `test_get_returns_account_with_default_language` | An account created without an explicit language gets the schema default (`en`, U3.1 AC) |
 | `test_get_missing_returns_none` | `get()` on a missing id returns `None` |
 
 ### `test_user_repo.py` → [`repositories/user_repo.py`](../repositories/user_repo.py)
@@ -601,6 +602,7 @@ No DB.
 | `test_update_currency_as_viewer_is_403` | Viewer → 403 |
 | `test_update_currency_unknown_code_is_422` | A code outside the `Currency` enum → 422 from Pydantic |
 | `test_update_currency_does_not_change_expense_amounts` | A seeded expense's `amount` is byte-for-byte unchanged after the PATCH — the direct D400 assertion, not just omission |
+| `test_update_language_is_not_yet_accepted` | `PATCH /accounts/me` with `{"language": ...}` leaves the stored/returned language unchanged (U3.1 AC "no route behaviour changes yet" — `AccountUpdate.language` exists on the contract but isn't wired into `AccountService.update`'s payload until U3.2) |
 | `test_no_path_variant_accepts_an_account_id` | `PATCH /accounts/{id}` → 404; there is no id-based route, only `/me` |
 | `test_update_currency_missing_credentials_is_401` | No auth headers → 401 |
 

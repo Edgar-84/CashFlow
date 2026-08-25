@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from models.enums import Currency, Role
+from models.enums import Currency, Language, Role
 
 
 class UserBase(BaseModel):
@@ -30,8 +30,8 @@ class UserResponse(UserBase):
 
 class UserMeResponse(UserResponse):
     """`GET /users/me` only — adds the caller's account currency (D211),
-    name (U0.2c) and today's date in `family_tz` (U3.3), all resolved
-    server-side.
+    language (D701, U3.1), name (U0.2c) and today's date in `family_tz`
+    (U3.3), all resolved server-side.
 
     Deliberately not merged into ``UserResponse``: every other ``users``
     route/consumer (admin CRUD, ``PermissionChecker``, existing tests) reads
@@ -40,6 +40,7 @@ class UserMeResponse(UserResponse):
     """
 
     currency: Currency
+    language: Language
     account_name: str
     # The Mini App's Add-expense date row must anchor on family_tz, never the
     # device clock (D120's bug class) — this is the only place that date

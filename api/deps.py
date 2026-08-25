@@ -293,7 +293,11 @@ async def get_current_user_with_currency(
     assert account is not None
     today = _family_today(get_settings().family_tz)
     return UserMeResponse(
-        **user.model_dump(), currency=account.currency, account_name=account.name, today=today
+        **user.model_dump(),
+        currency=account.currency,
+        language=account.language,
+        account_name=account.name,
+        today=today,
     )
 
 

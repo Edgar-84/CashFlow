@@ -28,9 +28,13 @@ class AccountService:
         # currency is a NOT NULL column with no "clear" semantics — an explicit
         # {"currency": null} is treated as omitted, same as UserService/
         # CategoryService.update do for their own NOT NULL columns.
+        # `language` exists on AccountUpdate (U3.1's contract) but PATCH
+        # /accounts/me does not accept it yet — that wiring, its admin gate
+        # and its tests are U3.2's job (plan mini-app-v7.md), so only
+        # `currency` is read out of the payload until then.
         payload = {
             key: (value.value if isinstance(value, Currency) else value)
-            for key, value in data.model_dump(exclude_unset=True).items()
+            for key, value in data.model_dump(exclude_unset=True, include={"currency"}).items()
             if value is not None
         }
         if not payload:
