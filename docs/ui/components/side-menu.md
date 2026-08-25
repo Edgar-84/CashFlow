@@ -4,8 +4,8 @@
 The app's navigation, as a panel that slides in from the left over screen 01 and
 covers it until dismissed. It replaces the six-tile bottom row that screen 01
 carried until V4 (2026-08-07, HUMAN: "6 buttons are always visible at the
-bottom… cluttering the UI"), and it is the only place the seven destinations are
-listed.
+bottom… cluttering the UI"), and it is the only place the seven ordinary
+destinations — eight for a system admin (V7) — are listed.
 
 **Used by `../screens/01-home.md` only.** Every other screen reaches Home
 through BackButton and has no menu button of its own — a drawer available from
@@ -19,6 +19,8 @@ everywhere would give this app two competing navigation models (see Resolved).
   horizontal lines) that opens a side menu sliding in from the left, overlaying
   the main screen, containing these same 6 items as a list", plus Settings as a
   seventh.
+- `docs/plans/mini-app-v7.md` item 2 and D710–D715 (V7) — the System Admin
+  role that gates the eighth row, `../screens/10-admin.md`.
 
 Measurements below are taken off `panel-open.jpg` at 588px wide for a 390pt
 viewport — a scale of ~1.51 image-px per CSS px. Every `[ref]` figure is
@@ -68,9 +70,11 @@ In render order:
 
    Both come from `GET /users/me`, which Home has already loaded — the menu
    never fetches. One 1px `--separator` rule under the band, and only there.
-4. **Rows** — seven, in this order: Add expense · Expenses · Budgets ·
-   Statistics · Categories · Tags · Settings. 48px tall, `0 16px` padding,
-   14px/500 `--ink`, left-aligned, **no rule between them** `[ref]`.
+4. **Rows** — seven for every ordinary caller, in this order: Add expense ·
+   Expenses · Budgets · Statistics · Categories · Tags · Settings. 48px tall,
+   `0 16px` padding, 14px/500 `--ink`, left-aligned, **no rule between them**
+   `[ref]`. **A caller whose role is `system_admin` sees an eighth row,
+   "Admin", after Settings** (V7, `../screens/10-admin.md`) — see Variants.
 5. **Footer** — pinned to the bottom of the panel, `16px` padding, 11.5px/400
    `--ink-secondary`: the last-synced line `[ref]`. Rendered only when the host
    has a cache timestamp to show; absent otherwise, never showing a placeholder.
@@ -83,12 +87,40 @@ added it as a distinct seventh item rather than a seventh peer. A gap, not a
 rule: the reference's list has no rules between rows and adding one only here
 would read as a heading boundary rather than a grouping.
 
+**Admin sits directly under Settings, in the same trailing group, with no
+further gap** (V7) — both rows are account/system-level rather than
+money-related, so they read as one group of two, not two separate groups of
+one. The 12px gap stays exactly where it already was, above Settings.
+
 ## Variants
 
 | Variant | When used | What differs |
 |---|---|---|
-| Default | a member or admin opens the menu | All seven rows enabled |
-| Read-only | `ForbiddenError` on Home's writes, i.e. a viewer | "Add expense" is **disabled, not hidden**, at 50% opacity — the same rule the bottom-nav tile followed. The other six stay enabled |
+| Default | a member or admin opens the menu | The seven ordinary rows enabled; no Admin row |
+| Read-only | `ForbiddenError` on Home's writes, i.e. a viewer | "Add expense" is **disabled, not hidden**, at 50% opacity — the same rule the bottom-nav tile followed. The other six stay enabled; no Admin row |
+| System admin (V7) | `role === "system_admin"` | An eighth row, "Admin", appears after Settings — see "Admin row visibility" below |
+
+### Admin row visibility (V7)
+The Admin row is **absent from the DOM**, not dimmed, for every role except
+`system_admin` — the one row in this panel that hides rather than disables,
+and deliberately so:
+
+- Every other conditional row in this app (Add expense for a viewer,
+  Currency's rows for a non-admin member) dims a capability the viewer's
+  *own account* could plausibly grant them later — a member can become that
+  account's admin through the account's own admin, and the dimmed row is
+  a correct preview of what that would unlock. System Admin is not reachable
+  that way: it is assigned only by direct database access from the product
+  operator (`docs/plans/mini-app-v7.md`'s Non-goals — no admin panel for
+  granting it), so no account admin, however senior, can ever unlock it for
+  a member. A dimmed row would misrepresent that as "ask your admin,"
+  which is false.
+- The row's mere presence also names a capability — a global, cross-account
+  superuser — that an ordinary family member has no legitimate reason to
+  learn exists. Hiding it keeps that fact undisclosed to the ~100% of
+  callers who will never hold the role, the same least-disclosure reasoning
+  `api/admin.py`'s own docstring states for why cross-account reads live in
+  one router (D711).
 
 ## States
 
@@ -100,6 +132,7 @@ would read as a heading boundary rather than a grouping.
 | Closing | scrim tap, row tap, BackButton, or Escape | Reverse, 160ms `ease-in`. A row's navigation starts **immediately**, not after the animation |
 | Pressed | tap on a row | Row background `--app-background` for the press duration |
 | Disabled row | read-only viewer, "Add expense" | 50% opacity, no haptic, no navigation |
+| Admin row absent (V7) | caller's role is not `system_admin` | The Admin row is not rendered at all — not present in the DOM, not `aria-hidden`, not disabled. See "Admin row visibility" above |
 | Loading | — | n/a. The menu renders from a static list and never fetches |
 | Error | — | n/a. Nothing here can fail |
 
@@ -119,6 +152,7 @@ would read as a heading boundary rather than a grouping.
 | `item.categories` | "Categories" | existing |
 | `item.tags` | "Tags" | existing |
 | `item.settings` | "Settings" | new |
+| `item.admin` | "Admin" | new (V7); rendered only for `system_admin`, see Variants |
 
 The six existing labels are carried over verbatim from `HOME_TILES` in
 `webapp/src/screens/home.ts`, so the change is where they live, not what they
@@ -157,7 +191,7 @@ Pure render function plus a thin mount, no fetching and no state — the
 ```ts
 type MenuItem =
   | "add-expense" | "expenses" | "budgets"
-  | "statistics" | "categories" | "tags" | "settings";
+  | "statistics" | "categories" | "tags" | "settings" | "admin";
 
 interface SideMenuProps {
   open: boolean;
@@ -165,6 +199,8 @@ interface SideMenuProps {
   currency: string | null;     // header line 2
   lastSyncedAt?: string;       // footer; omitted → no footer
   readOnly?: boolean;          // disables "Add expense" only
+  isSystemAdmin?: boolean;     // V7 — renders the "Admin" row when true; the row
+                                // does not exist in the DOM otherwise (see Variants)
   onSelect(item: MenuItem): void;   // host navigates AND closes
   onClose(): void;                  // scrim tap, BackButton, Escape
 }
@@ -184,8 +220,12 @@ navigating, so there is one place where "the menu is no longer open" is decided.
 ## Acceptance criteria
 - [ ] Tapping ☰ on screen 01 slides a panel in from the left edge over 200ms
       and dims the rest of the screen.
-- [ ] The panel lists exactly seven rows in the order Add expense, Expenses,
-      Budgets, Statistics, Categories, Tags, Settings.
+- [ ] The panel lists exactly seven rows, in the order Add expense, Expenses,
+      Budgets, Statistics, Categories, Tags, Settings, for every role except
+      `system_admin`.
+- [ ] For `system_admin` the panel lists an eighth row, "Admin", directly
+      after Settings with no rule and no extra gap between them; the row is
+      absent from the DOM (not merely dimmed) for every other role.
 - [ ] The panel is at most 320px wide and leaves the dimmed page visible beside
       it on a phone.
 - [ ] The header shows the account name over its currency code, on a band
@@ -207,6 +247,17 @@ navigating, so there is one place where "the menu is no longer open" is decided.
       category colour or `--accent`.
 
 ## Resolved
+- **The Admin row hides rather than dims, uniquely among this panel's
+  conditional rows** (2026-08-25, U0.5). Every other gate in this app
+  (Add expense for a viewer, the currency rows for a non-admin member) dims a
+  capability the viewer's own account admin could grant them; System Admin is
+  assigned only outside the product (direct DB access), so no in-app path
+  ever unlocks it for a dimmed row to correctly preview. Hiding also avoids
+  disclosing to ordinary members that a cross-account superuser role exists
+  at all. See "Admin row visibility" above.
+- **Admin sits directly under Settings with no new gap**, joining it as one
+  trailing group of account/system-level rows rather than opening a third
+  visual group (2026-08-25, U0.5).
 - **The drawer stays at seven rows for V7's language picker** (2026-08-25,
   D706). The brief said "a language picker in the menu", which this file's
   own `item.settings` row already satisfies one level down: the picker is

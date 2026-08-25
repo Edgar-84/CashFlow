@@ -261,7 +261,7 @@ implementation unit may start before *its own* spec exists.
       three languages with their endonyms; states the reload/re-render
       behaviour after a change; states that non-admins see it read-only, the
       same rule the currency list follows.
-- [ ] **U0.5** `docs/ui/screens/10-admin.md` — **new** — plus the
+- [x] **U0.5** `docs/ui/screens/10-admin.md` — **new** — plus the
       `components/side-menu.md` delta adding the eighth row. *(Gates all of
       M4. Note it touches `side-menu.md` too, like U0.4 — if both are done in
       one session, that file takes two passes, not one merged edit.)*
@@ -636,14 +636,57 @@ touching auth or scoping goes through the reviewer subagent.
   selector's `describe` stay in the browser's default locale regardless of
   the account's language, extending the "only chrome is translated" rule
   Non-goals already states for stored data.
-- **Next:** `/clear`, then **U0.5** — `ui-spec` writes
-  `docs/ui/screens/10-admin.md` plus the `side-menu.md` delta adding the
-  eighth row (Admin, after Settings), gating all of M4. If picked up in the
-  same session as a re-read of U0.4's work, note `side-menu.md` already
-  carries U0.4's Resolved-section edit — U0.5's edit is a second pass on that
-  file, not a merge of the two (the plan's own Ordering note called this out
-  in advance). M0 is entirely `ui-spec` work; no unit in M1–M4 may start
-  before the spec it decomposes exists.
+- **U0.5 is done**: `docs/ui/screens/10-admin.md` is written — a single file
+  covering both required surfaces, per its own AC: a **List mode** (stacked
+  "Accounts"/"Users" `--card` lists, reusing `08-settings.md`'s row rhythm)
+  and a **Create-account mode** (an in-screen Save/Cancel form reached via
+  MainButton, reusing `04b-budget-form.md`'s reasoning for hiding MainButton
+  once a Cancel affordance exists). Block/unblock on either list reuses
+  `06c-category-delete.md`'s Telegram-`showConfirm`-then-optimistic-patch
+  shape — every block or unblock is confirmed and named before it fires, and
+  a failed `PATCH` reverts the row rather than reloading the list. `side-
+  menu.md` got its second pass of the session (as the plan's Ordering note
+  anticipated): Anatomy/Variants/Copy/Inputs/Acceptance-criteria all now
+  state the eighth "Admin" row, gated on `role === "system_admin"`, sitting
+  directly under Settings with no new gap. A new "Admin row visibility"
+  section documents **why** this is the one row in the app that hides rather
+  than dims: every other conditional row (Add expense for a viewer, Currency
+  for a non-admin) dims a capability the viewer's *own* account admin could
+  eventually grant them; System Admin is assigned only by direct DB access
+  (no in-app path ever unlocks it), so dimming would falsely imply an
+  in-account path to it, and the row's mere presence would disclose a
+  cross-account superuser role to people who have no reason to know it
+  exists. One load-bearing modelling decision, not asked for explicitly but
+  required to satisfy D714's "one flag, one place" split: because blocking
+  an account never writes `users.is_blocked`, a user row shows "Suspended"
+  when *either* its own flag is set *or* its `account_name` matches a
+  currently-blocked row already loaded in the Accounts list above — computed
+  client-side from the two lists this screen already holds, no extra fetch.
+  A user whose account is blocked also gets its own Block/Unblock trigger
+  disabled (`disabled.accountBlocked`), since toggling it would change
+  nothing the user actually experiences. The screen also disables the
+  caller's own account/user Block trigger client-side, ahead of U4.5's
+  server-side 422 for the same case. No `docs/ui/design-system.md` edit was
+  needed — every token, spacing value and typography role this file uses
+  already existed, per the plan's own Constraint to reuse the existing
+  list-row rhythm rather than invent a third one. Left open, not decided
+  here: Currency/Language in the create form use a plain `<select>` rather
+  than this app's usual full-screen-radiogroup/sheet picker pattern
+  (flagged `[?]`, a deliberate scope-saving call for a screen only one
+  persona ever opens); list ordering for both Accounts and Users
+  (`[inferred]`); and — most notably — **which screen actually renders the
+  "this account has been suspended" copy a blocked caller sees**. That copy
+  is defined in `10-admin.md` (block semantics live there), but rendering it
+  is cross-cutting (most likely Home, extending its existing 403 state) and
+  is explicitly left for whichever M4 unit wires the 403 detail through, or
+  a decision of its own.
+- **Next:** `/clear`, then **M1** — U1.1 (Categories screen stops rendering
+  the per-row caption). M0 is now complete: all five spec files
+  (`06-categories.md`/`07-tags.md` revised, `02-add-expense.md` revised,
+  `05-statistics.md` new, `09-language.md` new, `10-admin.md` new) and their
+  `side-menu.md`/`08-settings.md`/`design-system.md`/`period-selector.md`
+  deltas exist. No unit in M1–M4 may start before the spec it decomposes —
+  that gate is now satisfied for all four remaining milestones.
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
