@@ -5,11 +5,11 @@ Names the period a screen is showing, and moves it. Two stacked rows: five tabs
 choosing the **unit**, and a `‹ label ›` row moving the **offset** within that
 unit.
 
-**Used by `../screens/01-home.md` only.** Screen 05 (Statistics) is deliberately
-untouched by this work (2026-08-04, HUMAN) — it keeps its existing
-`months_back` filters, and the period story lives on Home. Whether Statistics
-later adopts this component is a separate decision; nothing here is designed
-around it.
+**Used by `../screens/01-home.md` and `../screens/05-statistics.md` (V7,
+D704).** Screen 05 kept its own `months_back` presets through V6 (2026-08-04,
+HUMAN); V7's brief asked for the shared selector there too, and screen 05's
+spec documents the delta. Nothing in this file is Home-specific — Statistics
+is a plain second consumer, unchanged.
 
 It is the only place in the app that expresses "which period", and it never
 computes one — it emits `{unit, offset}` or `{unit: "custom", start, end}` and
@@ -230,9 +230,11 @@ by the absence of any such export.
   (screen 02 writes `spent_at`). No "you have no data before X" wall, no
   disabled `‹` at any depth. The only clamp in the app is at the **present**
   end: `offset > 0` is unreachable in the UI and 422 at the API.
-- **Statistics (screen 05) is out of scope** (2026-08-04, HUMAN) and keeps its
-  existing filters. The "All time" option the reference has is therefore not
-  needed anywhere, and this component has five tabs, not six.
+- ~~**Statistics (screen 05) is out of scope**~~ (2026-08-04, HUMAN) —
+  **superseded 2026-08-25 (V7, D704)**: screen 05 adopts this component
+  too, see `../screens/05-statistics.md`. The "All time" option the reference
+  has was never adopted by either screen, and this component still has five
+  tabs, not six.
 
 ## Open questions
 None. The label formats above are the contract; `describe` is unit-tested
