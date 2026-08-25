@@ -56,4 +56,12 @@ describe("catalogues", () => {
       expect(value).not.toMatch(/[<>]/);
     }
   });
+
+  // D318: MainButton's label and the yellow Add button's accessible name fire
+  // the same handler and must never say different things, in any language —
+  // enforced here rather than by sharing one constant in home.ts, since the
+  // Copy table (rightly) gives them two separate keys.
+  it.each(langs)("%s: mb.add and add.aria never drift apart (D318)", (lang) => {
+    expect(catalogues[lang]["mb.add"]).toBe(catalogues[lang]["add.aria"]);
+  });
 });

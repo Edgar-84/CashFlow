@@ -19,6 +19,37 @@ const en = {
   readonly: "You have read-only access to this account.",
   "error.retry": "Try again",
   "offline.banner": "Offline — showing data from {time}",
+  // U3.5 (home.ts + side-menu.ts). `mb.add`/`add.aria` carry the identical
+  // string on purpose (D318: MainButton label and the yellow Add button's
+  // accessible name fire the same handler and must never say different
+  // things) — enforced across all three languages by
+  // tests/i18n.test.ts, not by sharing one constant.
+  "mb.add": "Add expense",
+  "add.aria": "Add expense",
+  "menu.aria": "Menu",
+  "menu.title": "Menu",
+  "empty.day": "There were no expenses on this day.",
+  "empty.week": "There were no expenses in this week.",
+  "empty.month": "There were no expenses in this month.",
+  "empty.year": "There were no expenses in this year.",
+  "empty.custom": "There were no expenses in this period.",
+  "item.addExpense": "Add expense",
+  "item.expenses": "Expenses",
+  "item.budgets": "Budgets",
+  "item.statistics": "Statistics",
+  "item.categories": "Categories",
+  "item.tags": "Tags",
+  "item.settings": "Settings",
+  "footer.synced": "Synced {date} {time}",
+  // Composed with a raw, non-escaping substitution (home.ts's own
+  // `fillTemplate`), never `t()`'s vars — `budgetAlertMessage` is reused
+  // verbatim by `main.ts`'s Telegram toast (D609), which must never see HTML
+  // entities.
+  "alert.over": "{category} is over budget by {amount} {currency}",
+  "alert.warn": "{category} is at {pct}% — {spent} of {limit} {currency}",
+  "chart.other": "Other",
+  "category.unknown": "Unknown",
+  "error.fallback": "Something went wrong.",
 } as const;
 
 export type Catalogue = Record<keyof typeof en, string>;
@@ -27,12 +58,56 @@ const ru: Catalogue = {
   readonly: "У вас доступ только для чтения к этому аккаунту.",
   "error.retry": "Повторить",
   "offline.banner": "Офлайн — данные по состоянию на {time}",
+  "mb.add": "Добавить расход",
+  "add.aria": "Добавить расход",
+  "menu.aria": "Меню",
+  "menu.title": "Меню",
+  "empty.day": "В этот день расходов не было.",
+  "empty.week": "На этой неделе расходов не было.",
+  "empty.month": "В этом месяце расходов не было.",
+  "empty.year": "В этом году расходов не было.",
+  "empty.custom": "За этот период расходов не было.",
+  "item.addExpense": "Добавить расход",
+  "item.expenses": "Расходы",
+  "item.budgets": "Бюджеты",
+  "item.statistics": "Статистика",
+  "item.categories": "Категории",
+  "item.tags": "Теги",
+  "item.settings": "Настройки",
+  "footer.synced": "Синхронизировано {date} {time}",
+  "alert.over": "{category}: превышен бюджет на {amount} {currency}",
+  "alert.warn": "{category}: использовано {pct}% — {spent} из {limit} {currency}",
+  "chart.other": "Другое",
+  "category.unknown": "Неизвестно",
+  "error.fallback": "Что-то пошло не так.",
 };
 
 const uk: Catalogue = {
   readonly: "У вас є доступ лише для перегляду цього акаунта.",
   "error.retry": "Повторити",
   "offline.banner": "Офлайн — дані станом на {time}",
+  "mb.add": "Додати витрату",
+  "add.aria": "Додати витрату",
+  "menu.aria": "Меню",
+  "menu.title": "Меню",
+  "empty.day": "Цього дня витрат не було.",
+  "empty.week": "Цього тижня витрат не було.",
+  "empty.month": "Цього місяця витрат не було.",
+  "empty.year": "Цього року витрат не було.",
+  "empty.custom": "За цей період витрат не було.",
+  "item.addExpense": "Додати витрату",
+  "item.expenses": "Витрати",
+  "item.budgets": "Бюджети",
+  "item.statistics": "Статистика",
+  "item.categories": "Категорії",
+  "item.tags": "Теги",
+  "item.settings": "Налаштування",
+  "footer.synced": "Синхронізовано {date} {time}",
+  "alert.over": "{category}: перевищено бюджет на {amount} {currency}",
+  "alert.warn": "{category}: використано {pct}% — {spent} з {limit} {currency}",
+  "chart.other": "Інше",
+  "category.unknown": "Невідомо",
+  "error.fallback": "Щось пішло не так.",
 };
 
 // Exported (not just module-private) so `tests/i18n.test.ts` can assert the

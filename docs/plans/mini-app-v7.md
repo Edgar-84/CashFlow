@@ -337,7 +337,7 @@ implementation unit may start before *its own* spec exists.
 - [x] **U3.4** RU + UK catalogues for the keys that exist so far.
       **AC:** a test asserts all three catalogues have **identical key sets**
       and fails on a missing or extra key; no catalogue contains markup.
-- [ ] **U3.5** Extract `home.ts` + `components/side-menu.ts`.
+- [x] **U3.5** Extract `home.ts` + `components/side-menu.ts`.
 - [ ] **U3.6** Extract `add-expense.ts` (the largest single file, ~33 strings).
 - [ ] **U3.7** Extract `expenses.ts` + `expense-detail.ts`.
 - [ ] **U3.8** Extract `budgets.ts` + `budget-form.ts`.
@@ -1006,8 +1006,51 @@ touching auth or scoping goes through the reviewer subagent.
   two tests asserting the real RU and UK strings render instead of the EN
   ones. Translations are plain declarative sentences with no markup and no
   interpolation-syntax changes — `{time}` stays the placeholder token in both.
-- **Next:** `/clear`, then **U3.5** (extract `home.ts` +
-  `components/side-menu.ts` into the catalogue).
+- **U3.5 is done**: every user-visible literal in `home.ts` and
+  `components/side-menu.ts` now goes through `t()`, called at each render
+  site (never cached in a module constant) so a future language change
+  re-renders without a reload. New catalogue keys, matching
+  `01-home.md`/`side-menu.md`'s own Copy tables: `mb.add`/`add.aria`,
+  `menu.aria`/`menu.title`, `empty.day`–`empty.custom`, `item.addExpense`–
+  `item.settings`, `footer.synced`, `alert.over`, `alert.warn`. Three more
+  literals had no Copy-table row yet — `chart.other` ("Other", the donut/bar's
+  folded-tail label), `category.unknown` ("Unknown", the ranked-row/alert
+  fallback for a missing category — defensive only, not reachable in normal
+  use) and `error.fallback` ("Something went wrong.", `loadHome`'s fallback
+  for a non-`Error` rejection, distinct from the still-unused `error.load`) —
+  added to `01-home.md`'s Copy table in this same change, each noted as an
+  existing string now catalogued. `budgetAlertMessage` keeps its "raw,
+  unescaped" contract (`main.ts`'s toast reuses it verbatim, D609): it fetches
+  `alert.over`/`alert.warn`'s template via `t(key)` with no vars and fills
+  `{placeholders}` with a new local `fillTemplate` helper that does **not**
+  escape — `t()`'s own vars mechanism HTML-escapes string vars, which would
+  have leaked entities into the Telegram toast and, on the DOM side, been
+  escaped a second time by `renderBudgetAlertLine`'s existing
+  `escapeHtml(budgetAlertMessage(...))` wrap. Caught by writing the
+  R&D-category test first, not by review. One incidental fix inside
+  `buildHomeData`, required by the extraction itself: its `.filter`/`.map`
+  callbacks used `t` as the `CategoryTotal` parameter name, shadowing the
+  newly-imported `t()` — renamed to `ct`.
+  Tests: `home.test.ts`'s and `main.boot.test.ts`'s `vi.mock("../src/lib/i18n", ...)`
+  both changed from replacing the whole module (`{ setLanguage: vi.fn() }`,
+  which left no `t` export and broke every render call) to
+  `importOriginal` plus overriding only `setLanguage` — so this suite's
+  existing exact-EN-string assertions run through the real catalogue and
+  double as the AC's byte-identical-output regression test, with no new
+  fixture duplication. New coverage beyond that: `i18n.test.ts` asserts
+  `mb.add`/`add.aria` never drift apart in any language (D318); `home.test.ts`
+  covers the `category.unknown` fallback, the `error.fallback` non-Error
+  branch, and the R&D raw-vs-escaped-once budget-alert case; `side-menu.test.ts`
+  gained a `setLanguage("ru")` pass asserting translated row labels, the RU
+  dialog `aria-label`, and the `footer.synced` template. **Reviewer round 1:
+  APPROVE**, two NITs left as-is (both noted, not fixed): `home.test.ts`'s
+  `setLanguage` mock has no `afterEach` reset (harmless — it's a fully mocked
+  no-op spy there, unlike `side-menu.test.ts`'s real `setLanguage` calls,
+  which do reset); and `side-menu.md`'s `item.admin` Copy-table row (V7,
+  `system_admin`-gated) is correctly not yet wired into `ROWS` or the
+  catalogue — flagged only so a later unit doesn't assume it already is.
+- **Next:** `/clear`, then **U3.6** (extract `add-expense.ts`, the largest
+  single file, ~33 strings).
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the

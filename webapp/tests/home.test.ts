@@ -25,7 +25,14 @@ import type { PeriodValue } from "../src/lib/period";
 import { formatAmount } from "../src/lib/money";
 import type { TelegramWebApp } from "../src/lib/telegram";
 
-vi.mock("../src/lib/i18n", () => ({ setLanguage: vi.fn() }));
+// Only `setLanguage` is mocked (as a spy `loadHome`'s reconciliation test
+// asserts on) — `t`/`catalogues` stay real so this suite's exact-EN-string
+// assertions double as the byte-identical-output regression test for U3.5's
+// extraction.
+vi.mock("../src/lib/i18n", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/i18n")>();
+  return { ...actual, setLanguage: vi.fn() };
+});
 
 const THIS_MONTH: PeriodValue = { unit: "month", offset: 0 };
 const NOW = new Date(2026, 7, 4); // August 4, 2026 (local) — matches PERIOD_TOTAL/describe's own fixtures
@@ -379,6 +386,23 @@ describe("buildHomeData", () => {
     expect(data.segments.map((s) => s.categoryId)).not.toContain("cat-unused");
   });
 
+  it("(U3.5) falls back to the catalogue's 'Unknown' label for a ranked row or alert with no matching category", () => {
+    const data = buildHomeData({
+      categories: [], // no category matches "cat-ghost" below (defensive path, not normally reachable)
+      categoryTotals: [{ category_id: "cat-ghost", total: 500 }],
+      periodTotal: { ...PERIOD_TOTAL, total: 500 },
+      currency: "EUR",
+      budgetProgress: [
+        progress({ budget_plan_id: "plan-ghost", category_id: "cat-ghost", amount: 100, spent: 500, remaining: -400 }),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    expect(data.rows[0].label).toBe("Unknown");
+    expect(data.budgetAlerts[0].label).toBe("Unknown");
+  });
+
   it("folds more than six categories into a trailing Other donut slot, but the ranked rows don't fold", () => {
     const categories = Array.from({ length: 8 }, (_, i) =>
       category(`cat-${i}`, `Cat ${i}`, `2026-01-0${i + 1}T00:00:00Z`),
@@ -538,6 +562,15 @@ describe("loadHome", () => {
     if (state.status === "error") {
       expect(state.period).toEqual({ unit: "day", offset: -3 });
     }
+  });
+
+  it("(U3.5) falls back to the catalogue's generic error message when the rejection isn't an Error instance", async () => {
+    const state = await loadHome(
+      fakeApi({ statisticsByCategory: vi.fn().mockRejectedValue("boom") }),
+      createMemoryCache(),
+      THIS_MONTH,
+    );
+    expect(state).toEqual({ status: "error", message: "Something went wrong.", period: THIS_MONTH });
   });
 
   it("falls back to the last cached snapshot with a synced marker when offline, frozen at the cached period", async () => {
@@ -813,6 +846,35 @@ describe("budgetAlertMessage", () => {
     expect(message).toBe("Café is at 82% — 410.00 of 500.00 PLN");
     const html = renderHome({ status: "ready", ...data }, NOW);
     expect(html).toContain(message);
+  });
+
+  it("(U3.5) composes the sentence from the catalogue with no escaping — main.ts's toast needs plain text, not HTML entities — and the DOM strip escapes it exactly once", () => {
+    const data = buildHomeData({
+      categories: [category("cat-rd", "R&D", "2026-01-01T00:00:00Z")],
+      categoryTotals: [{ category_id: "cat-rd", total: 20000 }],
+      periodTotal: { ...PERIOD_TOTAL, total: 20000 },
+      currency: "EUR",
+      budgetProgress: [
+        progress({
+          budget_plan_id: "plan-rd",
+          category_id: "cat-rd",
+          amount: 10000,
+          spent: 20000,
+          remaining: -10000,
+          fill_pct: 200,
+        }),
+      ],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    const [alert] = data.budgetAlerts;
+    const message = budgetAlertMessage(alert, "EUR");
+
+    expect(message).toBe("R&D is over budget by 100.00 EUR");
+    const html = renderHome({ status: "ready", ...data }, NOW);
+    expect(html).toContain("R&amp;D is over budget by 100.00 EUR");
+    expect(html).not.toContain("&amp;amp;");
   });
 });
 

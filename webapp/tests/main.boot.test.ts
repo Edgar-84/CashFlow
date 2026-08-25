@@ -13,7 +13,13 @@
 // covering the opposite path: the `typeof document === "undefined"` guard.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/lib/i18n", () => ({ setLanguage: vi.fn() }));
+// Only `setLanguage` is mocked (as a spy this file's own test asserts on) —
+// `t`/`catalogues` stay real since `main.ts`'s real `showHome`/`applyHomeChrome`
+// path (not mocked here) calls `t()` for the MainButton label (U3.5).
+vi.mock("../src/lib/i18n", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/i18n")>();
+  return { ...actual, setLanguage: vi.fn() };
+});
 
 const { loadMock } = vi.hoisted(() => ({ loadMock: vi.fn() }));
 vi.mock("../src/screens/home", async (importOriginal) => {

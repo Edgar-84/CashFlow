@@ -398,6 +398,9 @@ clock.
 | `mb.add` | "Add expense" | MainButton label; existing string, unchanged |
 | `add.aria` | "Add expense" | the yellow button's accessible name — the `+` glyph alone is not one |
 | `menu.aria` | "Menu" | **(V4)** the ☰ button's accessible name; see `../components/side-menu.md` for the panel's own strings |
+| `chart.other` | "Other" | **(U3.5)** existing string, now catalogued — the donut/collapsed-bar's folded-tail label (design-system.md's "fold the tail into 'Other'") |
+| `category.unknown` | "Unknown" | **(U3.5)** existing string, now catalogued — the ranked-row/budget-alert label when a category id has no matching category; not reachable in normal use (every referenced category exists), defensive only |
+| `error.fallback` | "Something went wrong." | **(U3.5)** existing string, now catalogued — `loadHome`'s fallback when a rejection isn't an `Error` instance; distinct from `error.load` above, which this screen's code doesn't use yet |
 
 ### Empty copy: deictic, not period-named (V4, changed)
 V3's rule was that the empty state **names** the period ("Nothing in August").

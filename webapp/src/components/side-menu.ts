@@ -9,6 +9,7 @@
  */
 
 import { haptics } from "../lib/telegram";
+import { t, type Catalogue } from "../lib/i18n";
 
 export type MenuItem =
   | "add-expense"
@@ -31,19 +32,21 @@ export interface SideMenuProps {
 
 interface RowDef {
   id: MenuItem;
-  label: string;
+  labelKey: keyof Catalogue;
   gap?: boolean; // Settings' 12px gap above it (component doc's Anatomy)
 }
 
-// Order and wording per docs/ui/components/side-menu.md's Copy table.
+// Order and catalogue keys per docs/ui/components/side-menu.md's Copy table.
+// Looked up via `t()` at render time (never baked into this module-level
+// list), so a language change re-renders in the new language.
 const ROWS: readonly RowDef[] = [
-  { id: "add-expense", label: "Add expense" },
-  { id: "expenses", label: "Expenses" },
-  { id: "budgets", label: "Budgets" },
-  { id: "statistics", label: "Statistics" },
-  { id: "categories", label: "Categories" },
-  { id: "tags", label: "Tags" },
-  { id: "settings", label: "Settings", gap: true },
+  { id: "add-expense", labelKey: "item.addExpense" },
+  { id: "expenses", labelKey: "item.expenses" },
+  { id: "budgets", labelKey: "item.budgets" },
+  { id: "statistics", labelKey: "item.statistics" },
+  { id: "categories", labelKey: "item.categories" },
+  { id: "tags", labelKey: "item.tags" },
+  { id: "settings", labelKey: "item.settings", gap: true },
 ];
 
 function escapeHtml(value: string): string {
@@ -61,7 +64,7 @@ function formatSyncedAt(iso: string): string {
   const d = new Date(iso);
   const date = `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
   const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return `Synced ${date} ${time}`;
+  return t("footer.synced", { date, time });
 }
 
 function renderHeader(accountName: string | null, currency: string | null): string {
@@ -74,7 +77,7 @@ function renderHeader(accountName: string | null, currency: string | null): stri
 function renderRow(row: RowDef, readOnly: boolean): string {
   const disabled = readOnly && row.id === "add-expense";
   const cls = `side-menu-row${row.gap ? " side-menu-row-settings" : ""}`;
-  return `<button type="button" class="${cls}" data-item="${row.id}" data-testid="side-menu-row-${row.id}"${disabled ? " disabled" : ""}>${escapeHtml(row.label)}</button>`;
+  return `<button type="button" class="${cls}" data-item="${row.id}" data-testid="side-menu-row-${row.id}"${disabled ? " disabled" : ""}>${escapeHtml(t(row.labelKey))}</button>`;
 }
 
 function renderFooter(lastSyncedAt: string | undefined): string {
@@ -94,7 +97,7 @@ export function renderSideMenu(props: SideMenuProps): string {
   const rows = ROWS.map((row) => renderRow(row, readOnly)).join("");
   return `<div class="side-menu-root" data-testid="side-menu-root">
     <div class="side-menu-scrim" aria-hidden="true" data-testid="side-menu-scrim"></div>
-    <div class="side-menu-panel" role="dialog" aria-modal="true" aria-label="Menu" data-testid="side-menu-panel">
+    <div class="side-menu-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("menu.title"))}" data-testid="side-menu-panel">
       ${renderHeader(props.accountName, props.currency)}
       <nav class="side-menu-rows" data-testid="side-menu-rows">${rows}</nav>
       ${renderFooter(props.lastSyncedAt)}
