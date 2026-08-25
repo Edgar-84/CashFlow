@@ -306,7 +306,7 @@ implementation unit may start before *its own* spec exists.
       shows the chosen range; the selection survives a drill-down and return.
 
 ### M3 — Language (item 1)
-- [ ] **U3.1** Contracts + migration: `Language` enum, `accounts.language`,
+- [x] **U3.1** Contracts + migration: `Language` enum, `accounts.language`,
       the three model changes above, `docs/SCHEMA.sql`. **Ask the human before
       writing the migration file.**
       **AC:** `alembic upgrade head` then `downgrade -1` runs clean on a
@@ -820,10 +820,53 @@ touching auth or scoping goes through the reviewer subagent.
   `home.test.ts`'s. `openPicker` itself is not unit-tested — same accepted
   DOM-glue gap `mount` already has, and the same gap `home.ts::openPicker`
   has. M2 is complete.
-- **Next:** `/clear`, then **U3.1** (Contracts + migration: `Language` enum,
-  `accounts.language`, the three model changes in the plan's Contracts
-  section, `docs/SCHEMA.sql`). **Ask the human before writing the migration
-  file** — `migrations/versions/` is under the do-not-edit-without-asking rule.
+- **U3.1 is done**: `models/enums.py` gained the `Language` StrEnum
+  (EN/RU/UK, D701/D702) — `Role.SYSTEM_ADMIN` is M4.1's job and was not
+  touched. `AccountResponse.language`/`AccountUpdate.language` and
+  `UserMeResponse.language` were added exactly per the Contracts section (the
+  M4.1 `is_blocked` fields in the same contract block were left out — not
+  this unit's job). New migration
+  `2026_08_25_1906-be7167499d7d_add_accounts_language.py` mirrors the
+  `accounts.currency` migration precedent exactly:
+  `ALTER TABLE accounts ADD COLUMN language TEXT NOT NULL DEFAULT 'en'` /
+  `DROP COLUMN language` on downgrade; `docs/SCHEMA.sql`'s `accounts` table
+  gained the matching column. One mechanical wiring change beyond the
+  contract text itself was required, not a design decision: `UserMeResponse.language`
+  is a required field, so `api/deps.py::get_current_user_with_currency` now
+  also passes `language=account.language` — otherwise every `GET /users/me`
+  call would 500 on a missing field. **Caught by the reviewer subagent and
+  fixed in this unit, not deferred**: adding `language` to `AccountUpdate`
+  alone would have silently wired `PATCH /accounts/me` to accept and persist
+  it too, because `services/account_service.py::AccountService.update` built
+  its repository payload generically from every set field on `AccountUpdate`
+  with no allow-list — it was never scoped to `currency` by name. That is a
+  real AC violation ("no route behaviour changes yet"), not a hypothetical
+  one: the reviewer verified it persists language end-to-end against a real
+  Postgres. Fixed by adding `include={"currency"}` to that `model_dump` call,
+  with a comment pointing at U3.2 as the unit that lifts the restriction, and
+  a new regression test (`tests/test_accounts_api.py::test_update_language_is_not_yet_accepted`)
+  asserting a `PATCH /accounts/me` with `{"language": "ru"}` leaves the
+  stored language untouched. Existing
+  fixtures that construct `AccountResponse`/`UserMeResponse` directly
+  (`tests/test_models.py`, `tests/test_accounts_api.py`,
+  `tests/test_users_api.py`) were updated to supply `language` since it has
+  no default on the Pydantic model (only the DB column defaults). New
+  coverage: `tests/test_account_repo.py::test_get_returns_account_with_default_language`
+  (an account inserted with no explicit `language` reads back `Language.EN`,
+  the AC's "every existing account reads back en", run against
+  `scripts/integration_docker.sh`'s schema-applied throwaway DB — the
+  generic alembic `upgrade head` → `downgrade base` round-trip for this
+  migration is covered by CI, same pattern `test_schema_backfill.py`'s
+  docstring already documents for U0.3's migration, since local `alembic
+  upgrade` can't run on this dev machine, D18). A second reviewer pass on the
+  fixed diff came back APPROVE with one NIT, fixed in the same unit:
+  `test_enums_have_expected_members` gained `assert set(Language) ==
+  {Language.EN, Language.RU, Language.UK}`, alongside the existing
+  `Role`/`Resource`/`Action`/`Currency` membership checks.
+- **Next:** `/clear`, then **U3.2** (Backend: `GET /users/me` returns
+  `language`; `PATCH /accounts/me` accepts it — see that unit's AC for the
+  admin-only gate, 422-on-unknown-code and currency/language independence
+  requirements).
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
