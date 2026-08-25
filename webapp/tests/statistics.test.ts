@@ -7,6 +7,7 @@ import {
   buildStatisticsData,
   createMemoryCache,
   loadStatistics,
+  pickerValueForPeriod,
   renderStatistics,
   type StatisticsApi,
 } from "../src/screens/statistics";
@@ -458,5 +459,19 @@ describe("applyStatisticsChrome", () => {
     applyStatisticsChrome(onBack);
     expect(webApp.BackButton.onClick).toHaveBeenCalled();
     expect(webApp.MainButton.hide).toHaveBeenCalled();
+  });
+});
+
+describe("pickerValueForPeriod", () => {
+  it("seeds the picker with the previously applied custom range", () => {
+    expect(pickerValueForPeriod({ unit: "custom", offset: 0, start: "2026-07-09", end: "2026-07-17" })).toEqual({
+      start: "2026-07-09",
+      end: "2026-07-17",
+    });
+  });
+
+  it("opens empty for any non-custom period, even one with a leftover offset", () => {
+    expect(pickerValueForPeriod(MONTH_PERIOD)).toEqual({});
+    expect(pickerValueForPeriod({ unit: "day", offset: -3 })).toEqual({});
   });
 });

@@ -299,7 +299,7 @@ implementation unit may start before *its own* spec exists.
       Period; a unit tap resets offset to 0; the offset arrows clamp at 0
       (no future period); the grouping toggle still re-renders **without**
       refetching; the donut and bars both follow the selected period.
-- [ ] **U2.3** The "Period" tab opens `date-range-picker` and a custom range
+- [x] **U2.3** The "Period" tab opens `date-range-picker` and a custom range
       drives the screen.
       **AC:** picking a range sends `period=custom` with both dates and no
       `offset`; cancelling leaves the previous selection intact; the label row
@@ -796,11 +796,34 @@ touching auth or scoping goes through the reviewer subagent.
   `aria-disabled` at offset 0 across every live state; the control is **not**
   disabled while offline (the explicit divergence from Home); and region 2 has
   no `.chart-card` wrapper.
-- **Next:** `/clear`, then **U2.3** (the "Period" tab opens `date-range-picker`
-  and a custom range drives the screen, per `05-statistics.md`'s Interactions
-  table — `onOpenPicker` is currently a no-op stub in `statistics.ts::mount`,
-  see above). `home.ts`'s `openPicker`/`pickerValueForPeriod` are the pattern
-  to mirror; `date-range-picker.ts` itself is shipped and reused unchanged.
+- **U2.3 is done**: `webapp/src/screens/statistics.ts` wires `onOpenPicker` —
+  previously a no-op stub — to a new private `openPicker` plus an exported
+  `pickerValueForPeriod`, both direct mirrors of `home.ts`'s own functions of
+  the same name (same DOM-as-plain-child-of-`root` shape, same
+  reopen-seeds-the-previous-range behaviour). The one deliberate divergence
+  from `home.ts::openPicker`: Statistics' BackButton is **not** normally
+  `null` the way Home's root-screen BackButton is — it navigates back to
+  Home (`applyStatisticsChrome`) — so this screen's `openPicker` takes an
+  explicit `onBack` param and restores *that* handler on close, instead of
+  restoring to `null`. `StatisticsHandlers` gained `onApplyCustomRange`
+  (same shape as `HomeHandlers`'), wired in `main.ts::showStatistics` by
+  recursing into a fresh `showStatistics({ unit: "custom", offset: 0, start,
+  end }, grouping)` call — the same recursive shape U2.2 already used for
+  `onUnitChange`/`onOffsetChange`, not module-level state like `homePeriod`.
+  No change was needed in `components/period-selector.ts` — `onOpenPicker` was
+  already wired to both the "Period" tab tap and the label tap (U2.2's
+  `renderPeriodControl` already passed a `noop` placeholder there, per that
+  component's own contract). `period=custom` with both dates and no `offset`
+  was already covered by U2.1's `PERIOD_CASES`/`toQuery` test (custom strips
+  `offset`), so this unit only added `webapp/tests/statistics.test.ts`'s
+  `pickerValueForPeriod` describe block, a direct mirror of
+  `home.test.ts`'s. `openPicker` itself is not unit-tested — same accepted
+  DOM-glue gap `mount` already has, and the same gap `home.ts::openPicker`
+  has. M2 is complete.
+- **Next:** `/clear`, then **U3.1** (Contracts + migration: `Language` enum,
+  `accounts.language`, the three model changes in the plan's Contracts
+  section, `docs/SCHEMA.sql`). **Ask the human before writing the migration
+  file** — `migrations/versions/` is under the do-not-edit-without-asking rule.
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
