@@ -29,6 +29,7 @@ import {
   renderAddExpense,
   renderForm,
   sortCategoriesByUsage,
+  sortTagsByUsage,
   submitButtonState,
   wireBackButton,
   type AddExpenseApi,
@@ -253,6 +254,53 @@ describe("sortCategoriesByUsage", () => {
   });
 });
 
+// -- sortTagsByUsage (D705, mirrors sortCategoriesByUsage's D604) ---------
+
+describe("sortTagsByUsage", () => {
+  it("orders by all-time expense_count descending, regardless of creation date", () => {
+    const taxi = { ...tag("tag-taxi", "Taxi"), expense_count: 100, created_at: "2026-03-01T00:00:00Z" };
+    const entertainment = {
+      ...tag("tag-entertainment", "Entertainment"),
+      expense_count: 30,
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const fastFood = { ...tag("tag-fast-food", "Fast Food"), expense_count: 5, created_at: "2025-06-01T00:00:00Z" };
+
+    const sorted = sortTagsByUsage([fastFood, taxi, entertainment]);
+
+    expect(sorted.map((t) => t.name)).toEqual(["Taxi", "Entertainment", "Fast Food"]);
+  });
+
+  it("sorts a never-used tag (0) after every used one, ties broken by created_at ASC", () => {
+    const used = { ...tag("tag-used", "Used"), expense_count: 1 };
+    const unusedOlder = { ...tag("tag-unused-old", "Old"), expense_count: 0, created_at: "2026-01-01T00:00:00Z" };
+    const unusedNewer = { ...tag("tag-unused-new", "New"), expense_count: 0, created_at: "2026-02-01T00:00:00Z" };
+
+    const sorted = sortTagsByUsage([unusedNewer, used, unusedOlder]);
+
+    expect(sorted.map((t) => t.name)).toEqual(["Used", "Old", "New"]);
+  });
+
+  it("treats a null or absent expense_count as 0, not a throw or a random order", () => {
+    const used = { ...tag("tag-used", "Used"), expense_count: 5 };
+    const nullCount = { ...tag("tag-null", "NullCount"), expense_count: null };
+    const absentCount = tag("tag-absent", "AbsentCount"); // no expense_count key at all
+
+    const sorted = sortTagsByUsage([nullCount, used, absentCount]);
+
+    expect(sorted.map((t) => t.name)).toEqual(["Used", "NullCount", "AbsentCount"]);
+  });
+
+  it("does not mutate its input", () => {
+    const list = [tag("tag-a", "A"), tag("tag-b", "B")];
+    const before = [...list];
+
+    sortTagsByUsage(list);
+
+    expect(list).toEqual(before);
+  });
+});
+
 // -- loadAddExpenseData ---------------------------------------------------
 
 function fakeApi(overrides: Partial<AddExpenseApi> = {}): AddExpenseApi {
@@ -283,6 +331,13 @@ describe("loadAddExpenseData", () => {
     await loadAddExpenseData(api, createMemoryCache());
     expect(api.listCategories).toHaveBeenCalledOnce();
     expect(api.listCategories).toHaveBeenCalledWith({ includeUsage: true });
+  });
+
+  it("requests usage counts so the tag chips can order by frequency (D705), in exactly one GET /tags call", async () => {
+    const api = fakeApi();
+    await loadAddExpenseData(api, createMemoryCache());
+    expect(api.listTags).toHaveBeenCalledOnce();
+    expect(api.listTags).toHaveBeenCalledWith({ includeUsage: true });
   });
 
   it("returns empty when the account has no categories", async () => {
@@ -1118,6 +1173,24 @@ describe("renderAddExpense", () => {
     const addChipIndex = html.indexOf('data-testid="tag-add-chip"');
     expect(tagIdIndex).toBeGreaterThan(-1);
     expect(addChipIndex).toBeGreaterThan(tagIdIndex);
+  });
+
+  // -- D705: the tag chip row orders by usage, not creation order -----------
+
+  it("renders the chips most-used-first — 100/30/5 Taxi/Entertainment/Fast Food, whatever their creation dates, with '+ Add tag' still last", () => {
+    const taxi = { ...tag("tag-taxi", "Taxi"), expense_count: 100, created_at: "2026-03-01T00:00:00Z" };
+    const entertainment = {
+      ...tag("tag-entertainment", "Entertainment"),
+      expense_count: 30,
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    const fastFood = { ...tag("tag-fast-food", "Fast Food"), expense_count: 5, created_at: "2025-06-01T00:00:00Z" };
+    const html = renderForm({ ...READY, tags: [fastFood, taxi, entertainment] }, emptyDraft());
+
+    const order = [...html.matchAll(/data-tag-id="([^"]+)"/g)].map((m) => m[1]);
+
+    expect(order).toEqual(["tag-taxi", "tag-entertainment", "tag-fast-food"]);
+    expect(html.indexOf('data-testid="tag-add-chip"')).toBeGreaterThan(html.lastIndexOf("data-tag-id"));
   });
 
   it("marks a selected tag chip active and leaves others unselected", () => {
