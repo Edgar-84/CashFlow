@@ -234,7 +234,7 @@ implementation unit may start before *its own* spec exists.
       `include_usage=true` is still fetched** and why (hide-vs-delete, D305);
       the accessibility section says the row's accessible name is the category
       or tag name alone.
-- [ ] **U0.2** `docs/ui/screens/02-add-expense.md` — revise the tag-chip
+- [x] **U0.2** `docs/ui/screens/02-add-expense.md` — revise the tag-chip
       region to usage-descending ordering, in the same words V6 gave the
       category grid. *(Gates U1.3.)*
       **AC:** the tag region names all-time `expense_count` descending with
@@ -563,11 +563,23 @@ touching auth or scoping goes through the reviewer subagent.
   nothing renders the count. Left an open call for U1.1/U1.2, not decided
   here: whether `GET /statistics/by-category`/`by-tag` (the now-unconsumed
   this-month-total fetch) is dropped or left unused.
-- **Next:** `/clear`, then **U0.2** — `ui-spec` revises
-  `docs/ui/screens/02-add-expense.md`'s tag-chip region to usage-descending
-  ordering, gating U1.3. M0 is entirely `ui-spec` work and its five units are
-  numbered in dependency order; no unit in M1–M4 may start before the spec it
-  decomposes exists.
+- **U0.2 is done**: `docs/ui/screens/02-add-expense.md`'s Tags section now
+  states the chip-row ordering in the same words `../components/category-picker.md`'s
+  Ordering section gives the category grid (all-time `expense_count`
+  descending, `created_at ASC` tiebreak, a zero/absent count sorting last
+  among itself by `created_at ASC`) — D705's rule, just applied to this
+  screen's spec, no new decision needed. The Data row for `GET /tags` now
+  states `include_usage=true` the same way the `GET /categories` row does.
+  "+ Add tag" stays the last chip regardless of order; a freshly created tag
+  (0 uses) sorts among the unused tags, not to the front. No new component
+  file was created for tags — Add Expense's Tags section already owned this
+  spec directly (there is no `tag-picker.md`, unlike categories), so the
+  ordering rule lives inline rather than in a new component doc.
+- **Next:** `/clear`, then **U0.3** — `ui-spec` writes
+  `docs/ui/screens/05-statistics.md` from the shipped implementation, then
+  applies the V7 period-selector delta, gating all of M2. M0 is entirely
+  `ui-spec` work and its five units are numbered in dependency order; no unit
+  in M1–M4 may start before the spec it decomposes exists.
 - **Gotchas the next session must know:**
   - **Do not "add period support" to `api/statistics.py`.** It is already
     there and already validated. M2 is client wiring; a Python diff in M2 is
