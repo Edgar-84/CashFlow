@@ -396,6 +396,7 @@ describe("ApiClient — response parsing", () => {
       currency: "PLN",
       account_name: "Smith Family",
       today: "2026-07-29",
+      language: "en",
     };
     const { client } = makeClient(jsonResponse(payload));
 
