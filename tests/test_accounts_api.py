@@ -185,23 +185,116 @@ async def test_update_currency_unknown_code_is_422(
     assert response.status_code == 422
 
 
-async def test_update_language_is_not_yet_accepted(
+async def test_update_language_as_admin(
     client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse, account: AccountResponse
 ) -> None:
-    # U3.1 AC: "no route behaviour changes yet" — `AccountUpdate.language`
-    # exists on the contract (U3.1) but PATCH /accounts/me only wires
-    # `currency` through until U3.2 adds the language gate/tests.
-    _, account_repo = override_repo()
+    override_repo()
 
     response = await client.patch(
         "/accounts/me", json={"language": "ru"}, headers=auth_headers(admin.tg_id)
     )
 
     assert response.status_code == 200
-    assert response.json()["language"] == account.language.value
+    body = response.json()
+    assert body["language"] == "ru"
+    assert body["id"] == str(account.id)
+
+
+async def test_update_language_reflected_in_get_users_me(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse
+) -> None:
+    override_repo()
+
+    await client.patch("/accounts/me", json={"language": "ru"}, headers=auth_headers(admin.tg_id))
+    response = await client.get("/users/me", headers=auth_headers(admin.tg_id))
+
+    assert response.status_code == 200
+    assert response.json()["language"] == "ru"
+
+
+async def test_update_language_as_member_is_403(
+    client: AsyncClient,
+    override_repo: OverrideRepo,
+    member: UserResponse,
+    account: AccountResponse,
+) -> None:
+    _, account_repo = override_repo()
+
+    response = await client.patch(
+        "/accounts/me", json={"language": "ru"}, headers=auth_headers(member.tg_id)
+    )
+
+    assert response.status_code == 403
     stored = await account_repo.get(account.id)
     assert stored is not None
     assert stored.language == account.language
+
+
+async def test_update_language_as_viewer_is_403(
+    client: AsyncClient, override_repo: OverrideRepo, viewer: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        "/accounts/me", json={"language": "ru"}, headers=auth_headers(viewer.tg_id)
+    )
+
+    assert response.status_code == 403
+
+
+async def test_update_language_unknown_code_is_422(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        "/accounts/me", json={"language": "xx"}, headers=auth_headers(admin.tg_id)
+    )
+
+    assert response.status_code == 422
+
+
+async def test_update_language_leaves_currency_untouched(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse, account: AccountResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        "/accounts/me", json={"language": "ru"}, headers=auth_headers(admin.tg_id)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["currency"] == account.currency.value
+
+
+async def test_update_currency_leaves_language_untouched(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse, account: AccountResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        "/accounts/me", json={"currency": "EUR"}, headers=auth_headers(admin.tg_id)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["language"] == account.language.value
+
+
+async def test_update_currency_and_language_in_one_patch(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        "/accounts/me",
+        json={"currency": "EUR", "language": "uk"},
+        headers=auth_headers(admin.tg_id),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["currency"] == "EUR"
+    assert body["language"] == "uk"
 
 
 async def test_update_currency_does_not_change_expense_amounts(

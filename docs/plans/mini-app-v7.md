@@ -312,7 +312,7 @@ implementation unit may start before *its own* spec exists.
       **AC:** `alembic upgrade head` then `downgrade -1` runs clean on a
       throwaway DB (`scripts/integration_docker.sh`); every existing account
       reads back `en`; `verify.sh` green; **no route behaviour changes yet.**
-- [ ] **U3.2** Backend: `GET /users/me` returns `language`; `PATCH
+- [x] **U3.2** Backend: `GET /users/me` returns `language`; `PATCH
       /accounts/me` accepts it.
       **AC:** the PATCH is admin-only, the same gate the currency change uses;
       an unknown code is 422, not a 500; changing the language leaves currency
@@ -863,10 +863,33 @@ touching auth or scoping goes through the reviewer subagent.
   `test_enums_have_expected_members` gained `assert set(Language) ==
   {Language.EN, Language.RU, Language.UK}`, alongside the existing
   `Role`/`Resource`/`Action`/`Currency` membership checks.
-- **Next:** `/clear`, then **U3.2** (Backend: `GET /users/me` returns
-  `language`; `PATCH /accounts/me` accepts it — see that unit's AC for the
-  admin-only gate, 422-on-unknown-code and currency/language independence
-  requirements).
+- **U3.2 is done**: `GET /users/me` already returned `language` as of U3.1
+  (`api/deps.py::get_current_user_with_currency` already passed
+  `language=account.language`), so this unit's only remaining wiring was
+  lifting the `include={"currency"}` allow-list U3.1's reviewer pass added
+  to `services/account_service.py::AccountService.update`. Changed it to
+  `include={"currency", "language"}` and generalized the enum-to-string
+  branch from `isinstance(value, Currency)` to `isinstance(value, Currency |
+  Language)`, so both NOT-NULL fields go through the same "set only if
+  present and non-null" path independently of each other (D400/D401's
+  currency precedent, extended). The admin-only gate and the 422-on-unknown-
+  code behaviour needed no new code — `require_admin` on the route and
+  `Language` being a Pydantic-validated enum on `AccountUpdate` already cover
+  both, same as `currency`. Replaced
+  `tests/test_accounts_api.py::test_update_language_is_not_yet_accepted`
+  (U3.1's placeholder-behaviour regression test, now stale) with the AC's
+  four requirements as separate tests: `test_update_language_as_admin`,
+  `test_update_language_reflected_in_get_users_me`,
+  `test_update_language_as_member_is_403`,
+  `test_update_language_as_viewer_is_403`,
+  `test_update_language_unknown_code_is_422`,
+  `test_update_language_leaves_currency_untouched`,
+  `test_update_currency_leaves_language_untouched`, and
+  `test_update_currency_and_language_in_one_patch` — mirroring the existing
+  currency tests in the same file one-for-one.
+- **Next:** `/clear`, then **U3.3** (`webapp/src/lib/i18n.ts` + boot wiring,
+  EN catalogue only — see that unit's AC for the typed-key-union build
+  failure and the "before any screen renders" ordering requirement, D709).
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
