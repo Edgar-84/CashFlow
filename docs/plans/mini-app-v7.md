@@ -240,7 +240,7 @@ implementation unit may start before *its own* spec exists.
       **AC:** the tag region names all-time `expense_count` descending with
       `created_at ASC` as the tiebreak; an AC covers a tag with zero uses;
       "+ Add tag" is still stated as the last chip.
-- [ ] **U0.3** `docs/ui/screens/05-statistics.md` — **new**. The screen has
+- [x] **U0.3** `docs/ui/screens/05-statistics.md` — **new**. The screen has
       shipped since V2 with no spec file at all. Write it from the current
       implementation, then apply the V7 delta: the three `months_back` presets
       become the shared period selector. *(Gates all of M2. The largest M0
@@ -575,9 +575,35 @@ touching auth or scoping goes through the reviewer subagent.
   file was created for tags — Add Expense's Tags section already owned this
   spec directly (there is no `tag-picker.md`, unlike categories), so the
   ordering rule lives inline rather than in a new component doc.
-- **Next:** `/clear`, then **U0.3** — `ui-spec` writes
-  `docs/ui/screens/05-statistics.md` from the shipped implementation, then
-  applies the V7 period-selector delta, gating all of M2. M0 is entirely
+- **U0.3 is done**: `docs/ui/screens/05-statistics.md` is written from the
+  shipped `webapp/src/screens/statistics.ts` + `api/statistics.py`, then the
+  V7 delta applied — the three `months_back` preset chips are replaced by
+  `../components/period-selector.md` (Day/Week/Month/Year/Period, offset
+  arrows, jump-to-present), with a "Period" tab opening
+  `../components/date-range-picker.md` in `"range"` mode, exactly as Home
+  already does. `docs/ui/components/period-selector.md` is updated in the
+  same change — its "Used by screen 01 only" note and its "Statistics is out
+  of scope" Resolved bullet were both false the moment this spec named it a
+  second consumer. `docs/design/mini-app-ux.md` §4 screen 05's old chip table
+  is **not** edited — the new spec states it supersedes that table, the same
+  pattern `01-home.md` used for its own three-chip supersession (D700's
+  ordering: M0 documents the delta, M2 implements it). Two shipped
+  discrepancies were documented rather than silently reproduced or fixed:
+  region 2 (period selector + donut) is **not** wrapped in a `.chart-card`
+  the way Home's region 2 is — kept bare on the page background, matching
+  where the preset chips it replaces already sat, flagged `[?]`; and the
+  donut's stroke-width is 26px here vs. Home's 30px (Home was thickened in
+  V4, this screen never was) — also flagged `[?]`, not corrected. Six other
+  `[?]`s were left open in the new file for M2 to pick up or ignore (see the
+  file's Open questions): the donut's missing `aria-label`, the bar tap not
+  carrying the period (unlike Home's V4 ranked-row tap), the single-generic-
+  string empty copy vs. Home's five period-named strings, and the period
+  control not freezing while offline (unlike Home's `disabled` prop). None of
+  these blocks M2 — they are pre-existing shipped behaviour, stated so M2
+  doesn't have to rediscover them, and none is required by the V7 brief.
+- **Next:** `/clear`, then **U0.4** — `ui-spec` writes
+  `docs/ui/screens/09-language.md` plus the `side-menu.md`/`08-settings.md`
+  deltas that place the language picker, gating U3.11. M0 is entirely
   `ui-spec` work and its five units are numbered in dependency order; no unit
   in M1–M4 may start before the spec it decomposes exists.
 - **Gotchas the next session must know:**
