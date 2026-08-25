@@ -293,7 +293,7 @@ implementation unit may start before *its own* spec exists.
       `start_date`/`end_date`) and never `months_back`; no bound is computed in
       the browser; the never-throws/cache-fallback contract is unchanged; unit
       tests cover each of the five units.
-- [ ] **U2.2** The screen renders `period-selector` and re-fetches on a unit or
+- [x] **U2.2** The screen renders `period-selector` and re-fetches on a unit or
       offset tap.
       **AC:** the five tabs appear in the order Day · Week · Month · Year ·
       Period; a unit tap resets offset to 0; the offset arrows clamp at 0
@@ -765,14 +765,42 @@ touching auth or scoping goes through the reviewer subagent.
   of the five units"); the "marks the active preset chip" render test was
   deleted (the chip UI it exercised no longer exists, per the above); every
   other fixture's `monthsBack: N` became `period: PeriodValue`.
-- **Next:** `/clear`, then **U2.2** (the screen renders `period-selector` and
-  re-fetches on a unit or offset tap, per `05-statistics.md`'s Interactions
-  table). M0 is complete: all five spec files (`06-categories.md`/
-  `07-tags.md` revised, `02-add-expense.md` revised, `05-statistics.md` new,
-  `09-language.md` new, `10-admin.md` new) and their `side-menu.md`/
-  `08-settings.md`/`design-system.md`/`period-selector.md` deltas exist. No
-  unit in M1–M4 may start before the spec it decomposes — that gate is
-  satisfied for all four remaining milestones.
+- **U2.2 is done**: `webapp/src/screens/statistics.ts` now renders
+  `../components/period-selector.md` in regions 2a/2b — `renderReady`/
+  `renderEmpty`/`renderError` all prepend `renderPeriodControl(period, now)`
+  (a new `.period-selector-slot` wrapper, bare on the page background per
+  05-statistics.md's Layout table — no `.card`/`.chart-card`, unlike Home);
+  `renderForbidden`/`renderSkeleton` are untouched (no live control on 403 or
+  loading, per the screen doc's States table). `mount` now takes a `now: Date`
+  param (mirroring `home.ts`) and, for every state with a live period selector
+  (`ready`/`offline`/`empty`/`error`), calls `mountPeriodSelector` on that slot
+  wiring `onUnitChange`/`onOffsetChange` straight to two new
+  `StatisticsHandlers` callbacks; `disabled` is hardcoded `false` always — the
+  screen doc's Edge cases explicitly states the control is **not** frozen
+  offline, unlike Home's `disabled` prop. `onOpenPicker` is wired to a no-op
+  with a comment pointing at U2.3, which wires the date-range picker there —
+  tapping "Period" or the label does nothing yet, in scope for the next unit,
+  not this one. `main.ts::showStatistics` implements the two new handlers by
+  recursing into a fresh `showStatistics(period, grouping)` call (the same
+  shape `onRetry` already used, not module-level state like `homePeriod`) —
+  `onUnitChange` sets `{ unit, offset: 0 }`, `onOffsetChange` sets
+  `{ ...period, offset: clampOffset(offset) }` (imported, already used by
+  `showHome`), and both carry `grouping` through unchanged. Matches Home's own
+  precedent: this wiring itself is not unit-tested (`mount`'s DOM glue is the
+  file's one accepted gap, same as every other screen, and `main.ts`'s routing
+  functions are never exported for testing either — confirmed by grepping
+  `main.test.ts`, which only tests small pure helpers). `webapp/tests/statistics.test.ts`
+  gained a `now: Date` second argument on every `renderStatistics` call (new
+  `NOW` fixture, mirroring `home.test.ts`'s) and five new tests: the five tabs
+  render in order with the current unit active; the next-arrow is
+  `aria-disabled` at offset 0 across every live state; the control is **not**
+  disabled while offline (the explicit divergence from Home); and region 2 has
+  no `.chart-card` wrapper.
+- **Next:** `/clear`, then **U2.3** (the "Period" tab opens `date-range-picker`
+  and a custom range drives the screen, per `05-statistics.md`'s Interactions
+  table — `onOpenPicker` is currently a no-op stub in `statistics.ts::mount`,
+  see above). `home.ts`'s `openPicker`/`pickerValueForPeriod` are the pattern
+  to mirror; `date-range-picker.ts` itself is shipped and reused unchanged.
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
