@@ -43,16 +43,14 @@ import type {
   PeriodTotal,
   Uuid,
 } from "../api/types";
-import { setLanguage } from "../lib/i18n";
+import { setLanguage, t, type Catalogue } from "../lib/i18n";
 
 // docs/ui/screens/01-home.md's Copy table: `mb.add` and `add.aria` are both
-// this string — MainButton's label and the yellow Add button's accessible
-// name must never drift apart, since both fire the same handler (D318).
-const ADD_EXPENSE_LABEL = "Add expense";
-
-// Copy table's `menu.aria` — the ☰ button's accessible name (D409). The
-// glyph itself is `aria-hidden`, so this is the button's only name.
-const MENU_LABEL = "Menu";
+// this string in every language — MainButton's label and the yellow Add
+// button's accessible name must never drift apart, since both fire the same
+// handler (D318). Looked up via `t()` at each call site (never cached in a
+// module constant) so a language change re-renders in the new language
+// without a reload.
 
 // U1.6/design-system.md: stroke thickened 26 -> 30px, radius trimmed to keep
 // the outer edge (radius + strokeWidth/2) unchanged at 89 of the 200-unit
@@ -170,16 +168,16 @@ export function buildHomeData(input: {
   // <=1-row suppression is gone too; a single category still renders its
   // one row).
   const rows: HomeRankedRow[] = [...input.categoryTotals]
-    .filter((t) => t.total > 0)
+    .filter((ct) => ct.total > 0)
     .sort((a, b) => b.total - a.total)
-    .map((t) => {
-      const slot = colorBySlot.get(t.category_id) ?? null;
+    .map((ct) => {
+      const slot = colorBySlot.get(ct.category_id) ?? null;
       return {
-        categoryId: t.category_id,
-        label: nameById.get(t.category_id) ?? "Unknown",
+        categoryId: ct.category_id,
+        label: nameById.get(ct.category_id) ?? t("category.unknown"),
         colorVar: slot !== null ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
-        minor: t.total,
-        sharePct: input.periodTotal.total > 0 ? (t.total / input.periodTotal.total) * 100 : 0,
+        minor: ct.total,
+        sharePct: input.periodTotal.total > 0 ? (ct.total / input.periodTotal.total) * 100 : 0,
       };
     });
 
@@ -202,7 +200,7 @@ export function buildHomeData(input: {
     const row = index < realCount ? rows[index] : undefined;
     return {
       categoryId: row ? row.categoryId : null,
-      label: row ? row.label : "Other",
+      label: row ? row.label : t("chart.other"),
       colorVar: row ? row.colorVar : OTHER_COLOR_VAR,
       dash: seg.dash,
       gap: seg.gap,
@@ -222,7 +220,7 @@ export function buildHomeData(input: {
     const row = index < realCount ? rows[index] : undefined;
     return {
       categoryId: row ? row.categoryId : null,
-      label: row ? row.label : "Other",
+      label: row ? row.label : t("chart.other"),
       colorVar: row ? row.colorVar : OTHER_COLOR_VAR,
       widthPct: seg.widthPct,
     };
@@ -250,7 +248,7 @@ export function buildHomeData(input: {
         .map((p) => ({
           kind: "exceeded" as const,
           categoryId: p.category_id,
-          label: nameById.get(p.category_id) ?? "Unknown",
+          label: nameById.get(p.category_id) ?? t("category.unknown"),
           // `is_exceeded` is only ever true when `fill_pct` is not null
           // (services/budget_service.py), so this always resolves.
           fillPct: p.fill_pct ?? 0,
@@ -271,7 +269,7 @@ export function buildHomeData(input: {
         .map((p) => ({
           kind: "approaching" as const,
           categoryId: p.category_id,
-          label: nameById.get(p.category_id) ?? "Unknown",
+          label: nameById.get(p.category_id) ?? t("category.unknown"),
           fillPct: p.fill_pct as number,
           spentMinor: p.spent,
           limitMinor: p.amount,
@@ -369,7 +367,7 @@ export async function loadHome(api: HomeApi, cache: HomeCache, period: PeriodVal
       // successfully (component doc's Disabled state).
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
-    const message = err instanceof Error ? err.message : "Something went wrong.";
+    const message = err instanceof Error ? err.message : t("error.fallback");
     return { status: "error", message, period };
   }
 }
@@ -443,7 +441,7 @@ export function applyHomeChrome(state: HomeState, onAddExpense?: (date?: string)
     mainButton.hide();
     return;
   }
-  mainButton.show(ADD_EXPENSE_LABEL);
+  mainButton.show(t("mb.add"));
   mainButton.setEnabled(true);
   if (onAddExpense) {
     mainButton.onClick(() => onAddExpense(dayDateForHandoff(state)));
@@ -471,7 +469,7 @@ function escapeHtml(value: string): string {
 // `aria-hidden` + `focusable="false"` since the button's own `aria-label`
 // already carries the accessible name.
 function renderAddButton(): string {
-  return `<button type="button" class="add-btn" data-testid="add-button" aria-label="${escapeHtml(ADD_EXPENSE_LABEL)}"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg></button>`;
+  return `<button type="button" class="add-btn" data-testid="add-button" aria-label="${escapeHtml(t("add.aria"))}"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg></button>`;
 }
 
 // docs/ui/components/side-menu.md's Sizing: 44×44, a 20px glyph, `--ink` with
@@ -482,7 +480,7 @@ function renderAddButton(): string {
 // `components/side-menu.ts` itself, per that doc's Sizing section. `mount`
 // wires its click to `openSideMenu` below.
 function renderMenuButton(): string {
-  return `<button type="button" class="menu-btn" data-testid="menu-button" aria-label="${escapeHtml(MENU_LABEL)}"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><line x1="2" y1="5" x2="18" y2="5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="2" y1="10" x2="18" y2="10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="2" y1="15" x2="18" y2="15" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg></button>`;
+  return `<button type="button" class="menu-btn" data-testid="menu-button" aria-label="${escapeHtml(t("menu.aria"))}"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><line x1="2" y1="5" x2="18" y2="5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="2" y1="10" x2="18" y2="10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /><line x1="2" y1="15" x2="18" y2="15" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg></button>`;
 }
 
 // No-op stand-ins for the callbacks `PeriodSelectorProps` requires — the pure
@@ -523,7 +521,7 @@ function renderError(message: string, period: PeriodValue, now: Date): string {
     <div class="card chart-card">
       ${renderPeriodControl(period, now, false)}
       <p>${escapeHtml(message)}</p>
-      <button type="button" data-action="retry">Try again</button>
+      <button type="button" data-action="retry">${t("error.retry")}</button>
       ${renderAddButton()}
     </div>
   </div>`;
@@ -534,16 +532,16 @@ function renderError(message: string, period: PeriodValue, now: Date): string {
 // ring sits directly under a label that already names the period, so naming
 // it twice 100px apart is noise. Supersedes the eight offset-branching V3
 // strings ("Nothing today"/"Nothing in August"/...).
-const EMPTY_COPY: Record<PeriodUnit, string> = {
-  day: "There were no expenses on this day.",
-  week: "There were no expenses in this week.",
-  month: "There were no expenses in this month.",
-  year: "There were no expenses in this year.",
-  custom: "There were no expenses in this period.",
+const EMPTY_COPY_KEY: Record<PeriodUnit, keyof Catalogue> = {
+  day: "empty.day",
+  week: "empty.week",
+  month: "empty.month",
+  year: "empty.year",
+  custom: "empty.custom",
 };
 
 function describeEmptyPeriod(period: PeriodValue): string {
-  return EMPTY_COPY[period.unit];
+  return t(EMPTY_COPY_KEY[period.unit]);
 }
 
 // docs/ui/screens/01-home.md's Empty state (D405): the same 200px box and
@@ -593,7 +591,7 @@ function renderEmpty(period: PeriodValue, currency: Currency, now: Date, collaps
 function renderReadOnly(): string {
   return `<div class="home-readonly" data-testid="forbidden">
     ${renderMenuButton()}
-    <p>You have read-only access to this account.</p>
+    <p>${t("readonly")}</p>
   </div>`;
 }
 
@@ -725,6 +723,14 @@ function renderWarningGlyph(): string {
   return `<svg class="alert-glyph" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M7 1.3 13 12.3H1L7 1.3Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none" /><line x1="7" y1="5.2" x2="7" y2="8.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /><circle cx="7" cy="10.4" r="0.9" fill="currentColor" /></svg>`;
 }
 
+// Fills `{var}` placeholders in a catalogue template with no escaping — the
+// non-escaping counterpart to `t()`'s own vars mechanism. Only used by
+// `budgetAlertMessage` below, whose "raw and unescaped" contract (see its own
+// comment) `t()`'s auto-escaping would break.
+function fillTemplate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
+}
+
 // docs/ui/screens/01-home.md's Copy table: `alert.over` (unchanged wording,
 // so Home and screen 04 keep saying the same thing) and the new `alert.warn`,
 // carrying the percentage, spent and limit `alert.over` doesn't. `overMinor`
@@ -735,8 +741,18 @@ function renderWarningGlyph(): string {
 // — rather than a second copy of the wording that could drift from this one.
 export function budgetAlertMessage(alert: HomeBudgetAlert, currency: Currency): string {
   return alert.kind === "exceeded"
-    ? `${alert.label} is over budget by ${formatAmount(alert.overMinor ?? 0)} ${currency}`
-    : `${alert.label} is at ${Math.round(alert.fillPct)}% — ${formatAmount(alert.spentMinor)} of ${formatAmount(alert.limitMinor)} ${currency}`;
+    ? fillTemplate(t("alert.over"), {
+        category: alert.label,
+        amount: formatAmount(alert.overMinor ?? 0),
+        currency,
+      })
+    : fillTemplate(t("alert.warn"), {
+        category: alert.label,
+        pct: Math.round(alert.fillPct),
+        spent: formatAmount(alert.spentMinor),
+        limit: formatAmount(alert.limitMinor),
+        currency,
+      });
 }
 
 function renderBudgetAlertLine(alert: HomeBudgetAlert, currency: Currency): string {
@@ -760,7 +776,7 @@ function renderOfflineBanner(lastSyncedAt: string | undefined): string {
   if (!lastSyncedAt) {
     return "";
   }
-  return `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(lastSyncedAt)}</div>`;
+  return `<div class="offline-banner" data-testid="offline">${t("offline.banner", { time: lastSyncedAt })}</div>`;
 }
 
 function renderReady(

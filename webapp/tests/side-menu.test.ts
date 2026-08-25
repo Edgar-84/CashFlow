@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderSideMenu, type MenuItem, type SideMenuProps } from "../src/components/side-menu";
+import { setLanguage } from "../src/lib/i18n";
+
+afterEach(() => {
+  setLanguage("en");
+});
 
 const NOOP = (): void => {};
 
@@ -130,5 +135,23 @@ describe("renderSideMenu — dialog semantics", () => {
     expect(html).toContain('aria-modal="true"');
     expect(html).toContain('aria-label="Menu"');
     expect(html).toMatch(/side-menu-scrim" aria-hidden="true"/);
+  });
+});
+
+// U3.5: every row label and the panel's aria-label come from the i18n
+// catalogue (`lib/i18n.ts`), not a baked-in English string.
+describe("renderSideMenu — language (U3.5)", () => {
+  it("renders RU row labels and the RU dialog aria-label when the language is set", () => {
+    setLanguage("ru");
+    const html = renderSideMenu(props());
+    expect(html).toMatch(/data-item="add-expense"[^>]*>Добавить расход</);
+    expect(html).toMatch(/data-item="settings"[^>]*>Настройки</);
+    expect(html).toContain('aria-label="Меню"');
+  });
+
+  it("renders the RU footer through the same {date} {time} template as EN", () => {
+    setLanguage("ru");
+    const html = renderSideMenu(props({ lastSyncedAt: "2026-08-07T17:18:00.000Z" }));
+    expect(html).toMatch(/data-testid="side-menu-footer">Синхронизировано \d{1,2}\/\d{1,2}\/\d{4} \d{2}:\d{2}</);
   });
 });
