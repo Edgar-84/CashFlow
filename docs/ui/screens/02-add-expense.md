@@ -160,10 +160,19 @@ the `spent_at` on submit.
 - Multi-select, optional. Selected chip: `--ink` background, `--card` text.
 - Chips wrap; the row grows. No horizontal scroll — a hidden tag is an
   unfindable tag.
-- **"+ Add tag"** is the last chip, always, and navigates to screen 07 (Tags)
-  where a tag can be created. On returning, the tag list refetches and a
-  just-created tag is **pre-selected** (2026-08-04) — it is the only reason to
-  have gone there.
+- **Sorted most-used first (V7, 2026-08-25):** by all-time expense count for
+  the account, descending, ties by `created_at ASC` — the same rule, in the
+  same words, V6 gave the category grid (`../components/category-picker.md`'s
+  **Ordering** section). A tag with `expense_count` 0, or absent because the
+  caller forgot the flag, sorts last, among themselves by `created_at ASC`.
+  The screen's job is to pass `include_usage=true` on its `GET /tags` so the
+  count exists to sort by; nothing else about the fetch changes.
+- **"+ Add tag"** is the last chip, always — after every tag, regardless of
+  order — and navigates to screen 07 (Tags) where a tag can be created. On
+  returning, the tag list refetches and a just-created tag is **pre-selected**
+  (2026-08-04) — it is the only reason to have gone there. A freshly created
+  tag has `expense_count` 0, so it sorts among the unused tags, not to the
+  front.
 - Archived tags never appear.
 - **No fold in v1** (2026-08-04). Every tag is visible and the row grows. If it
   becomes unusably tall in real use, that is a follow-up with a real number
@@ -264,7 +273,7 @@ nobody overflows. The cap is enforced silently by `maxlength`.
 |---|---|
 | `GET /users/me` | currency **and account name** |
 | `GET /categories` | names + `color_slot`; archived excluded (`include_archived=false`, D306). **(V6)** sent with `include_usage=true` so `expense_count` is available for the grid's most-used-first order — an existing parameter (V3 U0.4), no backend delta |
-| `GET /tags` | archived excluded |
+| `GET /tags` | archived excluded. **(V7)** sent with `include_usage=true` so `expense_count` is available for the chip row's most-used-first order — an existing parameter, no backend delta |
 | `POST /expenses` | `amount`, `category_id`, `tag_ids`, `comment`, **`spent_at`** |
 
 ### Backend deltas this screen needs
@@ -350,7 +359,13 @@ nobody overflows. The cap is enforced silently by `maxlength`.
 - [ ] **(V4)** Opening from a past day and immediately tapping BackButton
       returns to screen 01 with no discard prompt — an incoming date is not a
       dirty draft.
-- [ ] The tag row's last chip reads "+ Add tag" and opens the Tags screen.
+- [ ] **(V7)** With Taxi at 100 all-time expenses, Entertainment at 30 and Fast
+      Food at 5, the chips render Taxi, Entertainment, Fast Food in that order
+      — regardless of which was created first.
+- [ ] **(V7)** A tag with zero expenses sorts after every used tag, and two
+      unused tags appear in `created_at ASC` order.
+- [ ] The tag row's last chip reads "+ Add tag", after every tag regardless of
+      order, and opens the Tags screen.
 - [ ] Selecting two tags and submitting creates one expense carrying both.
 - [ ] MainButton reads "Choose a category" and is disabled until a category is
       picked, then restates the amount, currency and category.
