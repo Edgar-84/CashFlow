@@ -1,6 +1,6 @@
 /** Screen 06 — Categories (docs/ui/screens/06-categories.md). "06a", the
- * list: a 4-column grid of every active category (colour circle, name, a
- * small "{count} · {amount}" caption) plus a grey "Add category" cell, and a
+ * list: a 4-column grid of every active category (colour circle, name — no
+ * per-row count/amount caption, D703) plus a grey "Add category" cell, and a
  * collapsible archived section below. Tapping an active cell or the "Add
  * category" cell navigates to "06b" — the create/rename/recolour form
  * (docs/ui/screens/06b-category-form.md, plan unit U2.2), also in this file
@@ -17,20 +17,13 @@
  *    accepted gap as every other screen's `mount`). Owns the one piece of
  *    in-screen state this unit has — whether the archived section is
  *    expanded — since that's a pure client-side toggle, not a fetch.
- *
- * `GET /statistics/by-category` only returns categories with at least one
- * expense in the period (`services/statistics_service.py::by_category`
- * builds its result from a `defaultdict` over actual expenses) — a category
- * absent from that response has spent 0 this month, not "unknown"; see
- * `monthTotalFor` below.
  */
 
 import { assignCategoryColors, categorySlotCssVar } from "../lib/category-colors";
-import { formatAmount } from "../lib/money";
 import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ApiError, ForbiddenError } from "../api/client";
 import { mountColorPicker, renderColorQuickRow, renderColorSheet, SHEET_COLUMNS } from "../components/color-picker";
-import type { CategoryResponse, CategoryTotal, Currency, Uuid } from "../api/types";
+import type { CategoryResponse, Currency, Uuid } from "../api/types";
 
 // -- data ---------------------------------------------------------------
 
@@ -43,7 +36,6 @@ export interface CategoryRow {
    * `colorVar`, to seed its edit-mode draft and "already taken" set. */
   colorSlot: number | null;
   expenseCount: number;
-  monthTotalMinor: number;
 }
 
 export interface CategoriesData {
@@ -52,13 +44,8 @@ export interface CategoriesData {
   archived: CategoryRow[];
 }
 
-function monthTotalFor(categoryId: Uuid, totals: CategoryTotal[]): number {
-  return totals.find((t) => t.category_id === categoryId)?.total ?? 0;
-}
-
 export function buildCategoriesData(input: {
   categories: CategoryResponse[];
-  monthTotals: CategoryTotal[];
   currency: Currency;
 }): CategoriesData {
   // Sorted `created_at ASC` across active AND archived — `category-colors.ts`'s
@@ -77,7 +64,6 @@ export function buildCategoriesData(input: {
       colorVar: categorySlotCssVar(colorBySlot.get(category.id) ?? null),
       colorSlot: category.color_slot ?? null,
       expenseCount: category.expense_count ?? 0,
-      monthTotalMinor: monthTotalFor(category.id, input.monthTotals),
     };
     (category.is_active === false ? archived : active).push(row);
   }
@@ -169,7 +155,6 @@ export function revertCategoryDeleteOutcome(
 export interface CategoriesApi {
   getMe(): Promise<{ currency: Currency }>;
   listCategories(opts: { includeUsage?: boolean; includeArchived?: boolean }): Promise<CategoryResponse[]>;
-  statisticsByCategory(query: { period: "month"; offset: number }): Promise<CategoryTotal[]>;
 }
 
 export interface CategoriesSnapshot {
@@ -211,8 +196,7 @@ export async function loadCategories(api: CategoriesApi, cache: CategoriesCache)
       api.getMe(),
       api.listCategories({ includeUsage: true, includeArchived: true }),
     ]);
-    const monthTotals = await api.statisticsByCategory({ period: "month", offset: 0 });
-    const data = buildCategoriesData({ categories, monthTotals, currency: me.currency });
+    const data = buildCategoriesData({ categories, currency: me.currency });
     cache.set({ data, syncedAt: new Date().toISOString() });
     return { status: "ready", ...data };
   } catch (err) {
@@ -248,20 +232,10 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function captionText(row: CategoryRow): string {
-  return `${row.expenseCount} · ${formatAmount(row.monthTotalMinor)}`;
-}
-
-function captionAriaLabel(row: CategoryRow): string {
-  const expenseWord = row.expenseCount === 1 ? "1 expense" : `${row.expenseCount} expenses`;
-  return `${row.name}, ${expenseWord}, ${formatAmount(row.monthTotalMinor)} this month`;
-}
-
 function renderCell(row: CategoryRow): string {
-  return `<button type="button" class="cat-cell" data-testid="cat-cell" data-category-id="${row.id}" aria-label="${escapeHtml(captionAriaLabel(row))}">
+  return `<button type="button" class="cat-cell" data-testid="cat-cell" data-category-id="${row.id}" aria-label="${escapeHtml(row.name)}">
     <span class="cat-cell-swatch" style="background:${row.colorVar}" aria-hidden="true"></span>
     <span class="cat-cell-name" aria-hidden="true">${escapeHtml(row.name)}</span>
-    <span class="cat-cell-caption" aria-hidden="true">${escapeHtml(captionText(row))}</span>
   </button>`;
 }
 
@@ -292,10 +266,9 @@ function renderGrid(active: CategoryRow[]): string {
  * its Accessibility section's focus order includes archived rows, so this
  * still needs to be reachable even with no handler wired yet. */
 function renderArchivedRow(row: CategoryRow): string {
-  return `<div class="row cat-archived-row" data-testid="cat-archived-row" role="button" tabindex="0" aria-label="${escapeHtml(captionAriaLabel(row))}">
+  return `<div class="row cat-archived-row" data-testid="cat-archived-row" role="button" tabindex="0" aria-label="${escapeHtml(row.name)}">
     <span class="swatch" style="background:${row.colorVar}" aria-hidden="true"></span>
     <span class="nm" aria-hidden="true">${escapeHtml(row.name)}</span>
-    <span class="cat-archived-caption" aria-hidden="true">${escapeHtml(captionText(row))}</span>
   </div>`;
 }
 
@@ -340,9 +313,9 @@ function renderDeleteFailureBanner(failure: CategoryDeleteFailure): string {
   </div>`;
 }
 
-// `CategoriesData.currency` is not rendered here — captions show only the
-// formatted amount, no trailing currency code, matching home.ts's ranked
-// rows. It stays on the data model for callers/tests that need it.
+// `CategoriesData.currency` is not rendered here — no amount is shown on
+// this screen at all (D703). It stays on the data model since `GET
+// /users/me` is fetched regardless and callers/tests still expect the shape.
 export function renderCategoriesView(state: CategoriesViewState): string {
   const { active, archived } = state.data;
   return `<div class="categories-ready" data-testid="ready">
