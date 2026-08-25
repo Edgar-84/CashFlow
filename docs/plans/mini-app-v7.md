@@ -338,7 +338,7 @@ implementation unit may start before *its own* spec exists.
       **AC:** a test asserts all three catalogues have **identical key sets**
       and fails on a missing or extra key; no catalogue contains markup.
 - [x] **U3.5** Extract `home.ts` + `components/side-menu.ts`.
-- [ ] **U3.6** Extract `add-expense.ts` (the largest single file, ~33 strings).
+- [x] **U3.6** Extract `add-expense.ts` (the largest single file, ~33 strings).
 - [ ] **U3.7** Extract `expenses.ts` + `expense-detail.ts`.
 - [ ] **U3.8** Extract `budgets.ts` + `budget-form.ts`.
 - [ ] **U3.9** Extract `categories.ts` + `tags.ts`.
@@ -1049,9 +1049,59 @@ touching auth or scoping goes through the reviewer subagent.
   which do reset); and `side-menu.md`'s `item.admin` Copy-table row (V7,
   `system_admin`-gated) is correctly not yet wired into `ROWS` or the
   catalogue — flagged only so a later unit doesn't assume it already is.
-- **Next:** `/clear`, then **U3.6** (extract `add-expense.ts`, the largest
-  single file, ~33 strings).
+- **U3.6 is done**: every user-visible literal in `add-expense.ts` now goes
+  through `t()`. 24 new `addExpense.*` keys cover the button guards
+  (`chooseCategory`/`enterAmount`/`saveChanges`, shared verbatim between
+  `submitButtonState` and `editButtonState`), the six `submitErrorMessage`
+  branches, the two discard-confirm strings (`discardExpense` for create,
+  `discardChanges` for 02b), the account/tags/comment/categories field
+  labels, the two date-row `aria-label`s, the `"+ Add tag"` chip and the
+  three date-pill words (`today`/`yesterday`/`two days ago`) `datePillOptions`
+  itself now returns pre-translated — the `Mon`/`Sun`-style weekday fallback
+  for pill 3 stays on `Intl.DateTimeFormat("en-US", ...)`, untouched, per the
+  plan's own out-of-scope call on locale-aware date formatting (U0.4's
+  resolved open question). Three strings turned out to already have a
+  matching global key from U3.5 and were reused instead of duplicated:
+  `error.retry` ("Try again", the retry button), `error.fallback`
+  ("Something went wrong.", `loadAddExpenseData`'s non-`Error` rejection
+  fallback — same fallback shape as `home.ts::loadHome`'s), and
+  `offline.banner` ("Offline — showing data from {time}", byte-identical
+  wording to Home's own offline banner). `addExpense.submitLabel`
+  ("Add {amount} {currency} to {category}") is the one templated key: like
+  U3.5's `alert.over`/`alert.warn`, it's a native `MainButton` label, not
+  innerHTML, so it's fetched via `t(key)` with no vars and filled by a new
+  private `fillTemplate` (a second copy of `home.ts`'s own function of that
+  name — pure modules don't share helpers in this file, per its existing
+  date-row convention) rather than `t()`'s own vars mechanism, which would
+  have HTML-escaped the category name into the button chrome. One rename to
+  avoid a second `t`-shadowing case (`home.ts` hit the same thing in U3.5):
+  `renderTagChips`'s `.map((t) => ...)` callback param renamed to `tag`.
+  `webapp/tests/add-expense.test.ts` needed **no changes** — every existing
+  exact-EN-string assertion runs through the real `en` catalogue by default
+  (no `vi.mock` on `../src/lib/i18n` in this file at all), so the full
+  existing suite doubles as the AC's byte-identical-output regression test.
+  `i18n.test.ts`'s generic per-language loops pick up all 24 new keys with no
+  changes needed there either.
+- **Next:** `/clear`, then **U3.7** (extract `expenses.ts` +
+  `expense-detail.ts`).
 - **Gotchas the next session must know:**
+  - **Check for an existing global key before adding a screen-prefixed one.**
+    U3.6 found three strings (`error.retry`, `error.fallback`,
+    `offline.banner`) that U3.5 had already catalogued under a global,
+    unprefixed key with byte-identical wording — reused rather than
+    duplicated under `expenses.*`. Worth a quick grep of `i18n.ts`'s `en`
+    object before naming a new key.
+  - **A `t`-shadowing local named `t` is a recurring hazard in this
+    codebase's map callbacks** (category/tag/transaction-style loops).
+    U3.5 hit it in `buildHomeData` (renamed to `ct`), U3.6 hit it in
+    `renderTagChips` (renamed to `tag`). Grep for `(t) =>`/`(t:` before
+    assuming a file is clean.
+  - **A string feeding a native `MainButton`/`showConfirm`/`showAlert` call is
+    not innerHTML.** `t()`'s vars mechanism HTML-escapes string
+    substitutions, which is correct for template-literal markup but wrong for
+    Telegram chrome — use `t(key)` with no vars plus a private `fillTemplate`
+    (U3.5's `budgetAlertMessage`, U3.6's `submitButtonState`) whenever a
+    templated string's rendered destination is native UI, not the DOM.
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
     `PATCH` directly. Do not port Currency's select-then-save pattern over by
