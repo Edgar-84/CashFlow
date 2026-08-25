@@ -19,14 +19,14 @@ a new `06b`/`06c` section), not invented here.
   **grid shape** (not the row-list this brief originally implied) was
   confirmed against the reference image in the same session.
 - `docs/design/mini-app-ux.md` §4 "06 — Categories" — the colour/delete
-  intent (D301/D302/D311) and "each row doubles as a mini-report" framing —
-  reinterpreted below as "each **cell** doubles as a mini-report" now that
-  the shape is a grid, not rows.
+  intent (D301/D302/D311). Its "each row doubles as a mini-report" framing
+  drove an earlier pass of this file (a third caption line, once
+  reinterpreted as "each **cell** doubles as a mini-report" for the grid
+  shape); that framing no longer applies to this screen — see Delta, D703.
 - `docs/plans/mini-app-v3.md` U2.1/U2.2/U2.3 — the already-approved unit
   acceptance criteria this spec must satisfy.
 - `../components/category-picker.md` — the 4-column grid, circle-above-name
-  cell, and grey "More"-cell pattern this screen reuses and extends with a
-  third caption line (see Delta).
+  cell, and grey "More"-cell pattern this screen reuses (see Delta).
 
 ## Delta from reference
 - **Taking:** the reference's 4-column grid; circle above centred name; the
@@ -37,12 +37,14 @@ a new `06b`/`06c` section), not invented here.
     `design-system.md`'s Iconography (no icon set project-wide, resolved
     2026-08-04). This matches `category-picker.md`'s existing delta from the
     same style of reference.
-  - Each cell gains a **third line** the reference does not have: a small
-    caption showing the category's expense count and this-month total
-    (`{count} · {amount}`) — required by the already-approved U2.1
-    acceptance criteria ("each row doubles as a mini-report"), which a
-    plain icon grid has no room for on its own. Resolved 2026-08-05 (see
-    Resolved).
+  - **No third caption line.** An earlier pass of this spec (2026-08-05)
+    added one showing the category's expense count and this-month total
+    (`{count} · {amount}`), required by the then-approved U2.1 acceptance
+    criteria ("each row doubles as a mini-report"). The human later decided
+    that information is unnecessary on this screen and it was removed in
+    full — count included, not just the amount — per D703 (2026-08-25, see
+    Resolved). The cell is swatch + name only, same two-part shape the
+    reference itself uses.
   - The reference's trailing cell reads "Create"; this app's copy table
     uses "Add category" instead, matching this project's fuller-word style
     elsewhere (e.g. "Add expense", not "Add"). `[inferred]` — cosmetic,
@@ -74,12 +76,12 @@ non-Home screen), and BackButton is native chrome.
    position fallback for `null` (`category-picker.md`'s existing rule,
    reused verbatim).
 2. **Name** — 12px `--ink`, centred, reserves a fixed **two-line** height
-   regardless of actual length (so captions in the same row stay aligned
-   even when neighbouring names wrap differently), then ellipsis. `8px`
-   under the swatch.
-3. **Caption** (new, not in `category-picker.md`) — 11px `--ink-secondary`
-   ("Caption" role, `design-system.md` Typography), centred, `4px` under
-   the name's reserved area: `"{count} · {amount}"`, e.g. `"12 · $340"`.
+   regardless of actual length (so cells in the same row stay the same
+   height even when neighbouring names wrap differently), then ellipsis.
+   `8px` under the swatch.
+
+No third line (D703 — see Delta and Resolved). The cell is exactly these
+two parts.
 
 ### "Add category" cell (region 3)
 Same column width as an active cell: swatch filled `--separator` with a
@@ -91,7 +93,7 @@ A tappable header row (section-eyebrow style, "Archived (`{n}`)", 10px,
 600, uppercase, `--ink-secondary`, with a chevron that flips on expand — pure
 client-side toggle, no fetch). Expanded, it shows one explanation line
 (`archived.explain`) above the archived items, rendered as a **row list**
-(colour dot · name · same count/total caption), not the grid — archived
+(colour dot · name, no caption — D703), not the grid — archived
 items are secondary/rare and read like an appendix, not active choices
 (decided 2026-08-05, see Resolved). Archived rows render at 60% opacity
 `[inferred]`, chosen to read as "historical" rather than
@@ -101,8 +103,8 @@ meaning).
 ## Components used
 None from `../components/` directly — this screen's grid parallels
 `category-picker.md`'s shape and reuses its swatch/cell/"More"-cell values,
-but is its own render function (adds the caption line `category-picker.md`
-does not have, and is not single-select/`radiogroup` — see Accessibility).
+but is its own render function (it navigates on tap rather than
+single-selecting, so it is not `radiogroup` — see Accessibility).
 
 ## Telegram
 - **Theme:** every colour from `tokens.css`, both themes.
@@ -122,7 +124,7 @@ does not have, and is not single-select/`radiogroup` — see Accessibility).
 
 | State | Trigger | What the user sees |
 |---|---|---|
-| Loading | first open | 8 skeleton cells at 64px with 12px name bars and a small caption bar, in the final grid positions (matches `category-picker.md`'s Loading state, extended with the caption bar). No reflow when data lands. |
+| Loading | first open | 8 skeleton cells at 64px with 12px name bars, in the final grid positions (matches `category-picker.md`'s Loading state). No reflow when data lands. |
 | Empty | zero categories | Grid holds **only** the "Add category" cell (matches `category-picker.md`'s "empty `items` array" rule), plus `empty` copy above the grid. |
 | Error | the categories or statistics fetch rejects and there is no cache | `error.load` + `error.retry`. Never a raw status code. |
 | 403 | `ForbiddenError` from the categories fetch | `readonly` copy in place of the grid; "Add category" cell **hidden**, not disabled (there is nothing to add to if the read itself is forbidden). |
@@ -154,25 +156,22 @@ does not have, and is not single-select/`radiogroup` — see Accessibility).
 | `add.aria` | "Add category" | accessible name; the `+` glyph alone is not one |
 | `archived.header` | "Archived ({n})" | `n` = archived count |
 | `archived.explain` | "Archived categories keep their history in reports, but you can't pick them for new expenses." | `[inferred]` — this is the plan's "plain-words explanation"; user should confirm or edit the exact wording |
-| `cell.caption.one` | "1 · {amount}" | singular count |
-| `cell.caption.many` | "{count} · {amount}" | plural count |
 
 ## Data
 
 | Call | Params | Notes |
 |---|---|---|
-| `GET /categories` | `include_usage=true`, `include_archived=true` | names, `color_slot`, `is_active`, `expense_count` (all-time count — `repositories/category_repo.py::list_with_usage` has no date filter on the join). **Backend already returns all four fields** (`models/category.py::CategoryResponse`); `webapp/src/api/client.ts::listCategories()` and `webapp/src/api/types.ts::CategoryResponse` do not yet expose them — extending both is in scope for this unit, not a backend change. |
-| `GET /statistics/by-category` | `period=month`, `offset=0` | this-month total per category (`CategoryTotal[]`). **Check before assuming zero-omission is safe**: Home's existing usage of this endpoint only ever renders categories present in the response; a category with a zero total this month may simply be absent from the array rather than returned with `total: 0`. This screen must treat "category id not present in the response" as `0`, not as an error or a missing cell. |
+| `GET /categories` | `include_usage=true`, `include_archived=true` | names, `color_slot`, `is_active`, `expense_count` (all-time count — `repositories/category_repo.py::list_with_usage` has no date filter on the join). **Backend already returns all four fields** (`models/category.py::CategoryResponse`); `webapp/src/api/client.ts::listCategories()` and `webapp/src/api/types.ts::CategoryResponse` do not yet expose them — extending both is in scope for this unit, not a backend change. **`include_usage=true` stays on this call even though `expense_count` is never rendered here (D703)** — it is what lets the eventual edit/delete surface (06b/06c) choose the hide-vs-delete branch without a second fetch (D305); dropping the flag would silently break that, not just the caption. |
+| `GET /statistics/by-category` | `period=month`, `offset=0` | this-month total per category (`CategoryTotal[]`). **No longer has a consumer on this screen (D703)** — its only purpose was the removed caption's amount half. Whether the implementing unit keeps the call (unused) or drops it along with `monthTotalMinor` is an implementation choice for U1.1, not decided here; either way there is nothing left on screen for a zero-omission bug to affect. |
 | `GET /users/me` | — | `currency`, for `formatAmount` |
 
 ## Accessibility
 - The grid is a list of **navigation buttons**, not a `radiogroup` — unlike
   `category-picker.md`, tapping a cell here navigates away rather than
   selecting in place, so no `aria-checked`/`radio` semantics apply.
-- Each active cell's accessible name includes the category name **and**
-  its caption (count + this-month total) — e.g. "Groceries, 12 expenses,
-  $340 this month" — so screen-reader users get the full mini-report even
-  though sighted users see it as a compact caption line. The swatch is
+- Each active cell's accessible name is the category name **alone** — e.g.
+  "Groceries" — matching what a sighted user sees; count and this-month
+  total are not surfaced anywhere on this screen (D703). The swatch is
   `aria-hidden`.
 - The "Add category" cell's accessible name is "Add category"; its `+` is
   decorative and `aria-hidden`.
@@ -187,14 +186,8 @@ does not have, and is not single-select/`radiogroup` — see Accessibility).
 
 ## Edge cases
 - **Long category name** — wraps to the reserved two-line name area, then
-  ellipsis; the caption line and swatch never move or resize (matches
-  `category-picker.md`'s wrap rule, extended to keep the caption aligned).
-- **Category active with 0 expenses this month, but has history** — caption
-  reads "0 · $0.00" for the month portion only if the month total is 0;
-  the count portion still reflects the non-zero all-time `expense_count`.
-  These are two independent numbers and must not be conflated (e.g. a
-  category with 5 all-time expenses and none this month reads "5 · $0.00",
-  never "0 · $0.00").
+  ellipsis; the swatch never moves or resizes (matches `category-picker.md`'s
+  wrap rule).
 - **No archived categories** — the archived section (region 4) does not
   render at all, not even collapsed-and-empty.
 - **All categories archived, none active** — the grid shows `empty` copy
@@ -207,13 +200,12 @@ does not have, and is not single-select/`radiogroup` — see Accessibility).
 - [ ] The Home "Categories" tile navigates to this screen; BackButton
       returns to Home (closes the reported dead-tile bug).
 - [ ] Active categories render as a 4-column grid of 64px filled colour
-      circles, each with its name centred underneath and a caption line
-      below the name reading its all-time expense count and this-month
-      total, sourced from `include_usage=true` and
-      `GET /statistics/by-category`.
+      circles, each with its name centred underneath. No count or amount is
+      shown anywhere on this screen (D703).
 - [ ] No circle contains a glyph, letter, emoji or image — colour only.
-- [ ] A category absent from the by-category response renders a `$0.00`
-      caption, not an error and not a missing cell.
+- [ ] `GET /categories` still sends `include_usage=true` even though
+      `expense_count` is never rendered here — it drives the hide-vs-delete
+      branch on the edit/delete surface (D305), unchanged by D703.
 - [ ] With zero categories, the grid shows only the "Add category" cell,
       plus "No categories yet" above it.
 - [ ] On a fetch failure with no cache, the screen shows "Couldn't load your
@@ -233,14 +225,22 @@ does not have, and is not single-select/`radiogroup` — see Accessibility).
       regression check, not new work.
 - [ ] No element on this screen uses `--accent` (yellow) — the "Add
       category" cell is the grey `--separator` circle described above.
-- [ ] Loading shows 8 skeleton cells at 64px with name and caption bars, in
-      the final grid positions, with no reflow when data lands.
+- [ ] Loading shows 8 skeleton cells at 64px with name bars, in the final
+      grid positions, with no reflow when data lands.
 - [ ] A category name of 30 characters wraps to two lines and ellipses
-      without moving the caption line or misaligning the row.
+      without misaligning the row.
+- [ ] Each active cell's accessible name is the category name alone (D703).
 - [ ] Rendering is correct in both light and dark, with every colour
       resolved from `tokens.css`.
 
 ## Resolved
+- **The per-cell caption is removed entirely — count included, not just the
+  amount** (2026-08-25, HUMAN, D703). Superseding the 2026-08-05 decision
+  below to add it: the human confirmed "removing the entire {quantity} ·
+  {amount} heading […] it is unnecessary information in those places." The
+  cell reverts to swatch + name only. `include_usage=true` keeps being sent
+  on `GET /categories` regardless — it drives hide-vs-delete (D305), a
+  concern unrelated to what renders.
 - **Grid, not a row list** (2026-08-05, HUMAN). The original verbal brief
   described rows; a reference screenshot of another app's "Add Category"
   grid was supplied in the same session, and the user chose to switch this
@@ -277,6 +277,6 @@ does not have, and is not single-select/`radiogroup` — see Accessibility).
       device.
 - [?] **"Add category" vs the reference's "Create"** — cosmetic copy choice,
       `[inferred]`, easy to change in the Copy table.
-- [?] **Zero-omission on `/statistics/by-category`** — needs a quick check
-      against the actual endpoint/service before implementation, not just
-      an assumption from Home's usage pattern.
+- ~~[?] **Zero-omission on `/statistics/by-category`**~~ — **moot (2026-08-25,
+      D703)**: the caption that consumed this data is removed; nothing on
+      screen renders a monthly total for this to affect.
