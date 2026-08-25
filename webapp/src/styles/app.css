@@ -1689,10 +1689,8 @@ body {
 /* -- categories (U2.1, docs/ui/screens/06-categories.md) --------------------
    4-column grid, reusing category-picker.md's swatch/gap values (that
    component isn't built yet — U3.1 — so this screen is the first to render
-   this shape). Adds a third caption line category-picker.md's cells don't
-   have: each active category doubles as a mini-report (count + this-month
-   total), which the design doc calls for and a plain icon grid has no other
-   room for. */
+   this shape). No caption line — a cell is swatch + name only (D703,
+   U1.1). */
 .cat-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1724,20 +1722,13 @@ body {
   color: var(--ink);
   text-align: center;
   /* Reserves a fixed two-line height regardless of actual length, so
-     captions in the same grid row stay aligned even when neighbouring
+     cells in the same grid row stay aligned even when neighbouring
      names wrap differently (docs/ui/screens/06-categories.md's Edge cases). */
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 29px;
-}
-
-.cat-cell-caption {
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--ink-secondary);
-  font-variant-numeric: tabular-nums;
 }
 
 .cat-cell-add-swatch {
@@ -1837,13 +1828,6 @@ body {
 
 .cat-archived-row {
   opacity: 0.6;
-}
-
-.cat-archived-caption {
-  flex: none;
-  font-size: 11px;
-  color: var(--ink-secondary);
-  font-variant-numeric: tabular-nums;
 }
 
 /* -- category picker (U3.1, docs/ui/components/category-picker.md) ---------

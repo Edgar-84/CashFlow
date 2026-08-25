@@ -272,7 +272,7 @@ implementation unit may start before *its own* spec exists.
       suspended user sees; every value traces to `design-system.md`.
 
 ### M1 — The two small fixes (items 3 and 5)
-- [ ] **U1.1** Categories screen stops rendering the per-row caption.
+- [x] **U1.1** Categories screen stops rendering the per-row caption.
       **AC:** no row on screen 06 shows a count or an amount; the row's
       accessible name is the category name alone; `listCategories` is **still**
       called with `includeUsage: true` and the hide-vs-delete branch is
@@ -680,13 +680,37 @@ touching auth or scoping goes through the reviewer subagent.
   is cross-cutting (most likely Home, extending its existing 403 state) and
   is explicitly left for whichever M4 unit wires the 403 detail through, or
   a decision of its own.
-- **Next:** `/clear`, then **M1** — U1.1 (Categories screen stops rendering
-  the per-row caption). M0 is now complete: all five spec files
-  (`06-categories.md`/`07-tags.md` revised, `02-add-expense.md` revised,
-  `05-statistics.md` new, `09-language.md` new, `10-admin.md` new) and their
-  `side-menu.md`/`08-settings.md`/`design-system.md`/`period-selector.md`
-  deltas exist. No unit in M1–M4 may start before the spec it decomposes —
-  that gate is now satisfied for all four remaining milestones.
+- **U1.1 is done**: `webapp/src/screens/categories.ts` no longer renders the
+  per-row caption (`captionText`/`captionAriaLabel`, `.cat-cell-caption`,
+  `.cat-archived-caption`) on either the active grid or the archived row
+  list — both cells are swatch + name only, and each accessible name is now
+  just the category name (`aria-label="Groceries"`), matching the revised
+  spec's Accessibility section verbatim. `GET /categories` still sends
+  `include_usage=true` (a test asserts the exact call args), and
+  `categoryDeleteOutcomeKind`/`categoryDeleteTriggerLabel` (the hide-vs-delete
+  branch, D305) are untouched — they read `expenseCount`, which stays on
+  `CategoryRow`. Per the spec's explicit "implementation choice" note, this
+  unit **also dropped** `monthTotalMinor`/`monthTotalFor` from
+  `CategoryRow`/`buildCategoriesData` and the `GET /statistics/by-category`
+  call from `loadCategories` (and `statisticsByCategory` from the
+  `CategoriesApi` interface) — that fetch had no remaining consumer once the
+  amount half of the caption was gone, so keeping it would have been dead
+  code. `getMe()`/`CategoriesData.currency` were deliberately left alone even
+  though nothing on this screen formats an amount any more — the spec's Data
+  table still lists that call without flagging it as removable, unlike the
+  statistics call, so removing it would have been a drive-by beyond this
+  unit's boundary. `webapp/tests/categories.test.ts` updated to match (no
+  `monthTotals`/`CategoryTotal` fixtures, aria-label assertions now check the
+  bare name).
+- **Next:** `/clear`, then **U1.2** (Tags screen, same change — mirror U1.1's
+  approach in `webapp/src/screens/tags.ts`, including the same call as here
+  on whether `GET /statistics/by-tag` still has a consumer). M0 is complete:
+  all five spec files (`06-categories.md`/`07-tags.md` revised,
+  `02-add-expense.md` revised, `05-statistics.md` new, `09-language.md` new,
+  `10-admin.md` new) and their `side-menu.md`/`08-settings.md`/
+  `design-system.md`/`period-selector.md` deltas exist. No unit in M1–M4 may
+  start before the spec it decomposes — that gate is satisfied for all four
+  remaining milestones.
 - **Gotchas the next session must know:**
   - **U3.11 has no MainButton and no confirm popup.** `09-language.md`
     deliberately made the language picker tap-to-apply — a row tap fires the
@@ -695,11 +719,10 @@ touching auth or scoping goes through the reviewer subagent.
   - **Do not "add period support" to `api/statistics.py`.** It is already
     there and already validated. M2 is client wiring; a Python diff in M2 is
     the signal to stop.
-  - **Do not stop passing `include_usage=true`** in U1.1/U1.2. The count still
-    drives hide-vs-delete (D305); only the rendering goes. And remove the
-    amount from `categories.ts:257`'s **aria label** too, not just the visible
-    caption at `:252` — U0.1's revised spec says the accessible name is the
-    name alone, not name-plus-amount.
+  - **Do not stop passing `include_usage=true`** in U1.2 (`tags.ts`, mirroring
+    U1.1's `categories.ts`). The count still drives hide-vs-delete (D305);
+    only the rendering goes, and the accessible name becomes the tag name
+    alone, same as U1.1.
   - **`sortCategoriesByUsage` already exists** at `add-expense.ts:147`. U1.3
     mirrors it; it does not generalise it into a shared helper, because
     `CategoryResponse` and `TagResponse` are separate hand-written mirrors by
