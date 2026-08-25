@@ -16,6 +16,7 @@
  */
 
 import { formatAmount, parseAmount } from "../lib/money";
+import { t } from "../lib/i18n";
 import {
   confirmDiscard,
   getViewportStableHeight,
@@ -134,7 +135,7 @@ export async function loadAddExpenseData(
     if (cached) {
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
-    const message = err instanceof Error ? err.message : "Something went wrong.";
+    const message = err instanceof Error ? err.message : t("error.fallback");
     return { status: "error", message };
   }
 }
@@ -212,12 +213,23 @@ export function amountError(amountInput: string): string | null {
   if (amountInput.trim() === "") {
     return null;
   }
-  return parseAmount(amountInput) === null ? "Enter an amount greater than 0." : null;
+  return parseAmount(amountInput) === null ? t("addExpense.amountError") : null;
 }
 
 export interface SubmitButtonState {
   label: string;
   enabled: boolean;
+}
+
+// Fills `{var}` placeholders in a catalogue template with no escaping — the
+// non-escaping counterpart to `t()`'s own vars mechanism, a private copy of
+// `screens/home.ts`'s own function of the same name (each pure module owns
+// its own, per this file's date-row header comment). Only used for
+// `addExpense.submitLabel`: that string becomes a native MainButton label via
+// `mainButton.show()`, not innerHTML, so `t()`'s auto-escaping of the
+// interpolated category name would show literal HTML entities instead of it.
+function fillTemplate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
 }
 
 /** MainButton label/enabled per the AC: disabled and "Choose a category"
@@ -232,14 +244,21 @@ export function submitButtonState(
   currency: Currency,
 ): SubmitButtonState {
   if (!draft.categoryId) {
-    return { label: "Choose a category", enabled: false };
+    return { label: t("addExpense.chooseCategory"), enabled: false };
   }
   const category = categories.find((c) => c.id === draft.categoryId);
   const minor = parseAmount(draft.amountInput);
   if (minor === null || !category) {
-    return { label: "Enter an amount", enabled: false };
+    return { label: t("addExpense.enterAmount"), enabled: false };
   }
-  return { label: `Add ${formatAmount(minor)} ${currency} to ${category.name}`, enabled: true };
+  return {
+    label: fillTemplate(t("addExpense.submitLabel"), {
+      amount: formatAmount(minor),
+      currency,
+      category: category.name,
+    }),
+    enabled: true,
+  };
 }
 
 /** Screen 02b's PATCH payload (U1.4) — only the fields that actually differ
@@ -307,12 +326,12 @@ export function editButtonState(
   today: string | null,
 ): SubmitButtonState {
   if (!draft.categoryId) {
-    return { label: "Choose a category", enabled: false };
+    return { label: t("addExpense.chooseCategory"), enabled: false };
   }
   if (parseAmount(draft.amountInput) === null) {
-    return { label: "Enter an amount", enabled: false };
+    return { label: t("addExpense.enterAmount"), enabled: false };
   }
-  return { label: "Save changes", enabled: isEditDirty(draft, initialExpense, today) };
+  return { label: t("addExpense.saveChanges"), enabled: isEditDirty(draft, initialExpense, today) };
 }
 
 export type SubmitOutcome =
@@ -330,27 +349,25 @@ function submitErrorMessage(
   opts: { mode?: AddExpenseMode; staleExpense?: boolean } = {},
 ): string {
   if (err instanceof ForbiddenError) {
-    return opts.mode === "edit"
-      ? "You don't have permission to edit this expense."
-      : "You don't have permission to add expenses.";
+    return opts.mode === "edit" ? t("addExpense.error.editForbidden") : t("addExpense.error.forbidden");
   }
   if (opts.staleExpense) {
-    return "That expense no longer exists.";
+    return t("addExpense.error.staleExpense");
   }
   if (err instanceof NotFoundError) {
-    return "That category no longer exists.";
+    return t("addExpense.error.staleCategory");
   }
   // 409 (D302): the category existed when the grid was drawn but was
   // archived before this submit landed. No dedicated error class — the
   // status code is the only signal, same convention as
   // `screens/budgets.ts::saveErrorMessage`'s duplicate-plan 409.
   if (err instanceof ApiError && err.status === 409) {
-    return "That category was archived. Choose another.";
+    return t("addExpense.error.categoryArchived");
   }
   if (err instanceof ApiError) {
     return err.message;
   }
-  return "Something went wrong. Please try again.";
+  return t("addExpense.error.fallback");
 }
 
 /** The two failure modes this unit recovers from (docs/ui/screens/02-add-
@@ -588,7 +605,7 @@ export function wireBackButton(
   opts: { isDirtyFn?: (draft: Draft) => boolean; message?: string } = {},
 ): void {
   const isDirtyFn = opts.isDirtyFn ?? isDirty;
-  const message = opts.message ?? "Discard this expense?";
+  const message = opts.message ?? t("addExpense.discardExpense");
   setBackButtonHandler(() => {
     void (async () => {
       if (!isDirtyFn(getDraft())) {
@@ -675,7 +692,7 @@ function renderCategoryGridSlot(categories: CategoryResponse[], selectedId: Uuid
 
 function renderAccountField(accountName: string): string {
   return `<div class="account-field" data-testid="account-field">
-    <div class="account-label">Account</div>
+    <div class="account-label">${t("addExpense.account")}</div>
     <div class="account-name" data-testid="account-name">${escapeHtml(accountName)}</div>
   </div>`;
 }
@@ -726,11 +743,11 @@ export interface DatePillOption {
  * shortcut", D406 half one). Its second line then becomes the short weekday
  * abbreviation ("Sun") rather than a word, per the screen doc's Copy table. */
 export function datePillOptions(today: string, selected: string): DatePillOption[] {
-  const t = parseDateString(today);
+  const d0 = parseDateString(today);
   const fixed: DatePillOption[] = [
-    { date: today, label: "today" },
-    { date: toDateString(addDays(t, -1)), label: "yesterday" },
-    { date: toDateString(addDays(t, -2)), label: "two days ago" },
+    { date: today, label: t("addExpense.datePill.today") },
+    { date: toDateString(addDays(d0, -1)), label: t("addExpense.datePill.yesterday") },
+    { date: toDateString(addDays(d0, -2)), label: t("addExpense.datePill.twoDaysAgo") },
   ];
   if (fixed.some((p) => p.date === selected)) {
     return fixed;
@@ -777,8 +794,8 @@ function renderDateRow(today: string, spentAt: string | null): string {
     })
     .join("");
   return `<div class="date-row" data-testid="date-row">
-    <div class="date-pills" role="radiogroup" aria-label="Date">${pills}</div>
-    <button type="button" class="date-calendar-btn" data-testid="date-calendar-button" aria-label="Choose a date">${CALENDAR_ICON}</button>
+    <div class="date-pills" role="radiogroup" aria-label="${escapeHtml(t("addExpense.dateRadiogroup"))}">${pills}</div>
+    <button type="button" class="date-calendar-btn" data-testid="date-calendar-button" aria-label="${escapeHtml(t("addExpense.chooseDate"))}">${CALENDAR_ICON}</button>
   </div>`;
 }
 
@@ -787,10 +804,10 @@ function renderDateRow(today: string, spentAt: string | null): string {
 // returns empty markup the way the pre-U3.4 version did.
 function renderTagChips(tags: TagResponse[], selectedIds: Uuid[]): string {
   const chips = sortTagsByUsage(tags)
-    .map((t) => renderChip({ id: t.id, label: t.name, selected: selectedIds.includes(t.id), attr: "tag-id" }))
+    .map((tag) => renderChip({ id: tag.id, label: tag.name, selected: selectedIds.includes(tag.id), attr: "tag-id" }))
     .join("");
-  const addChip = '<button type="button" class="chip" data-testid="tag-add-chip">+ Add tag</button>';
-  return `<div class="field-label">Tags</div><div class="chip-row" data-testid="tag-chips">${chips}${addChip}</div>`;
+  const addChip = `<button type="button" class="chip" data-testid="tag-add-chip">${escapeHtml(t("addExpense.addTag"))}</button>`;
+  return `<div class="field-label">${t("addExpense.tags")}</div><div class="chip-row" data-testid="tag-chips">${chips}${addChip}</div>`;
 }
 
 /** How far (px) the just-focused comment field must scroll so the keyboard
@@ -813,7 +830,7 @@ export function renderForm(
 ): string {
   const error = amountError(draft.amountInput);
   return `<div class="add-expense-form" data-testid="add-expense-form">
-    ${opts.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(opts.lastSyncedAt)}</div>` : ""}
+    ${opts.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">${t("offline.banner", { time: opts.lastSyncedAt })}</div>` : ""}
     <div class="card field">
       <input class="amount-input" data-testid="amount-input" inputmode="decimal" autofocus
         value="${escapeHtml(draft.amountInput)}" placeholder="0.00" />
@@ -824,8 +841,8 @@ export function renderForm(
     ${renderCategoryGridSlot(data.categories, draft.categoryId)}
     ${renderDateRow(data.today, draft.spentAt)}
     ${renderTagChips(data.tags, draft.tagIds)}
-    <div class="field-label">Comment</div>
-    <textarea class="comment-input" data-testid="comment-input" placeholder="Comment" maxlength="4096">${escapeHtml(draft.comment)}</textarea>
+    <div class="field-label">${t("addExpense.comment")}</div>
+    <textarea class="comment-input" data-testid="comment-input" placeholder="${escapeHtml(t("addExpense.comment"))}" maxlength="4096">${escapeHtml(draft.comment)}</textarea>
     ${opts.submitError ? `<p class="submit-error" data-testid="submit-error">${escapeHtml(opts.submitError)}</p>` : ""}
   </div>`;
 }
@@ -845,10 +862,10 @@ function renderSkeleton(amountInput: string): string {
       <div class="currency-suffix-skeleton" data-testid="currency-skeleton"></div>
     </div>
     <div class="account-field">
-      <div class="account-label">Account</div>
+      <div class="account-label">${t("addExpense.account")}</div>
       <div class="account-name-skeleton" data-testid="account-skeleton"></div>
     </div>
-    <div class="cp-label">Categories</div>
+    <div class="cp-label">${t("addExpense.categories")}</div>
     <div class="cp-grid" data-testid="category-grid-skeleton">${cells}</div>
     <div class="chips-skeleton"></div>
   </div>`;
@@ -857,19 +874,19 @@ function renderSkeleton(amountInput: string): string {
 function renderError(message: string): string {
   return `<div class="add-expense-error" data-testid="error">
     <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <button type="button" data-action="retry">${t("error.retry")}</button>
   </div>`;
 }
 
 function renderForbidden(): string {
   return `<div class="add-expense-readonly" data-testid="forbidden">
-    <p>You don't have permission to add expenses.</p>
+    <p>${t("addExpense.error.forbidden")}</p>
   </div>`;
 }
 
 function renderEmpty(): string {
   return `<div class="add-expense-empty" data-testid="empty">
-    <p>Add a category first — every expense needs one.</p>
+    <p>${t("addExpense.empty")}</p>
   </div>`;
 }
 
@@ -976,7 +993,7 @@ export function mount(
     if (mode === "edit" && initialExpense) {
       wireBackButton(controller.getDraft, handlers.onClose, {
         isDirtyFn: (d) => isEditDirty(d, initialExpense, data.today),
-        message: "Discard changes?",
+        message: t("addExpense.discardChanges"),
       });
     } else {
       wireBackButton(controller.getDraft, handlers.onClose);
