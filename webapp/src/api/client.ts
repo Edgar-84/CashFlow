@@ -104,12 +104,12 @@ interface RequestOptions {
   json?: unknown;
 }
 
-/** `PeriodQuery` (D313, the primary selector — Home moves to this in U1.5) or
- * the legacy `{ months_back }` alias (D300). Screen 05 (Statistics) is out of
- * scope for this plan's period-selector work (D316) and keeps sending
- * `months_back` — `last_3_months` has no `PeriodQuery` equivalent, so the
- * alias cannot be dropped from this client until Statistics is revisited.
- * Accepted cost: two period vocabularies coexist here (D316). */
+/** `PeriodQuery` (D313, the primary selector) or the legacy `{ months_back }`
+ * alias (D300). Both Home and Statistics send `PeriodQuery` now (V7, D704 —
+ * screen 05 moved off `months_back` in `screens/statistics.ts`'s
+ * `loadStatistics`). The alias stays on this client's type only because the
+ * backend still accepts it for the bot (D708); nothing in this webapp calls
+ * these three methods with `{ months_back }` any more. */
 export type StatisticsQuery = PeriodQuery | { months_back?: number };
 
 export class ApiClient {
