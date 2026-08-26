@@ -14,6 +14,7 @@
 
 import { categorySlotCssVar, categorySlotName, PALETTE_SLOT_COUNT, QUICK_SLOTS } from "../lib/category-colors";
 import { nextGridFocusIndex } from "../screens/categories";
+import { t } from "../lib/i18n";
 import { haptics } from "../lib/telegram";
 
 export interface ColorPickerProps {
@@ -44,12 +45,25 @@ const PLUS_SVG =
   '<line x1="8" y1="2" x2="8" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />' +
   '<line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>';
 
+// A private, non-escaping template filler — `label` is wrapped in this file's
+// own `escapeHtml` at its one call site below, so `t()`'s auto-escaping vars
+// mechanism would escape the interpolated (untranslated, `lib/category-
+// colors.ts`-owned) slot name twice (same reasoning as `period-selector.ts`'s
+// copy of this helper, U3.9's gotcha; "pure modules don't share helpers",
+// U3.5+).
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? vars[name] : match));
+}
+
 // Doubles the selected state in the accessible name on top of `aria-checked`
 // (component doc's Copy table, `swatch.aria.selected`) — deliberate, for
-// clients that announce one but not the other.
+// clients that announce one but not the other. `categorySlotName` itself
+// stays untranslated (`lib/category-colors.ts` is out of scope for this
+// unit, same "only chrome is translated" line the plan draws around
+// formatting — see `date-range-picker.ts`'s own note).
 function renderCircle(slot: number, selected: boolean, disabled: boolean): string {
   const name = categorySlotName(slot);
-  const label = selected ? `${name}, selected` : name;
+  const label = selected ? fillTemplate(t("colorPicker.selected"), { name }) : name;
   return `<button type="button" class="clp-circle${selected ? " selected" : ""}" role="radio" aria-checked="${selected}" aria-label="${escapeHtml(label)}" data-testid="clp-circle" data-slot="${slot}" style="background:${categorySlotCssVar(slot)}"${disabled ? " disabled" : ""}>${
     selected ? `<span class="clp-badge" aria-hidden="true">${CHECK_SVG}</span>` : ""
   }</button>`;
@@ -68,9 +82,9 @@ export function renderColorQuickRow(props: ColorPickerProps): string {
   const overflow = overflowSlot !== null ? renderCircle(overflowSlot, true, disabled) : "";
   const plus = disabled
     ? ""
-    : `<button type="button" class="clp-plus" aria-label="More colours" data-testid="clp-more">${PLUS_SVG}</button>`;
+    : `<button type="button" class="clp-plus" aria-label="${escapeHtml(t("colorPicker.more"))}" data-testid="clp-more">${PLUS_SVG}</button>`;
   return `<div class="clp-row${disabled ? " clp-disabled" : ""}" data-testid="clp-row">
-    <div class="clp-radiogroup" role="radiogroup" aria-label="Colour" data-testid="clp-radiogroup">${circles}${overflow}</div>
+    <div class="clp-radiogroup" role="radiogroup" aria-label="${escapeHtml(t("colorPicker.colour"))}" data-testid="clp-radiogroup">${circles}${overflow}</div>
     ${plus}
   </div>`;
 }
@@ -82,12 +96,13 @@ export function renderColorSheet(selectedSlot: number | null): string {
   const circles = Array.from({ length: PALETTE_SLOT_COUNT }, (_, i) => i + 1)
     .map((slot) => renderCircle(slot, slot === selectedSlot, false))
     .join("");
+  const colourLabel = escapeHtml(t("colorPicker.colour"));
   return `<div class="drp-root" data-testid="clp-sheet-root">
     <div class="drp-scrim" data-testid="clp-scrim"></div>
-    <div class="drp-sheet" role="dialog" aria-modal="true" aria-label="Colour" data-testid="clp-sheet">
-      <div class="drp-title">Colour</div>
+    <div class="drp-sheet" role="dialog" aria-modal="true" aria-label="${colourLabel}" data-testid="clp-sheet">
+      <div class="drp-title">${colourLabel}</div>
       <div class="clp-sheet-body" data-testid="clp-sheet-body">
-        <div class="clp-grid" role="radiogroup" aria-label="Colour" data-testid="clp-grid">${circles}</div>
+        <div class="clp-grid" role="radiogroup" aria-label="${colourLabel}" data-testid="clp-grid">${circles}</div>
       </div>
     </div>
   </div>`;

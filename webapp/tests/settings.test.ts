@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { Currency } from "../src/api/types";
+import { setLanguage, t } from "../src/lib/i18n";
 import {
-  CURRENCY_NAMES,
   CURRENCY_ORDER,
-  SAVE_ERROR,
   createMemoryCache,
   createSettingsController,
+  currencyName,
   loadSettings,
   renderSettings,
   renderSettingsView,
@@ -39,7 +39,7 @@ describe("CURRENCY_ORDER", () => {
 
   it("has a name for every currency in the order", () => {
     for (const code of CURRENCY_ORDER) {
-      expect(CURRENCY_NAMES[code]).toBeTruthy();
+      expect(currencyName(code)).toBeTruthy();
     }
   });
 });
@@ -155,7 +155,7 @@ describe("createSettingsController", () => {
 
       const outcome = await controller.save();
 
-      expect(outcome).toEqual({ status: "error", message: SAVE_ERROR });
+      expect(outcome).toEqual({ status: "error", message: t("settings.errSave") });
       expect(controller.getSelected()).toBe("EUR");
     }
   });
@@ -178,7 +178,7 @@ describe("renderSettingsView", () => {
     const html = renderSettingsView({ selected: "USD", interactive: true, showAdminLine: false });
     for (const code of CURRENCY_ORDER) {
       expect(html).toContain(code);
-      expect(html).toContain(CURRENCY_NAMES[code]);
+      expect(html).toContain(currencyName(code));
     }
   });
 
@@ -233,8 +233,13 @@ describe("renderSettingsView", () => {
   });
 
   it("shows the save-error copy under the list when passed", () => {
-    const html = renderSettingsView({ selected: "USD", interactive: true, showAdminLine: false, saveError: SAVE_ERROR });
-    expect(html).toContain(SAVE_ERROR);
+    const html = renderSettingsView({
+      selected: "USD",
+      interactive: true,
+      showAdminLine: false,
+      saveError: t("settings.errSave"),
+    });
+    expect(html).toContain(t("settings.errSave"));
   });
 });
 
@@ -278,5 +283,33 @@ describe("renderSettings", () => {
     const html = renderSettings({ status: "ready", currency: "USD", role: "admin" }, { selected: "EUR", saving: true });
     const disabledCount = (html.match(/ disabled>/g) ?? []).length;
     expect(disabledCount).toBe(CURRENCY_ORDER.length);
+  });
+});
+
+// -- i18n (U3.10) --------------------------------------------------------
+
+describe("renders in Russian", () => {
+  afterEach(() => setLanguage("en"));
+
+  it("translates the section heading, warning, admin line, currency names and save error", () => {
+    setLanguage("ru");
+    const html = renderSettingsView({ selected: "USD", interactive: false, showAdminLine: true, saveError: t("settings.errSave") });
+    expect(html).toContain(t("settings.sectionCurrency"));
+    expect(html).toContain(t("settings.warnNoConversion"));
+    expect(html).toContain(t("settings.readonlyAdmin"));
+    expect(html).toContain(currencyName("EUR"));
+    expect(html).toContain(t("settings.errSave"));
+  });
+
+  it("translates the load error, the confirm popup message and the discard prompt", async () => {
+    setLanguage("ru");
+    const api: SettingsApi = {
+      getMe: vi.fn().mockRejectedValue(new RetryableError()),
+      updateAccount: vi.fn(),
+    };
+    const state = await loadSettings(api, createMemoryCache());
+    expect(state).toEqual({ status: "error", message: t("settings.errLoad") });
+    expect(settingsConfirmMessage("EUR")).toBe(t("settings.confirmMessage").replace("{code}", "EUR"));
+    expect(t("settings.discardChanges")).not.toBe("Discard changes?");
   });
 });

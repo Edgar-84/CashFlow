@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { CategoryResponse, CategoryTotal, PeriodTotal, TagResponse, TagTotal } from "../src/api/types";
+import { setLanguage, t } from "../src/lib/i18n";
 import { toQuery, type PeriodValue } from "../src/lib/period";
 import {
   applyStatisticsChrome,
@@ -473,5 +474,59 @@ describe("pickerValueForPeriod", () => {
   it("opens empty for any non-custom period, even one with a leftover offset", () => {
     expect(pickerValueForPeriod(MONTH_PERIOD)).toEqual({});
     expect(pickerValueForPeriod({ unit: "day", offset: -3 })).toEqual({});
+  });
+});
+
+// -- i18n (U3.10) --------------------------------------------------------
+
+describe("renders in Russian", () => {
+  afterEach(() => setLanguage("en"));
+
+  it("translates the grouping toggle, forbidden and empty-period copy", () => {
+    setLanguage("ru");
+    const forbidden = renderStatistics({ status: "forbidden" }, NOW);
+    expect(forbidden).toContain(t("statistics.forbidden"));
+
+    const empty = renderStatistics({ status: "empty", period: MONTH_PERIOD, grouping: "tag" }, NOW);
+    expect(empty).toContain(t("statistics.byCategory"));
+    expect(empty).toContain(t("statistics.byTag"));
+    expect(empty).toContain(t("statistics.emptyPeriod"));
+  });
+
+  it("translates the unknown-category/-tag fallback labels and the empty-bars notes", () => {
+    setLanguage("ru");
+    const data = buildStatisticsData({
+      categories: CATEGORIES,
+      tags: TAGS,
+      categoryTotals: [{ category_id: "cat-deleted", total: 500 }],
+      tagTotals: [],
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      period: MONTH_PERIOD,
+      grouping: "tag",
+    });
+    expect(data.categoryBars[0]).toMatchObject({ label: t("statistics.unknownCategory") });
+
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
+    expect(html).toContain(t("statistics.bars.emptyTag"));
+  });
+
+  it("translates the offline banner and the retry error copy", () => {
+    setLanguage("ru");
+    const data = buildStatisticsData({
+      categories: CATEGORIES,
+      tags: TAGS,
+      categoryTotals: CATEGORY_TOTALS,
+      tagTotals: TAG_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      period: MONTH_PERIOD,
+      grouping: "category",
+    });
+    const offline = renderStatistics({ status: "offline", lastSyncedAt: "2026-01-15T09:00:00.000Z", ...data }, NOW);
+    expect(offline).toContain(t("offline.banner", { time: "2026-01-15T09:00:00.000Z" }));
+
+    const error = renderStatistics({ status: "error", message: "boom", period: MONTH_PERIOD, grouping: "category" }, NOW);
+    expect(error).toContain(t("error.retry"));
   });
 });

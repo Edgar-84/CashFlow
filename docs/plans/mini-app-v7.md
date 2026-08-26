@@ -342,7 +342,7 @@ implementation unit may start before *its own* spec exists.
 - [x] **U3.7** Extract `expenses.ts` + `expense-detail.ts`.
 - [x] **U3.8** Extract `budgets.ts` + `budget-form.ts`.
 - [x] **U3.9** Extract `categories.ts` + `tags.ts`.
-- [ ] **U3.10** Extract `settings.ts` + `statistics.ts` + the remaining
+- [x] **U3.10** Extract `settings.ts` + `statistics.ts` + the remaining
       components (`period-selector`, `date-range-picker`, `category-picker`,
       `color-picker`, `toast`) + `main.ts`.
       **AC (U3.5–U3.10, each):** no user-visible literal remains in the files
@@ -1223,8 +1223,54 @@ touching auth or scoping goes through the reviewer subagent.
   "Save" label; `i18n.test.ts`'s generic per-language loops pick up all 39 new
   keys with no changes needed there. Grepped both files for the
   `(t) =>`/`(t:` shadowing hazard — none found, nothing to rename.
-- **Next:** `/clear`, then **U3.10** (extract `settings.ts` + `statistics.ts`
-  + the remaining components + `main.ts`).
+- **U3.10 is done**: every user-visible literal in `settings.ts`, `statistics.ts`,
+  the five remaining components (`period-selector.ts`, `date-range-picker.ts`,
+  `category-picker.ts`, `color-picker.ts`, `toast.ts`) and `main.ts` now goes
+  through `t()`. `toast.ts` needed no change — its `message` is always
+  pre-composed by the caller (`home.ts`'s `budgetAlertMessage`, already
+  catalogued). `main.ts` needed only two: both `deleteCategoryAndUpdateCache`/
+  `deleteTagAndUpdateCache`'s hardcoded `"You have read-only access to this
+  account."` now reuse the global `readonly` key U3.5 already catalogued.
+  `settings.ts`'s 15 hardcoded `CURRENCY_NAMES` became `currencyName(code)`,
+  one catalogue key per ISO code (`settings.currency.USD` etc.) — the
+  screen doc's own "English names, no localisation" line is now stale
+  (pre-V7; not touched by U0.4's later delta) and superseded by the plan's
+  Goal item 1 and this unit's AC; flagged here rather than silently
+  reproduced or hand-edited into the spec, which is this unit's owned code,
+  not its spec. `date-range-picker.ts` and `color-picker.ts` each carry a
+  file-header note stating a deliberate boundary: calendar month/weekday
+  names (`date-range-picker.ts`'s `MONTH_NAMES`/`WEEKDAY_HEADER`) and
+  category-slot colour names (`color-picker.ts`'s `categorySlotName`, owned
+  by `lib/category-colors.ts`, outside this unit's file list) stay
+  browser-locale/untranslated — the same "only chrome is translated, date/
+  number formatting stays out of V7" line U0.4's resolved open question and
+  `lib/period.ts::describe` already draw; only the chrome *around* them
+  (dialog titles, quick-chip labels, footer buttons, aria-label templates)
+  is catalogued. `period-selector.ts`'s `aria.prev`/`aria.next` templates
+  compose with a translated unit noun (`periodSelector.unit.*`) via a
+  private `fillTemplate` rather than `t()`'s auto-escaping vars, since the
+  composed string is written into an `aria-label` attribute that the call
+  site's own `escapeHtml` already wraps once — same double-escape hazard
+  U3.9 first flagged, now confirmed recurring in this unit's non-native-chrome
+  cell too (not just MainButton/`showConfirm`), per that unit's own gotcha
+  note. `statistics.ts` renamed two more `(t) =>`/`(t:` map-callback
+  shadowing sites (`catTotalById`, `input.tagTotals.map`) to `ct`/`tt`,
+  alongside the pattern's now-familiar `tagNameById` → `tag` rename.
+  Every test file needed no changes to its existing exact-EN-string
+  assertions (no `vi.mock` on `../src/lib/i18n` in any of them) — they
+  doubled as the AC's byte-identical-output regression test unchanged,
+  except `settings.test.ts` (dropped the `CURRENCY_NAMES`/`SAVE_ERROR`
+  exports it imported directly, switched to `currencyName()`/`t()`).
+  Added: a scoped `setLanguage("ru")`/`afterEach(() => setLanguage("en"))`
+  block per screen/component test file (settings, statistics,
+  period-selector, date-range-picker, category-picker, color-picker) —
+  `main.ts`'s own routing functions stay untested under Node, the same
+  accepted gap the file's header comment and U2.2's STATE note both already
+  document. `i18n.test.ts`'s generic per-language loops pick up all ~70 new
+  keys with no changes needed there. M3.3 (the webapp string-extraction
+  pass) is complete; `bot/` extraction starts at U3.12.
+- **Next:** `/clear`, then **U3.11** (the language picker screen from U0.4's
+  spec, its route, and its Settings entry point).
 - **Gotchas the next session must know:**
   - **Re-scan the whole file for literals after the first pass, not just the
     obvious render/copy sites.** U3.8's `budgetForm.err.planGone` was a
@@ -1293,3 +1339,20 @@ touching auth or scoping goes through the reviewer subagent.
     through `t(key, vars)`, check whether anything downstream already
     escapes the result — if so, use `fillTemplate` and let that one existing
     `escapeHtml()` call do the only escaping.
+  - **A screen doc can be stale about localisation itself, not just about a
+    string's content.** `08-settings.md`'s Copy section says "English names,
+    no localisation — the rest of the app is English-only" for the 15
+    currency names — true when written (V4), false since M3 started. U3.10
+    translated them anyway (the plan's Goal item 1 and the unit's own AC both
+    say every visible string, no carve-out for this one) and left the doc
+    line as found — fixing a spec beyond the unit's own file list is a
+    drive-by, not this unit's job. Whoever next touches `08-settings.md`
+    should correct that line in the same change.
+  - **Date/number formatting stays out of V7 wherever it appears, not just in
+    `lib/period.ts::describe`.** U3.10 hit the same boundary twice more:
+    `date-range-picker.ts`'s `MONTH_NAMES`/`MONTH_ABBR`/`WEEKDAY_HEADER` and
+    `color-picker.ts`'s `categorySlotName` (owned by `lib/category-colors.ts`,
+    a file no U3.x unit's file list includes) both stay untranslated on
+    purpose — translate the chrome *around* a formatted/named value, never
+    the formatter or name table itself, unless a future unit's file list
+    explicitly names that module.

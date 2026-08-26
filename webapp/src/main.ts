@@ -1,5 +1,5 @@
 import { ApiClient, ForbiddenError } from "./api/client";
-import { setLanguage } from "./lib/i18n";
+import { setLanguage, t } from "./lib/i18n";
 import { applyTheme, getInitData } from "./lib/telegram";
 import {
   createMemoryCache as createAddExpenseCache,
@@ -755,7 +755,7 @@ async function deleteCategoryAndUpdateCache(categoryId: Uuid): Promise<void> {
     }
     const failure: CategoryDeleteFailure =
       err instanceof ForbiddenError
-        ? { categoryId, message: "You have read-only access to this account.", retryable: false }
+        ? { categoryId, message: t("readonly"), retryable: false }
         : { categoryId, message: categoryDeleteFailureMessage(row.name, row.expenseCount), retryable: true };
     renderCategoriesFromCache(failure);
   }
@@ -916,7 +916,7 @@ async function deleteTagAndUpdateCache(tagId: Uuid): Promise<void> {
     }
     const failure: TagDeleteFailure =
       err instanceof ForbiddenError
-        ? { tagId, message: "You have read-only access to this account.", retryable: false }
+        ? { tagId, message: t("readonly"), retryable: false }
         : { tagId, message: tagDeleteFailureMessage(row.name, row.expenseCount), retryable: true };
     renderTagsFromCache(failure);
   }

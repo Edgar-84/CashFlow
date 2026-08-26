@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   nextRangeSelection,
   quickRange,
@@ -7,6 +7,7 @@ import {
   type DateRangePickerProps,
   type DateRangePickerValue,
 } from "../src/components/date-range-picker";
+import { setLanguage, t } from "../src/lib/i18n";
 
 // Tuesday, August 4 2026 — matches period.test.ts / period-selector.test.ts's fixture.
 const MAX_DATE = "2026-08-04";
@@ -244,5 +245,48 @@ describe("quickRange", () => {
 
   it("This month spans the 1st of maxDate's month through maxDate", () => {
     expect(quickRange("month", MAX_DATE)).toEqual({ start: "2026-08-01", end: "2026-08-04" });
+  });
+});
+
+// -- i18n (U3.10) --------------------------------------------------------
+
+describe("renders in Russian", () => {
+  afterEach(() => setLanguage("en"));
+
+  it("translates the title, summary, quick chips and footer, keeping calendar labels in English", () => {
+    setLanguage("ru");
+    const html = renderDateRangePicker(props());
+    expect(html).toContain(`aria-label="${t("dateRangePicker.selectPeriod")}"`);
+    expect(html).toContain(`<div class="drp-title">${t("dateRangePicker.selectPeriod")}</div>`);
+    expect(html).toContain(t("dateRangePicker.chooseStart"));
+    expect(html).toContain(t("dateRangePicker.quick.week7"));
+    expect(html).toContain(t("dateRangePicker.quick.days30"));
+    expect(html).toContain(t("dateRangePicker.quick.month"));
+    expect(html).toContain(`>${t("dateRangePicker.cancel")}<`);
+    expect(html).toContain(t("dateRangePicker.apply"));
+    // Calendar month names/weekday header stay browser-locale (file's own
+    // scope note) — this component's chrome translates around them.
+    expect(html).toContain("August 2026");
+    expect(html).toContain("Mon");
+  });
+
+  it("translates the range-too-long message and the single-mode title", () => {
+    setLanguage("ru");
+    const tooLong = renderDateRangePicker(
+      props({ value: { start: "2026-01-01", end: "2026-03-01" }, maxRangeDays: 30 }),
+    );
+    expect(tooLong).toContain(t("dateRangePicker.rangeTooLong").replace("{maxRangeDays}", "30"));
+
+    const single = renderDateRangePicker(props({ mode: "single" }));
+    expect(single).toContain(`<div class="drp-title">${t("dateRangePicker.selectDate")}</div>`);
+  });
+
+  it("translates the 'from'/'from ... to ...' summary connectors", () => {
+    setLanguage("ru");
+    const from = renderDateRangePicker(props({ value: { start: "2026-08-01" } }));
+    expect(from).toContain(t("dateRangePicker.from").replace("{date}", "1 Aug 2026"));
+
+    const fromTo = renderDateRangePicker(props({ value: { start: "2026-08-01", end: "2026-08-04" } }));
+    expect(fromTo).toContain(t("dateRangePicker.fromTo").replace("{from}", "1 Aug").replace("{to}", "4 Aug 2026"));
   });
 });

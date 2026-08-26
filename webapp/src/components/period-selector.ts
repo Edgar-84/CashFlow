@@ -7,6 +7,7 @@
  */
 
 import { describe as describePeriod, type PeriodUnit, type PeriodValue } from "../lib/period";
+import { t, type Catalogue } from "../lib/i18n";
 import { haptics } from "../lib/telegram";
 
 export interface PeriodSelectorProps {
@@ -23,16 +24,17 @@ export interface PeriodSelectorProps {
 
 interface TabDef {
   unit: PeriodUnit;
-  label: string;
+  label: keyof Catalogue;
 }
 
-// Order and wording per docs/ui/components/period-selector.md's Copy table.
+// Order per docs/ui/components/period-selector.md's Copy table; wording comes
+// from the catalogue so a tab label follows the account's language.
 const TABS: readonly TabDef[] = [
-  { unit: "day", label: "Day" },
-  { unit: "week", label: "Week" },
-  { unit: "month", label: "Month" },
-  { unit: "year", label: "Year" },
-  { unit: "custom", label: "Period" },
+  { unit: "day", label: "periodSelector.tab.day" },
+  { unit: "week", label: "periodSelector.tab.week" },
+  { unit: "month", label: "periodSelector.tab.month" },
+  { unit: "year", label: "periodSelector.tab.year" },
+  { unit: "custom", label: "periodSelector.tab.custom" },
 ];
 
 function escapeHtml(value: string): string {
@@ -43,10 +45,26 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+// A private, non-escaping template filler — every call site below already
+// wraps its result in this file's own `escapeHtml` before writing it into an
+// attribute, so using `t()`'s auto-escaping vars mechanism here would escape
+// the interpolated unit noun twice (same reasoning as `categories.ts`'s
+// `fillTemplate`, U3.9's gotcha; "pure modules don't share helpers", U3.5+).
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? vars[name] : match));
+}
+
+const UNIT_NOUN: Record<Exclude<PeriodUnit, "custom">, keyof Catalogue> = {
+  day: "periodSelector.unit.day",
+  week: "periodSelector.unit.week",
+  month: "periodSelector.unit.month",
+  year: "periodSelector.unit.year",
+};
+
 function renderTabs(value: PeriodValue, disabled: boolean): string {
   const tabs = TABS.map((tab) => {
     const active = tab.unit === value.unit;
-    return `<button type="button" role="tab" class="period-tab${active ? " active" : ""}" aria-selected="${active}" data-unit="${tab.unit}" data-testid="period-tab-${tab.unit}"${disabled ? " disabled" : ""}><span class="period-tab-text">${escapeHtml(tab.label)}</span></button>`;
+    return `<button type="button" role="tab" class="period-tab${active ? " active" : ""}" aria-selected="${active}" data-unit="${tab.unit}" data-testid="period-tab-${tab.unit}"${disabled ? " disabled" : ""}><span class="period-tab-text">${escapeHtml(t(tab.label))}</span></button>`;
   }).join("");
   return `<div class="period-tabs" role="tablist">${tabs}</div>`;
 }
@@ -54,7 +72,10 @@ function renderTabs(value: PeriodValue, disabled: boolean): string {
 function renderArrow(direction: "prev" | "next", value: PeriodValue, disabled: boolean): string {
   const isNext = direction === "next";
   const atPresent = isNext && value.offset === 0;
-  const ariaLabel = isNext ? `Next ${value.unit}` : `Previous ${value.unit}`;
+  const unitNoun = value.unit === "custom" ? "" : t(UNIT_NOUN[value.unit]);
+  const ariaLabel = fillTemplate(t(isNext ? "periodSelector.aria.next" : "periodSelector.aria.prev"), {
+    unit: unitNoun,
+  });
   const glyph = isNext ? "›" : "‹"; // › ‹
   return `<button type="button" class="period-arrow" data-action="${direction}" aria-label="${escapeHtml(ariaLabel)}"${atPresent ? ' aria-disabled="true"' : ""}${disabled ? " disabled" : ""} data-testid="period-arrow-${direction}">${glyph}</button>`;
 }
@@ -70,11 +91,11 @@ const JUMP_ICON =
 
 // Copy table's per-unit accessible name — "a screen reader user arrowing
 // through months should hear the thing they are returning to".
-const JUMP_ARIA_LABEL: Record<Exclude<PeriodUnit, "custom">, string> = {
-  day: "Back to today",
-  week: "Back to this week",
-  month: "Back to this month",
-  year: "Back to this year",
+const JUMP_ARIA_LABEL: Record<Exclude<PeriodUnit, "custom">, keyof Catalogue> = {
+  day: "periodSelector.aria.jump.day",
+  week: "periodSelector.aria.jump.week",
+  month: "periodSelector.aria.jump.month",
+  year: "periodSelector.aria.jump.year",
 };
 
 function renderJumpCell(value: PeriodValue, disabled: boolean): string {
@@ -84,7 +105,7 @@ function renderJumpCell(value: PeriodValue, disabled: boolean): string {
   if (value.unit === "custom" || value.offset === 0) {
     return `<div class="period-jump-cell" aria-hidden="true"></div>`;
   }
-  const ariaLabel = JUMP_ARIA_LABEL[value.unit];
+  const ariaLabel = t(JUMP_ARIA_LABEL[value.unit]);
   return `<div class="period-jump-cell"><button type="button" class="period-arrow period-jump" data-action="jump" aria-label="${escapeHtml(ariaLabel)}"${disabled ? " disabled" : ""} data-testid="period-jump">${JUMP_ICON}</button></div>`;
 }
 
@@ -97,7 +118,7 @@ function renderNav(value: PeriodValue, now: Date, disabled: boolean): string {
   return `<div class="period-nav">
     ${hasArrows ? '<div class="period-spacer" aria-hidden="true"></div>' : ""}
     ${hasArrows ? renderArrow("prev", value, disabled) : ""}
-    <button type="button" class="period-label" aria-label="Change period" data-testid="period-label"${disabled ? " disabled" : ""}><span class="period-label-text">${escapeHtml(label)}</span></button>
+    <button type="button" class="period-label" aria-label="${escapeHtml(t("periodSelector.aria.label"))}" data-testid="period-label"${disabled ? " disabled" : ""}><span class="period-label-text">${escapeHtml(label)}</span></button>
     ${hasArrows ? renderArrow("next", value, disabled) : ""}
     ${hasArrows ? renderJumpCell(value, disabled) : ""}
   </div>`;

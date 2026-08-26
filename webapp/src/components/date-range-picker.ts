@@ -10,6 +10,7 @@
  */
 
 import { monthGrid, type MonthGridDay } from "../lib/period";
+import { t } from "../lib/i18n";
 import { haptics } from "../lib/telegram";
 
 export type DateRangePickerMode = "range" | "single";
@@ -42,6 +43,11 @@ const LAZY_LOAD_BATCH = 6;
 // finite. See plan Decision log D3xx.
 const YEAR_LIST_YEARS_BACK = 30;
 
+// Calendar month/weekday labels stay hardcoded English, not catalogue-driven
+// — same scope line the plan draws for `lib/period.ts::describe`'s output
+// (U0.4's resolved open question: "only chrome is translated", date/number
+// formatting stays out of V7). U3.10 only translates this file's *chrome*
+// (dialog title, quick chips, footer, summary connector words) around it.
 const MONTH_NAMES = [
   "January",
   "February",
@@ -135,19 +141,6 @@ function formatDate(d: Date, includeYear: boolean): string {
   return includeYear ? `${base} ${d.getFullYear()}` : base;
 }
 
-function formatSummary(value: DateRangePickerValue): string {
-  if (!value.start) {
-    return "Choose a start date";
-  }
-  if (!value.end) {
-    return `from ${formatDate(parseDateString(value.start), true)}`;
-  }
-  const start = parseDateString(value.start);
-  const end = parseDateString(value.end);
-  const sameYear = start.getFullYear() === end.getFullYear();
-  return `from ${formatDate(start, !sameYear)} to ${formatDate(end, true)}`;
-}
-
 // -- HTML escaping (mirrors period-selector.ts) ------------------------------
 
 function escapeHtml(value: string): string {
@@ -156,6 +149,31 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// A private, non-escaping template filler — every caller of `formatSummary`
+// wraps its result in `escapeHtml` already, so using `t()`'s auto-escaping
+// vars mechanism here would escape the interpolated date substring twice
+// (same reasoning as `period-selector.ts`'s copy of this helper, U3.9's
+// gotcha; "pure modules don't share helpers", U3.5+).
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? vars[name] : match));
+}
+
+function formatSummary(value: DateRangePickerValue): string {
+  if (!value.start) {
+    return t("dateRangePicker.chooseStart");
+  }
+  if (!value.end) {
+    return fillTemplate(t("dateRangePicker.from"), { date: formatDate(parseDateString(value.start), true) });
+  }
+  const start = parseDateString(value.start);
+  const end = parseDateString(value.end);
+  const sameYear = start.getFullYear() === end.getFullYear();
+  return fillTemplate(t("dateRangePicker.fromTo"), {
+    from: formatDate(start, !sameYear),
+    to: formatDate(end, true),
+  });
 }
 
 // -- pure per-cell / per-month rendering -------------------------------------
@@ -229,12 +247,15 @@ function renderWeekdayHeader(): string {
 
 function renderQuickChips(): string {
   const chips: Array<{ kind: QuickRangeKind; label: string }> = [
-    { kind: "week7", label: "Last 7 days" },
-    { kind: "days30", label: "Last 30 days" },
-    { kind: "month", label: "This month" },
+    { kind: "week7", label: t("dateRangePicker.quick.week7") },
+    { kind: "days30", label: t("dateRangePicker.quick.days30") },
+    { kind: "month", label: t("dateRangePicker.quick.month") },
   ];
   return `<div class="drp-quick-chips">${chips
-    .map((c) => `<button type="button" class="drp-quick-chip" data-quick="${c.kind}" data-testid="drp-quick-${c.kind}">${c.label}</button>`)
+    .map(
+      (c) =>
+        `<button type="button" class="drp-quick-chip" data-quick="${c.kind}" data-testid="drp-quick-${c.kind}">${escapeHtml(c.label)}</button>`,
+    )
     .join("")}</div>`;
 }
 
@@ -272,13 +293,14 @@ export function renderDateRangePicker(props: DateRangePickerProps): string {
   const applyDisabled = !isRange || !value.start || !value.end || rangeTooLong;
 
   const summary = rangeTooLong
-    ? `Choose a range of up to ${maxRangeDays} days.`
+    ? fillTemplate(t("dateRangePicker.rangeTooLong"), { maxRangeDays: String(maxRangeDays) })
     : formatSummary(value);
+  const selectPeriodLabel = escapeHtml(t("dateRangePicker.selectPeriod"));
 
   return `<div class="drp-root" data-testid="drp-root">
     <div class="drp-scrim" data-testid="drp-scrim"></div>
-    <div class="drp-sheet" role="dialog" aria-modal="true" aria-label="Select period" data-testid="drp-sheet">
-      <div class="drp-title">${isRange ? "Select period" : "Select date"}</div>
+    <div class="drp-sheet" role="dialog" aria-modal="true" aria-label="${selectPeriodLabel}" data-testid="drp-sheet">
+      <div class="drp-title">${isRange ? selectPeriodLabel : escapeHtml(t("dateRangePicker.selectDate"))}</div>
       ${isRange ? `<div class="drp-summary${rangeTooLong ? " drp-summary-error" : ""}" data-testid="drp-summary">${escapeHtml(summary)}</div>` : ""}
       ${isRange ? renderQuickChips() : ""}
       ${renderWeekdayHeader()}
@@ -287,8 +309,8 @@ export function renderDateRangePicker(props: DateRangePickerProps): string {
       ${
         isRange
           ? `<div class="drp-footer" data-testid="drp-footer">
-        <button type="button" class="drp-cancel" data-testid="drp-cancel">Cancel</button>
-        <button type="button" class="drp-apply" data-testid="drp-apply"${applyDisabled ? " disabled" : ""}>Apply</button>
+        <button type="button" class="drp-cancel" data-testid="drp-cancel">${escapeHtml(t("dateRangePicker.cancel"))}</button>
+        <button type="button" class="drp-apply" data-testid="drp-apply"${applyDisabled ? " disabled" : ""}>${escapeHtml(t("dateRangePicker.apply"))}</button>
       </div>`
           : ""
       }

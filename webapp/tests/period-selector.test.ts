@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderPeriodSelector, type PeriodSelectorProps } from "../src/components/period-selector";
+import { setLanguage, t } from "../src/lib/i18n";
 import type { PeriodUnit, PeriodValue } from "../src/lib/period";
 
 const NOW = new Date(2026, 7, 4); // Tuesday, August 4 2026 — matches period.test.ts's fixture
@@ -140,5 +141,29 @@ describe("renderPeriodSelector — disabled (offline)", () => {
   it("omitting disabled behaves as not disabled", () => {
     const html = renderPeriodSelector(props({ unit: "month", offset: -1 }));
     expect(html).not.toContain("disabled");
+  });
+});
+
+// -- i18n (U3.10) --------------------------------------------------------
+
+describe("renders in Russian", () => {
+  afterEach(() => setLanguage("en"));
+
+  it("translates the tabs, the label aria-name, the arrows and the jump control", () => {
+    setLanguage("ru");
+    const html = renderPeriodSelector(props({ unit: "month", offset: -1 }));
+    for (const key of [
+      "periodSelector.tab.day",
+      "periodSelector.tab.week",
+      "periodSelector.tab.month",
+      "periodSelector.tab.year",
+      "periodSelector.tab.custom",
+    ] as const) {
+      expect(html).toContain(t(key));
+    }
+    expect(html).toContain(`aria-label="${t("periodSelector.aria.label")}"`);
+    expect(html).toContain(t("periodSelector.aria.prev").replace("{unit}", t("periodSelector.unit.month")));
+    expect(html).toContain(t("periodSelector.aria.next").replace("{unit}", t("periodSelector.unit.month")));
+    expect(html).toContain(`aria-label="${t("periodSelector.aria.jump.month")}"`);
   });
 });
