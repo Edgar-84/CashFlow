@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$PLAN" ] && [ -f "$PLAN" ] || { echo "usage: bash scripts/auto-units.sh <plan-file> [--max N] [--from ID] [--dry-run]"; exit 2; }
+[ -n "$PLAN" ] && [ -f "$PLAN" ] || { echo "usage: bash scripts/auto-units.sh <plan-file> [--only P] [--from ID] [--until ID] [--max N] [--dry-run] [--model M]"; echo "       (run with --help for what each flag does)"; exit 2; }
 command -v claude >/dev/null || { echo "FATAL: claude CLI not on PATH"; exit 2; }
 command -v gh     >/dev/null || { echo "FATAL: gh CLI not on PATH"; exit 2; }
 
@@ -135,4 +135,8 @@ for UNIT in $UNITS; do
   fi
 done
 
-say "Finished — $RAN unit(s) merged. Logs in $RUN_DIR"
+if [ "$DRY" -eq 1 ]; then
+  say "Dry run — $RAN unit(s) would run. Nothing was changed."
+else
+  say "Finished — $RAN unit(s) merged. Logs in $RUN_DIR"
+fi
