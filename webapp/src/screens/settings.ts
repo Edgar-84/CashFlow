@@ -1,16 +1,21 @@
 /** Screen 08 — Settings (docs/ui/screens/08-settings.md). Reached from the
  * side menu's seventh row (U3.2) and nowhere else. V4 ships exactly one
  * setting: the account's display currency (D400/D401 — a relabel, never a
- * conversion; `expenses.amount` is untouched minor units).
+ * conversion; `expenses.amount` is untouched minor units). V7 adds a second
+ * section, Language (region 4/5, U3.11) — a single navigation row to its own
+ * screen (`screens/language.ts`), not a second inline list (D706).
  *
  * Same three-layer split as every other screen:
  *  - data: `loadSettings` — one `GET /users/me` call (already returns
- *    `currency` and `role`, D211/D401), never throws, same cache-fallback
- *    contract as `loadHome`/`loadTags`. The 15-row list itself is a
- *    constant (`CURRENCY_ORDER`, names via `currencyName()`), not fetched.
+ *    `currency`, `language` and `role`, D211/D401/D701), never throws, same
+ *    cache-fallback contract as `loadHome`/`loadTags`. The 15-row currency
+ *    list itself is a constant (`CURRENCY_ORDER`, names via `currencyName()`),
+ *    not fetched.
  *  - controller: `createSettingsController` owns the in-progress selection
  *    and the `PATCH /accounts/me` round trip, same double-submit guard
- *    shape as `tags.ts::createTagFormController`.
+ *    shape as `tags.ts::createTagFormController`. The Language row has no
+ *    controller of its own — it only navigates (screen doc's V7 States note:
+ *    "no states of its own beyond loading with the rest of the screen").
  *  - presentation: `renderSettings` (pure, HTML strings) and `mount` (thin
  *    DOM glue, the one part with no meaningful unit test — same accepted
  *    gap as every other screen's mount).
@@ -23,7 +28,8 @@
 
 import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { t, type Catalogue } from "../lib/i18n";
-import type { Currency, Role } from "../api/types";
+import { languageName } from "./language";
+import type { Currency, Language, Role } from "../api/types";
 
 // -- data ---------------------------------------------------------------
 
@@ -76,11 +82,12 @@ export function currencyName(code: Currency): string {
 
 export interface SettingsData {
   currency: Currency;
+  language: Language;
   role: Role;
 }
 
 export interface SettingsApi {
-  getMe(): Promise<{ currency: Currency; role: Role }>;
+  getMe(): Promise<{ currency: Currency; language: Language; role: Role }>;
   updateAccount(data: { currency: Currency }): Promise<{ currency: Currency }>;
 }
 
@@ -120,7 +127,7 @@ export type SettingsState =
 export async function loadSettings(api: SettingsApi, cache: SettingsCache): Promise<SettingsState> {
   try {
     const me = await api.getMe();
-    const data: SettingsData = { currency: me.currency, role: me.role };
+    const data: SettingsData = { currency: me.currency, language: me.language, role: me.role };
     cache.set({ data, syncedAt: new Date().toISOString() });
     return { status: "ready", ...data };
   } catch {
@@ -221,6 +228,23 @@ function renderRow(code: Currency, checked: boolean, interactive: boolean): stri
   </button>`;
 }
 
+/** Region 4/5 (V7) — a plain navigation button, not part of the currency
+ * `radiogroup` (screen doc's Accessibility note). Always tappable regardless
+ * of role: "a Language row tap navigates for every role, admin or not" —
+ * the read-only gate lives on `screens/language.ts` itself, not here. */
+function renderLanguageRow(language: Language): string {
+  const aria = escapeHtml(t("settings.languageRowAria", { endonym: languageName(language) }));
+  return `<div class="settings-language-section">
+    <div class="settings-eyebrow">${escapeHtml(t("settings.sectionLanguage"))}</div>
+    <button type="button" class="card settings-row" data-testid="settings-language-row" aria-label="${aria}">
+      <span class="lang-row-text">
+        <span class="lang-row-endonym">${escapeHtml(languageName(language))}</span>
+        <span class="lang-row-code">${language.toUpperCase()}</span>
+      </span>
+    </button>
+  </div>`;
+}
+
 export interface SettingsViewOptions {
   /** `null` only while `status === "loading"` — no row is marked yet. */
   selected: Currency | null;
@@ -234,6 +258,11 @@ export interface SettingsViewOptions {
   showAdminLine: boolean;
   lastSyncedAt?: string;
   saveError?: string | null;
+  /** `undefined` only while `status === "loading"`/`"error"` — the Language
+   * section (region 4/5, V7) needs the account's current language, so it
+   * renders only once that's known (`ready`/`offline`), same as the
+   * currency `✓` needing the same fetch. */
+  language?: Language;
 }
 
 export function renderSettingsView(options: SettingsViewOptions): string {
@@ -254,6 +283,7 @@ export function renderSettingsView(options: SettingsViewOptions): string {
       ${rows}
     </div>
     ${options.saveError ? `<p class="settings-save-error" data-testid="save-error">${escapeHtml(options.saveError)}</p>` : ""}
+    ${options.language ? renderLanguageRow(options.language) : ""}
   </div>`;
 }
 
@@ -276,6 +306,7 @@ export function renderSettings(
   return renderSettingsView({
     selected: ui.selected,
     interactive,
+    language: state.language,
     showAdminLine: !isAdmin,
     lastSyncedAt: state.status === "offline" ? state.lastSyncedAt : undefined,
     saveError: ui.saveError,
@@ -291,6 +322,11 @@ export interface SettingsHandlers {
   /** Fires once the PATCH resolves — main.ts navigates back to Home, which
    * refetches and relabels every amount (screen doc's Saved state). */
   onSaved: () => void;
+  /** Region 5's row tap (V7) — navigates to `screens/language.ts` for every
+   * role, admin or not (screen doc's Interactions: "no confirm, nothing to
+   * discard here"). Never wired during `loading`/`error`, where the row
+   * itself isn't rendered. */
+  onOpenLanguage: () => void;
 }
 
 export function mount(root: HTMLElement, state: SettingsState, api: SettingsApi, handlers: SettingsHandlers): void {
@@ -335,6 +371,10 @@ export function mount(root: HTMLElement, state: SettingsState, api: SettingsApi,
         controller.select(code);
         render();
       });
+    });
+    root.querySelector('[data-testid="settings-language-row"]')?.addEventListener("click", () => {
+      haptics.selection();
+      handlers.onOpenLanguage();
     });
   }
 

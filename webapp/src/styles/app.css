@@ -2498,6 +2498,56 @@ body {
   color: var(--status-red);
 }
 
+/* -- screen 08 region 4/5 + screen 09 — Language (U3.11,
+   docs/ui/screens/08-settings.md's V7 delta + docs/ui/screens/09-language.md).
+   `.settings-language-section` gives Settings' new "Language" heading+row
+   pair the 24px between-sections gap design-system.md's Spacing table names
+   (distinct from `.settings-view`'s own 12px inside-section gap). Three
+   terms are additive here, not two — flex item margins never collapse with
+   their container: `.settings-view`'s own 12px `gap` above this section,
+   this section's own `margin-top` (12px), and `.settings-eyebrow`'s own
+   `margin: 4px 4px 0` (below), which is a no-op everywhere else `.settings-eyebrow`
+   is used (always the first child of `.settings-view` itself there) but
+   would otherwise add a fourth term here, since region 4's eyebrow is the
+   first child of this *nested* flex container instead. Zeroed below so the
+   remaining two terms (12 + 12) sum to exactly 24px. The row itself reuses
+   `.card`/`.settings-row` verbatim (same 48px/14px-radius shell every list
+   row in this file already uses) — only the two-line endonym/code text
+   stack below is new: `09-language.md`'s Layout swaps currency's
+   side-by-side code/name for a stacked pair, endonym primary. */
+.settings-language-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.settings-language-section .settings-eyebrow {
+  margin-top: 0;
+}
+
+.lang-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lang-row-endonym {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lang-row-code {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-secondary);
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */

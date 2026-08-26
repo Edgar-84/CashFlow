@@ -350,7 +350,7 @@ implementation unit may start before *its own* spec exists.
       Telegram popup copy and error strings; all three catalogues stay
       key-identical; the rendered EN output is byte-identical to before the
       unit (that is the regression test); `verify.sh` green.
-- [ ] **U3.11** The language picker screen from U0.4's spec, plus its route and
+- [x] **U3.11** The language picker screen from U0.4's spec, plus its route and
       its side-menu/Settings entry point.
       **AC:** picking a language PATCHes the account, re-renders the app in it
       without a manual reload, and shows a success haptic; a non-admin sees the
@@ -1269,8 +1269,56 @@ touching auth or scoping goes through the reviewer subagent.
   document. `i18n.test.ts`'s generic per-language loops pick up all ~70 new
   keys with no changes needed there. M3.3 (the webapp string-extraction
   pass) is complete; `bot/` extraction starts at U3.12.
-- **Next:** `/clear`, then **U3.11** (the language picker screen from U0.4's
-  spec, its route, and its Settings entry point).
+- **U3.11 is done**: `screens/language.ts` (screen 09) is new — same
+  data/controller/presentation/mount split as `settings.ts`, but a row tap
+  fires the `PATCH` directly (no MainButton, no confirm popup, no discard
+  flow, per `09-language.md`'s Delta section and the plan's own gotcha
+  below). `createLanguageController.choose(code)` is a no-op (`blocked`, no
+  request) when `code` is already the confirmed selection, **except** right
+  after a failed attempt, when any tap — including a re-tap of the same row
+  — retries; a private `failed` flag (cleared on success, set on failure)
+  carries that distinction, since the row shown checked after a failure was
+  never actually confirmed server-side. `settings.ts` gained region 4/5 (a
+  "Language" heading + one navigation row, always tappable regardless of
+  role — the read-only gate lives on `09-language.md` itself, not here);
+  `SettingsData`/`SettingsApi.getMe()` now also carry `language` (one extra
+  field off the same `GET /users/me`, no second fetch) so the row can show
+  the current endonym+code without loading anything new. `api/types.ts`'s
+  `AccountResponse`/`AccountUpdate` gained the `language` field the backend
+  has carried since U3.1/U3.2 — this unit is their first webapp reader.
+  New CSS: `.settings-language-section` (the 24px between-sections gap) and
+  `.lang-row-text`/`.lang-row-endonym`/`.lang-row-code` (the endonym-primary,
+  ISO-code-secondary two-line row both screens 08 and 09 share) — no new
+  design-system values, only new compositions of already-listed ones.
+  Reviewer round 1 caught `.settings-language-section`'s `margin-top: 24px`
+  being additive with `.settings-view`'s own 12px flex `gap` — fixed to
+  `margin-top: 12px`, but round 2 caught that the fix's own arithmetic still
+  missed a third additive term: `.settings-eyebrow`'s own `margin: 4px 4px 0`
+  compounds inside this newly-*nested* flex container (every other
+  `.settings-eyebrow` use is a first child of `.settings-view` directly,
+  where flex `gap` already supersedes it). Fixed with a scoped
+  `.settings-language-section .settings-eyebrow { margin-top: 0; }`
+  override, so the remaining two terms (12 + 12) sum to exactly 24px.
+  Verified empirically, not just by arithmetic: rendered `vite build`
+  output, loaded the real compiled CSS + `renderSettings()`/`renderLanguage()`
+  output in Chrome, and measured `getBoundingClientRect()` gaps directly —
+  24px confirmed between the Currency card and the Language heading, and all
+  three `docs/ui/screens/09-language.md` states (admin/non-admin/save-error)
+  screenshotted and checked against the spec's Layout/Copy/States tables.
+  `language.name.en`/`.ru`/`.uk` are the only catalogue keys that are
+  **identical across all three catalogues on purpose** (an endonym doesn't
+  translate with the viewer's language) — `i18n.test.ts`'s key-identity
+  check still passes since it only asserts key *sets* match, not that values
+  differ. 62 new/changed tests (`language.test.ts` new, `settings.test.ts`
+  extended); `verify.sh` green. Not done: a live Chrome click-through — this
+  repo has no mock `Telegram.WebApp` harness or Playwright rig for the Mini
+  App (checked; none exists), and a real one needs Telegram-signed
+  `initData` the backend's HMAC check won't fake. Covered instead by the 62
+  tests above plus `tsc`/`eslint`/`vite build`. Worth a `/run-skill-generator`
+  pass if manual verification of Mini App units becomes a recurring need.
+- **Next:** `/clear`, then **U3.12** (`bot/i18n.py` + language resolution,
+  EN catalogue only — D707's cached `AllowlistMiddleware` probe, not a
+  second fetch).
 - **Gotchas the next session must know:**
   - **Re-scan the whole file for literals after the first pass, not just the
     obvious render/copy sites.** U3.8's `budgetForm.err.planGone` was a
