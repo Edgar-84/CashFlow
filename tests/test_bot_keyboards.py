@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from bot.i18n import t
 from bot.keyboards import (
     CANCEL_CALLBACK,
     CONFIRM_CALLBACK,
@@ -110,10 +111,7 @@ def test_tags_keyboard_renders_the_done_button_in_the_given_language() -> None:
 
     buttons = flatten(tags_keyboard(tags, language=Language.RU))
 
-    # RU aliases EN until U3.15's catalogues ship (bot/i18n.py) — this test
-    # locks in that the language argument actually reaches t(), not that RU
-    # differs from EN yet.
-    assert buttons[-1].text == "Done"
+    assert buttons[-1].text == t(Language.RU, "kb.tagsDone")
 
 
 def test_tag_callback_round_trips_the_uuid() -> None:
@@ -149,7 +147,7 @@ def test_budgets_keyboard_unknown_category_placeholder_uses_the_given_language()
 
     buttons = flatten(budgets_keyboard([plan], {}, language=Language.RU))
 
-    assert buttons[0].text == "Unknown"
+    assert buttons[0].text == t(Language.RU, "common.unknown")
 
 
 def test_budget_callback_round_trips_the_uuid() -> None:
@@ -186,7 +184,10 @@ def test_confirm_keyboard_renders_confirm_and_cancel() -> None:
 def test_confirm_keyboard_uses_the_given_language() -> None:
     buttons = flatten(confirm_keyboard(language=Language.RU))
 
-    assert [b.text for b in buttons] == ["✅ Confirm", "❌ Cancel"]
+    assert [b.text for b in buttons] == [
+        t(Language.RU, "kb.confirm"),
+        t(Language.RU, "kb.cancel"),
+    ]
 
 
 def test_edit_field_keyboard_renders_the_four_editable_fields() -> None:
@@ -204,7 +205,12 @@ def test_edit_field_keyboard_renders_the_four_editable_fields() -> None:
 def test_edit_field_keyboard_uses_the_given_language() -> None:
     buttons = flatten(edit_field_keyboard(language=Language.RU))
 
-    assert [b.text for b in buttons] == ["Amount", "Category", "Comment", "Tags"]
+    assert [b.text for b in buttons] == [
+        t(Language.RU, "kb.editField.amount"),
+        t(Language.RU, "kb.editField.category"),
+        t(Language.RU, "kb.editField.comment"),
+        t(Language.RU, "kb.editField.tags"),
+    ]
 
 
 def test_statistics_keyboard_renders_presets_and_drilldown_entries() -> None:
@@ -242,8 +248,12 @@ def test_statistics_keyboard_uses_the_given_language() -> None:
     )
 
     assert [b.text for b in buttons][:3] == [
-        f"{SELECTED_PREFIX}This month",
-        "Last month",
-        "Last 3 months",
+        f"{SELECTED_PREFIX}{t(Language.RU, 'kb.statistics.thisMonth')}",
+        t(Language.RU, "kb.statistics.lastMonth"),
+        t(Language.RU, "kb.statistics.last3Months"),
     ]
-    assert [b.text for b in buttons][3:] == ["By category…", "By tag…", "📊 Chart"]
+    assert [b.text for b in buttons][3:] == [
+        t(Language.RU, "kb.statistics.byCategory"),
+        t(Language.RU, "kb.statistics.byTag"),
+        t(Language.RU, "kb.statistics.chart"),
+    ]
