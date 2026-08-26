@@ -37,6 +37,7 @@ import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../li
 import { mount as mountDateRangePicker, type DateRangePickerValue } from "../components/date-range-picker";
 import { mount as mountPeriodSelector, renderPeriodSelector } from "../components/period-selector";
 import { segments as donutSegments } from "../lib/donut";
+import { t } from "../lib/i18n";
 import { formatAmount } from "../lib/money";
 import { MAX_RANGE_DAYS, toQuery, type PeriodQuery, type PeriodUnit, type PeriodValue } from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
@@ -110,9 +111,9 @@ export function buildStatisticsData(input: {
 }): StatisticsData {
   const orderedCategories = [...input.categories].sort((a, b) => a.created_at.localeCompare(b.created_at));
   const colorBySlot = new Map(assignCategoryColors(input.categories).map((c) => [c.id, c.slot]));
-  const catTotalById = new Map(input.categoryTotals.map((t) => [t.category_id, t.total]));
+  const catTotalById = new Map(input.categoryTotals.map((ct) => [ct.category_id, ct.total]));
   const catNameById = new Map(input.categories.map((c) => [c.id, c.name]));
-  const tagNameById = new Map(input.tags.map((t) => [t.id, t.name]));
+  const tagNameById = new Map(input.tags.map((tag) => [tag.id, tag.name]));
 
   const donutInput = orderedCategories.map((c) => ({ id: c.id, label: c.name, minor: catTotalById.get(c.id) ?? 0 }));
   const rawSegments = donutSegments(donutInput, { circumference: DONUT_CIRCUMFERENCE, maxSlots: MAX_DONUT_SLOTS });
@@ -125,7 +126,7 @@ export function buildStatisticsData(input: {
     const slot = category ? (colorBySlot.get(category.id) ?? null) : null;
     return {
       categoryId: category ? category.id : null,
-      label: category ? category.name : "Other",
+      label: category ? category.name : t("chart.other"),
       colorVar: category ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
       dash: seg.dash,
       gap: seg.gap,
@@ -134,22 +135,22 @@ export function buildStatisticsData(input: {
   });
 
   const categoryBars = rankedBars(
-    input.categoryTotals.map((t) => {
-      const slot = colorBySlot.get(t.category_id) ?? null;
+    input.categoryTotals.map((ct) => {
+      const slot = colorBySlot.get(ct.category_id) ?? null;
       return {
-        id: t.category_id,
-        label: catNameById.get(t.category_id) ?? "Unknown category",
+        id: ct.category_id,
+        label: catNameById.get(ct.category_id) ?? t("statistics.unknownCategory"),
         colorVar: slot !== null ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
-        minor: t.total,
+        minor: ct.total,
       };
     }),
   );
   const tagBars = rankedBars(
-    input.tagTotals.map((t) => ({
-      id: t.tag_id,
-      label: tagNameById.get(t.tag_id) ?? "Unknown tag",
+    input.tagTotals.map((tt) => ({
+      id: tt.tag_id,
+      label: tagNameById.get(tt.tag_id) ?? t("statistics.unknownTag"),
       colorVar: null,
-      minor: t.total,
+      minor: tt.total,
     })),
   );
 
@@ -242,7 +243,7 @@ export async function loadStatistics(
     if (cached) {
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
-    const message = err instanceof Error ? err.message : "Something went wrong.";
+    const message = err instanceof Error ? err.message : t("error.fallback");
     return { status: "error", message, period, grouping };
   }
 }
@@ -291,8 +292,8 @@ function renderPeriodControl(period: PeriodValue, now: Date): string {
 
 function renderGroupingToggle(grouping: Grouping): string {
   return `<div class="chip-row" data-testid="grouping-toggle">
-    <button type="button" class="chip${grouping === "category" ? " active" : ""}" data-testid="grouping-category" data-grouping="category">By category</button>
-    <button type="button" class="chip${grouping === "tag" ? " active" : ""}" data-testid="grouping-tag" data-grouping="tag">By tag</button>
+    <button type="button" class="chip${grouping === "category" ? " active" : ""}" data-testid="grouping-category" data-grouping="category">${escapeHtml(t("statistics.byCategory"))}</button>
+    <button type="button" class="chip${grouping === "tag" ? " active" : ""}" data-testid="grouping-tag" data-grouping="tag">${escapeHtml(t("statistics.byTag"))}</button>
   </div>`;
 }
 
@@ -324,8 +325,8 @@ function renderDonut(data: StatisticsData): string {
  * total is non-zero) gets its own note rather than blank space. */
 function renderBars(bars: StatisticsBar[], grouping: Grouping): string {
   if (bars.length === 0) {
-    const noun = grouping === "category" ? "categorised" : "tagged";
-    return `<p class="stats-bars-empty" data-testid="bars-empty">No ${noun} expenses in this period.</p>`;
+    const key = grouping === "category" ? "statistics.bars.emptyCategory" : "statistics.bars.emptyTag";
+    return `<p class="stats-bars-empty" data-testid="bars-empty">${escapeHtml(t(key))}</p>`;
   }
   if (bars.length === 1) {
     return "";
@@ -352,7 +353,7 @@ function renderOfflineBanner(lastSyncedAt: string | undefined): string {
   if (!lastSyncedAt) {
     return "";
   }
-  return `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(lastSyncedAt)}</div>`;
+  return `<div class="offline-banner" data-testid="offline">${t("offline.banner", { time: lastSyncedAt })}</div>`;
 }
 
 function renderReady(data: StatisticsData, lastSyncedAt: string | undefined, now: Date): string {
@@ -381,13 +382,13 @@ function renderError(message: string, period: PeriodValue, now: Date): string {
   return `<div class="statistics-error" data-testid="error">
     ${renderPeriodControl(period, now)}
     <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <button type="button" data-action="retry">${escapeHtml(t("error.retry"))}</button>
   </div>`;
 }
 
 function renderForbidden(): string {
   return `<div class="statistics-readonly" data-testid="forbidden">
-    <p>You don't have permission to view statistics.</p>
+    <p>${escapeHtml(t("statistics.forbidden"))}</p>
   </div>`;
 }
 
@@ -395,7 +396,7 @@ function renderEmpty(grouping: Grouping, period: PeriodValue, now: Date): string
   return `<div class="statistics-empty" data-testid="empty">
     ${renderPeriodControl(period, now)}
     ${renderGroupingToggle(grouping)}
-    <p>No expenses in this period.</p>
+    <p>${escapeHtml(t("statistics.emptyPeriod"))}</p>
   </div>`;
 }
 

@@ -7,7 +7,7 @@
  *  - data: `loadSettings` — one `GET /users/me` call (already returns
  *    `currency` and `role`, D211/D401), never throws, same cache-fallback
  *    contract as `loadHome`/`loadTags`. The 15-row list itself is a
- *    constant (`CURRENCY_ORDER`/`CURRENCY_NAMES`), not fetched.
+ *    constant (`CURRENCY_ORDER`, names via `currencyName()`), not fetched.
  *  - controller: `createSettingsController` owns the in-progress selection
  *    and the `PATCH /accounts/me` round trip, same double-submit guard
  *    shape as `tags.ts::createTagFormController`.
@@ -22,6 +22,7 @@
  */
 
 import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
+import { t, type Catalogue } from "../lib/i18n";
 import type { Currency, Role } from "../api/types";
 
 // -- data ---------------------------------------------------------------
@@ -47,24 +48,31 @@ export const CURRENCY_ORDER: readonly Currency[] = [
 ];
 
 /** Client-side copy, not an API field (screen doc's Copy note: naming a
- * currency isn't validation, so it doesn't belong on the backend enum). */
-export const CURRENCY_NAMES: Readonly<Record<Currency, string>> = {
-  USD: "US Dollar",
-  EUR: "Euro",
-  GBP: "British Pound",
-  PLN: "Polish Złoty",
-  UAH: "Ukrainian Hryvnia",
-  CZK: "Czech Koruna",
-  CHF: "Swiss Franc",
-  SEK: "Swedish Krona",
-  NOK: "Norwegian Krone",
-  DKK: "Danish Krone",
-  JPY: "Japanese Yen",
-  CNY: "Chinese Yuan",
-  CAD: "Canadian Dollar",
-  AUD: "Australian Dollar",
-  TRY: "Turkish Lira",
+ * currency isn't validation, so it doesn't belong on the backend enum). Each
+ * code maps to its own catalogue key (U3.10) rather than a static English
+ * table, so the name follows the account's language like every other
+ * user-visible string. */
+const CURRENCY_NAME_KEYS: Readonly<Record<Currency, keyof Catalogue>> = {
+  USD: "settings.currency.USD",
+  EUR: "settings.currency.EUR",
+  GBP: "settings.currency.GBP",
+  PLN: "settings.currency.PLN",
+  UAH: "settings.currency.UAH",
+  CZK: "settings.currency.CZK",
+  CHF: "settings.currency.CHF",
+  SEK: "settings.currency.SEK",
+  NOK: "settings.currency.NOK",
+  DKK: "settings.currency.DKK",
+  JPY: "settings.currency.JPY",
+  CNY: "settings.currency.CNY",
+  CAD: "settings.currency.CAD",
+  AUD: "settings.currency.AUD",
+  TRY: "settings.currency.TRY",
 };
+
+export function currencyName(code: Currency): string {
+  return t(CURRENCY_NAME_KEYS[code]);
+}
 
 export interface SettingsData {
   currency: Currency;
@@ -102,9 +110,6 @@ export type SettingsState =
   | ({ status: "ready" } & SettingsData)
   | ({ status: "offline"; lastSyncedAt: string } & SettingsData);
 
-const LOAD_ERROR = "Couldn't load your settings.";
-export const SAVE_ERROR = "Couldn't change the currency.";
-
 /** Never throws — every failure resolves to a `SettingsState` the caller can
  * render directly, same contract as `loadHome`/`loadTags`. `GET /users/me`
  * has no role gate (every authenticated user can read their own account), so
@@ -123,7 +128,7 @@ export async function loadSettings(api: SettingsApi, cache: SettingsCache): Prom
     if (cached) {
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
-    return { status: "error", message: LOAD_ERROR };
+    return { status: "error", message: t("settings.errLoad") };
   }
 }
 
@@ -164,12 +169,22 @@ export function createSettingsController(api: SettingsApi, original: Currency): 
         const account = await api.updateAccount({ currency: selected });
         return { status: "success", currency: account.currency };
       } catch {
-        return { status: "error", message: SAVE_ERROR };
+        return { status: "error", message: t("settings.errSave") };
       } finally {
         submitting = false;
       }
     },
   };
+}
+
+/** A private, non-escaping template filler — this string feeds Telegram's
+ * native `showConfirm` popup, not innerHTML, so `t()`'s auto-escaping vars
+ * mechanism would show literal HTML entities instead of the currency code
+ * (same reasoning as every other screen's own copy of this helper, e.g.
+ * `home.ts::fillTemplate`, `budgets.ts::fillTemplate` — "pure modules don't
+ * share helpers" convention, U3.5+). */
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? vars[name] : match));
 }
 
 /** The Telegram confirm popup's message (screen doc's `confirm.message`,
@@ -178,7 +193,7 @@ export function createSettingsController(api: SettingsApi, original: Currency): 
  * every other confirm flow in this app already works within, e.g.
  * `tags.ts::tagDeleteConfirmMessage`). */
 export function settingsConfirmMessage(target: Currency): string {
-  return `Change currency? Every amount in this account will be shown in ${target}. Existing amounts are not converted.`;
+  return fillTemplate(t("settings.confirmMessage"), { code: target });
 }
 
 // -- presentation ---------------------------------------------------------
@@ -194,14 +209,14 @@ function escapeHtml(value: string): string {
 function renderError(message: string): string {
   return `<div class="settings-error" data-testid="error">
     <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <button type="button" data-action="retry">${escapeHtml(t("error.retry"))}</button>
   </div>`;
 }
 
 function renderRow(code: Currency, checked: boolean, interactive: boolean): string {
   return `<button type="button" class="settings-row" role="radio" aria-checked="${checked}" data-testid="settings-row" data-code="${code}"${interactive ? "" : " disabled"}>
     <span class="settings-row-code">${code}</span>
-    <span class="settings-row-name">${CURRENCY_NAMES[code]}</span>
+    <span class="settings-row-name">${escapeHtml(currencyName(code))}</span>
     ${checked ? `<span class="settings-row-check" aria-hidden="true">✓</span>` : ""}
   </button>`;
 }
@@ -229,12 +244,13 @@ export function renderSettingsView(options: SettingsViewOptions): string {
   // is otherwise sighted-only text with no ARIA association to the radios it
   // explains — screen-reader parity with the visible "why" line).
   const describedBy = options.showAdminLine ? "settings-warning settings-admin-line" : "settings-warning";
+  const currencyLabel = escapeHtml(t("settings.sectionCurrency"));
   return `<div class="settings-view" data-testid="ready">
-    <div class="settings-eyebrow">Currency</div>
-    <p class="settings-warning" id="settings-warning">Changing the currency relabels existing amounts. It does not convert them — 50.00 stays 50.00.</p>
-    ${options.showAdminLine ? `<p class="settings-admin-line" id="settings-admin-line" data-testid="admin-line">Only an account admin can change the currency.</p>` : ""}
-    ${options.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(options.lastSyncedAt)}</div>` : ""}
-    <div class="card settings-list" role="radiogroup" aria-label="Currency" aria-describedby="${describedBy}"${options.showAdminLine ? ' aria-readonly="true"' : ""} data-testid="settings-list">
+    <div class="settings-eyebrow">${currencyLabel}</div>
+    <p class="settings-warning" id="settings-warning">${escapeHtml(t("settings.warnNoConversion"))}</p>
+    ${options.showAdminLine ? `<p class="settings-admin-line" id="settings-admin-line" data-testid="admin-line">${escapeHtml(t("settings.readonlyAdmin"))}</p>` : ""}
+    ${options.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">${t("offline.banner", { time: options.lastSyncedAt })}</div>` : ""}
+    <div class="card settings-list" role="radiogroup" aria-label="${currencyLabel}" aria-describedby="${describedBy}"${options.showAdminLine ? ' aria-readonly="true"' : ""} data-testid="settings-list">
       ${rows}
     </div>
     ${options.saveError ? `<p class="settings-save-error" data-testid="save-error">${escapeHtml(options.saveError)}</p>` : ""}
@@ -300,7 +316,7 @@ export function mount(root: HTMLElement, state: SettingsState, api: SettingsApi,
     if (!interactive) {
       mainButton.hide();
     } else {
-      mainButton.show("Save currency");
+      mainButton.show(t("settings.saveButton"));
       mainButton.setEnabled(controller.isDirty());
     }
   };
@@ -328,7 +344,7 @@ export function mount(root: HTMLElement, state: SettingsState, api: SettingsApi,
         handlers.onBack();
         return;
       }
-      const discard = await confirmDiscard("Discard changes?");
+      const discard = await confirmDiscard(t("settings.discardChanges"));
       if (discard) {
         handlers.onBack();
       }

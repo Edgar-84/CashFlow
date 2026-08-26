@@ -12,6 +12,7 @@
  */
 
 import type { Uuid } from "../api/types";
+import { t } from "../lib/i18n";
 import { haptics } from "../lib/telegram";
 
 export interface CategoryPickerItem {
@@ -86,9 +87,9 @@ const MORE_PLUS_SVG =
   '<line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" /></svg>';
 
 function renderMoreCell(): string {
-  return `<button type="button" class="cp-cell cp-more" aria-label="Manage categories" data-testid="cp-more">
+  return `<button type="button" class="cp-cell cp-more" aria-label="${escapeHtml(t("categoryPicker.manage"))}" data-testid="cp-more">
     <span class="cp-swatch cp-more-swatch" aria-hidden="true">${MORE_PLUS_SVG}</span>
-    <span class="cp-name" aria-hidden="true">More</span>
+    <span class="cp-name" aria-hidden="true">${escapeHtml(t("categoryPicker.more"))}</span>
   </button>`;
 }
 
@@ -97,12 +98,13 @@ export function renderCategoryPicker(props: CategoryPickerProps): string {
   const cells = props.items.map((item) => renderCell(item, item.id === props.selectedId, disabled)).join("");
   const empty =
     props.items.length === 0
-      ? `<p class="cp-empty" data-testid="cp-empty">Create your first category to add an expense.</p>`
+      ? `<p class="cp-empty" data-testid="cp-empty">${escapeHtml(t("categoryPicker.empty"))}</p>`
       : "";
+  const categoriesLabel = escapeHtml(t("categoryPicker.categories"));
   return `<div class="cp-root${disabled ? " cp-disabled" : ""}" data-testid="category-picker">
-    <div class="cp-label">Categories</div>
+    <div class="cp-label">${categoriesLabel}</div>
     <div class="cp-grid">
-      <div class="cp-radiogroup" role="radiogroup" aria-label="Categories">${cells}</div>
+      <div class="cp-radiogroup" role="radiogroup" aria-label="${categoriesLabel}">${cells}</div>
       ${disabled ? "" : renderMoreCell()}
     </div>
     ${empty}

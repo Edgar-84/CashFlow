@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   nextGridFocusIndex,
   renderCategoryPicker,
   type CategoryPickerItem,
   type CategoryPickerProps,
 } from "../src/components/category-picker";
+import { setLanguage, t } from "../src/lib/i18n";
 
 const NOOP = (): void => {};
 
@@ -195,5 +196,23 @@ describe("nextGridFocusIndex", () => {
   it("returns the same index for an unhandled key, and for an empty grid", () => {
     expect(nextGridFocusIndex(5, 2, "Tab")).toBe(2);
     expect(nextGridFocusIndex(0, 0, "ArrowRight")).toBe(0);
+  });
+});
+
+// -- i18n (U3.10) --------------------------------------------------------
+
+describe("renders in Russian", () => {
+  afterEach(() => setLanguage("en"));
+
+  it("translates the label, the More cell and the empty-state copy", () => {
+    setLanguage("ru");
+    const html = renderCategoryPicker(props());
+    expect(html).toContain(`>${t("categoryPicker.categories")}<`);
+    expect(html).toContain(`aria-label="${t("categoryPicker.categories")}"`);
+    expect(html).toContain(`aria-label="${t("categoryPicker.manage")}"`);
+    expect(html).toContain(`>${t("categoryPicker.more")}<`);
+
+    const empty = renderCategoryPicker(props({ items: [] }));
+    expect(empty).toContain(t("categoryPicker.empty"));
   });
 });

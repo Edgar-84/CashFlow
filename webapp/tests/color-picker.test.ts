@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderColorQuickRow, renderColorSheet, type ColorPickerProps } from "../src/components/color-picker";
-import { PALETTE_SLOT_COUNT } from "../src/lib/category-colors";
+import { categorySlotName, PALETTE_SLOT_COUNT } from "../src/lib/category-colors";
+import { setLanguage, t } from "../src/lib/i18n";
 
 const NOOP = (): void => {};
 
@@ -158,5 +159,22 @@ describe("renderColorSheet", () => {
   it("never renders a hardcoded hex colour — every fill is a token", () => {
     const html = renderColorSheet(30);
     expect(html).not.toMatch(/#[0-9a-fA-F]{3,6}/);
+  });
+});
+
+// -- i18n (U3.10) --------------------------------------------------------
+
+describe("renders in Russian", () => {
+  afterEach(() => setLanguage("en"));
+
+  it("translates the row/sheet labels, the More button and the selected suffix — slot names stay untranslated", () => {
+    setLanguage("ru");
+    const row = renderColorQuickRow(props({ selectedSlot: 1 }));
+    expect(row).toContain(`aria-label="${t("colorPicker.colour")}"`);
+    expect(row).toContain(`aria-label="${t("colorPicker.more")}"`);
+    expect(row).toContain(t("colorPicker.selected").replace("{name}", categorySlotName(1)));
+
+    const sheet = renderColorSheet(null);
+    expect(sheet).toContain(`>${t("colorPicker.colour")}<`);
   });
 });
