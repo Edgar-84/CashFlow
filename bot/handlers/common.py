@@ -1,53 +1,27 @@
 """`/start` + `/help`: role-agnostic command list (U2.5). No FSM state, no
 backend calls — every account member sees the same text regardless of role;
 permission errors on individual commands still come from the API (MVP D27).
+
+Both messages go through `bot/i18n.py::t()` (U3.13); `language` defaults to
+`Language.EN` for direct calls (e.g. tests), but aiogram always injects the
+caller's real resolved language from `AllowlistMiddleware`'s data (D707)
+since dispatch matches by parameter name regardless of the default.
 """
 
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-WELCOME_TEXT = (
-    "Welcome to CashFlow! Track shared family expenses, budgets and "
-    "statistics right from this chat.\n\nSend /help to see what you can do."
-)
-
-HELP_TEXT = "\n\n".join(
-    [
-        "Expenses:\n"
-        "/add — add an expense\n"
-        "/expenses — list recent expenses\n"
-        "/editexpense — edit an expense\n"
-        "/deleteexpense — delete an expense",
-        "Categories:\n"
-        "/categories — list categories\n"
-        "/addcategory — add a category\n"
-        "/renamecategory — rename a category\n"
-        "/deletecategory — delete a category",
-        "Tags:\n"
-        "/tags — list tags\n"
-        "/addtag — add a tag\n"
-        "/renametag — rename a tag\n"
-        "/deletetag — delete a tag",
-        "Budgets:\n"
-        "/budgets — list budget plans\n"
-        "/addbudget — add a budget plan\n"
-        "/updatebudget — update a budget plan\n"
-        "/deletebudget — delete a budget plan",
-        "Statistics:\n"
-        "/statistics — period statistics, drill down by category/tag\n"
-        "/chart — category breakdown for the active period",
-        "Anytime:\n/cancel — cancel the current action",
-    ]
-)
+from bot.i18n import t
+from models.enums import Language
 
 
-async def cmd_start(message: Message) -> None:
-    await message.answer(WELCOME_TEXT)
+async def cmd_start(message: Message, language: Language = Language.EN) -> None:
+    await message.answer(t(language, "common.welcome"))
 
 
-async def cmd_help(message: Message) -> None:
-    await message.answer(HELP_TEXT)
+async def cmd_help(message: Message, language: Language = Language.EN) -> None:
+    await message.answer(t(language, "common.help"))
 
 
 def create_router() -> Router:

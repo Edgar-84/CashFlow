@@ -23,6 +23,15 @@ tests/test_bot_handlers_expenses.py) registered onto a *fresh* Router by
 routers can only ever be attached to one parent Dispatcher, and `create_router`
 must be callable more than once (bot.py's `create_dispatcher` is called once
 per test in tests/test_bot_bot.py).
+
+Every user-visible string goes through `bot/i18n.py::t()` (U3.13). Every
+handler and helper below takes a `language: Language`, defaulting to
+`Language.EN` — aiogram injects the caller's real resolved language
+(`AllowlistMiddleware`, D707) into every registered handler regardless of
+that default, since dispatch matches by parameter name; the default only
+matters for direct calls (tests, and this module's own handler-to-helper
+calls, which always pass `language` through explicitly rather than relying
+on it).
 """
 
 import logging
@@ -37,6 +46,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from bot.i18n import t
 from bot.keyboards import (
     CANCEL_CALLBACK,
     CONFIRM_CALLBACK,
@@ -56,6 +66,7 @@ from bot.keyboards import (
 )
 from bot.states import AddExpense, DeleteExpense, EditExpense
 from models.category import CategoryResponse
+from models.enums import Language
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.tag import TagResponse
 
@@ -97,103 +108,128 @@ def _format_amount(minor_units: int) -> str:
     return f"{Decimal(minor_units) / 100:.2f}"
 
 
-async def _confirm_summary(state: FSMContext) -> str:
+async def _confirm_summary(state: FSMContext, language: Language = Language.EN) -> str:
     data = await state.get_data()
     lines = [
-        "Confirm this expense:",
-        f"Category: {data['category_name']}",
-        f"Amount: {_format_amount(data['amount'])}",
+        t(language, "expense.confirmTitle"),
+        f"{t(language, 'expense.field.category')} {data['category_name']}",
+        f"{t(language, 'expense.field.amount')} {_format_amount(data['amount'])}",
     ]
     if data.get("comment"):
-        lines.append(f"Comment: {data['comment']}")
+        lines.append(f"{t(language, 'expense.field.comment')} {data['comment']}")
     selected_ids = set(data.get("selected_tag_ids", []))
     if selected_ids:
         tags: list[TagResponse] = data.get("tags", [])
         names = [tag.name for tag in tags if str(tag.id) in selected_ids]
-        lines.append(f"Tags: {', '.join(names)}")
+        lines.append(f"{t(language, 'expense.field.tags')} {', '.join(names)}")
     return "\n".join(lines)
 
 
 async def cmd_add_expense(
-    message: Message, state: FSMContext, client: ExpenseBackendClient
+    message: Message,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await message.answer("Couldn't reach the backend. Please try again in a moment.")
+        await message.answer(t(language, "expense.backendUnreachable"))
         return
     if not categories:
-        await message.answer("No categories found. Ask an admin to add one first.")
+        await message.answer(t(language, "expense.noCategories"))
         return
     await state.set_state(AddExpense.category)
     await state.update_data(categories=categories)
-    await message.answer("Choose a category:", reply_markup=categories_keyboard(categories))
+    await message.answer(
+        t(language, "expense.chooseCategory"),
+        reply_markup=categories_keyboard(categories),
+    )
 
 
 async def on_category_chosen(
-    callback: CallbackQuery, callback_data: CategoryCallback, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: CategoryCallback,
+    state: FSMContext,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     categories: list[CategoryResponse] = data.get("categories", [])
     category = next((c for c in categories if c.id == callback_data.category_id), None)
     if category is None:
-        await callback.answer("Unknown category, please pick again.", show_alert=True)
+        await callback.answer(t(language, "expense.unknownCategory"), show_alert=True)
         return
     await state.update_data(category_id=str(category.id), category_name=category.name)
     await state.set_state(AddExpense.amount)
     await callback.answer()
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Enter the amount (e.g. 12.50 or 12,50):")
+        await callback.message.edit_text(t(language, "expense.enterAmount"))
 
 
-async def on_amount_entered(message: Message, state: FSMContext) -> None:
+async def on_amount_entered(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
     try:
         amount = parse_amount_to_minor_units(message.text or "")
     except ValueError:
-        await message.answer("That doesn't look like a valid amount. Try again (e.g. 12.50):")
+        await message.answer(t(language, "expense.invalidAmount"))
         return
     await state.update_data(amount=amount)
     await state.set_state(AddExpense.comment)
-    await message.answer("Add a comment, or send /skip:")
+    await message.answer(t(language, "expense.enterComment"))
 
 
 async def on_comment_skipped(
-    message: Message, state: FSMContext, client: ExpenseBackendClient
+    message: Message,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await state.update_data(comment=None)
-    await _prompt_tags_or_confirm(message, state, client)
+    await _prompt_tags_or_confirm(message, state, client, language)
 
 
 async def on_comment_entered(
-    message: Message, state: FSMContext, client: ExpenseBackendClient
+    message: Message,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await state.update_data(comment=message.text)
-    await _prompt_tags_or_confirm(message, state, client)
+    await _prompt_tags_or_confirm(message, state, client, language)
 
 
 async def _prompt_tags_or_confirm(
-    message: Message, state: FSMContext, client: ExpenseBackendClient
+    message: Message,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         tags = await client.list_tags()
     except httpx.HTTPError:
         logger.exception("Failed to fetch tags")
-        await message.answer("Couldn't reach the backend. Please try again in a moment.")
+        await message.answer(t(language, "expense.backendUnreachable"))
         return
     if not tags:
         await state.set_state(AddExpense.confirm)
-        await message.answer(await _confirm_summary(state), reply_markup=confirm_keyboard())
+        await message.answer(
+            await _confirm_summary(state, language), reply_markup=confirm_keyboard(language)
+        )
         return
     await state.update_data(tags=tags, selected_tag_ids=[])
     await state.set_state(AddExpense.tags)
     await message.answer(
-        "Pick tags (tap Done when finished):", reply_markup=tags_keyboard(tags, set())
+        t(language, "expense.pickTags"), reply_markup=tags_keyboard(tags, set(), language)
     )
 
 
 async def on_tag_toggled(
-    callback: CallbackQuery, callback_data: TagCallback, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: TagCallback,
+    state: FSMContext,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     tags: list[TagResponse] = data.get("tags", [])
@@ -207,20 +243,27 @@ async def on_tag_toggled(
     await callback.answer()
     if isinstance(callback.message, Message):
         selected_uuids = {UUID(tid) for tid in selected}
-        await callback.message.edit_reply_markup(reply_markup=tags_keyboard(tags, selected_uuids))
+        await callback.message.edit_reply_markup(
+            reply_markup=tags_keyboard(tags, selected_uuids, language)
+        )
 
 
-async def on_tags_done(callback: CallbackQuery, state: FSMContext) -> None:
+async def on_tags_done(
+    callback: CallbackQuery, state: FSMContext, language: Language = Language.EN
+) -> None:
     await state.set_state(AddExpense.confirm)
     await callback.answer()
     if isinstance(callback.message, Message):
         await callback.message.edit_text(
-            await _confirm_summary(state), reply_markup=confirm_keyboard()
+            await _confirm_summary(state, language), reply_markup=confirm_keyboard(language)
         )
 
 
 async def on_confirm(
-    callback: CallbackQuery, state: FSMContext, client: ExpenseBackendClient
+    callback: CallbackQuery,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -247,24 +290,28 @@ async def on_confirm(
     except httpx.HTTPError:
         logger.exception("Failed to create expense")
         if isinstance(callback.message, Message):
-            await callback.message.edit_text(
-                "Something went wrong saving the expense. Please try again with /add."
-            )
+            await callback.message.edit_text(t(language, "expense.createFailed"))
         return
     if isinstance(callback.message, Message):
-        await callback.message.edit_text(f"Expense saved: {_format_amount(expense.amount)}")
+        await callback.message.edit_text(
+            t(language, "expense.saved", amount=_format_amount(expense.amount))
+        )
 
 
-async def on_cancel_callback(callback: CallbackQuery, state: FSMContext) -> None:
+async def on_cancel_callback(
+    callback: CallbackQuery, state: FSMContext, language: Language = Language.EN
+) -> None:
     await state.clear()
-    await callback.answer("Cancelled")
+    await callback.answer(t(language, "expense.cancelledToast"))
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Cancelled.")
+        await callback.message.edit_text(t(language, "expense.cancelled"))
 
 
-async def on_cancel_command(message: Message, state: FSMContext) -> None:
+async def on_cancel_command(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
     await state.clear()
-    await message.answer("Cancelled.")
+    await message.answer(t(language, "expense.cancelled"))
 
 
 # Bounds the rendered message well under Telegram's 4096-char message limit
@@ -276,25 +323,27 @@ _MAX_COMMENT_CHARS = 100
 # be unusable to scroll — kept far below the cap (plan Risks section).
 _MAX_PICKER_SHOWN = 10
 
-_BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
 
-
-def _error_message(exc: httpx.HTTPStatusError) -> str:
+def _error_message(exc: httpx.HTTPStatusError, language: Language = Language.EN) -> str:
     if exc.response.status_code == 403:
-        return "You don't have permission to do that."
+        return t(language, "readonly")
     if exc.response.status_code == 404:
-        return "That expense no longer exists."
-    return "Something went wrong. Please try again."
+        return t(language, "expense.error.staleExpense")
+    return t(language, "expense.error.fallback")
 
 
-def _format_expenses_list(expenses: list[ExpenseResponse], category_names: dict[UUID, str]) -> str:
-    lines = ["Your expenses:"]
+def _format_expenses_list(
+    expenses: list[ExpenseResponse],
+    category_names: dict[UUID, str],
+    language: Language = Language.EN,
+) -> str:
+    lines = [t(language, "expense.listTitle")]
     shown = expenses[:_MAX_EXPENSES_SHOWN]
     for expense in shown:
-        category_name = category_names.get(expense.category_id, "Unknown")
+        category_name = category_names.get(expense.category_id, t(language, "common.unknown"))
         line = f"{expense.created_at:%Y-%m-%d} — {_format_amount(expense.amount)} [{category_name}]"
         if expense.user_name:
-            line += f" by {expense.user_name}"
+            line += " " + t(language, "expense.listItem.by", name=expense.user_name)
         if expense.comment:
             comment = expense.comment
             if len(comment) > _MAX_COMMENT_CHARS:
@@ -303,65 +352,73 @@ def _format_expenses_list(expenses: list[ExpenseResponse], category_names: dict[
         lines.append(line)
     remaining = len(expenses) - len(shown)
     if remaining > 0:
-        lines.append(f"...and {remaining} more not shown.")
+        lines.append(t(language, "expense.listMore", remaining=remaining))
     return "\n".join(lines)
 
 
-async def cmd_list_expenses(message: Message, client: ExpenseBackendClient) -> None:
-    try:
-        expenses = await client.list_expenses()
-    except httpx.HTTPError:
-        logger.exception("Failed to fetch expenses")
-        await message.answer(_BACKEND_UNREACHABLE)
-        return
-    if not expenses:
-        await message.answer("No expenses yet.")
-        return
-    try:
-        categories = await client.list_categories()
-    except httpx.HTTPError:
-        logger.exception("Failed to fetch categories")
-        await message.answer(_BACKEND_UNREACHABLE)
-        return
-    category_names = {category.id: category.name for category in categories}
-    await message.answer(_format_expenses_list(expenses, category_names))
-
-
-# -- delete flow: picker -> detail view -> delete-with-confirm ---------------
-
-
-def _format_expense_detail(expense: ExpenseResponse, category_name: str) -> str:
-    lines = [
-        f"Date: {expense.created_at:%Y-%m-%d}",
-        f"Category: {category_name}",
-        f"Amount: {_format_amount(expense.amount)}",
-    ]
-    if expense.comment:
-        lines.append(f"Comment: {expense.comment}")
-    if expense.user_name:
-        lines.append(f"Added by: {expense.user_name}")
-    if expense.tags:
-        lines.append(f"Tags: {', '.join(tag.name for tag in expense.tags)}")
-    return "\n".join(lines)
-
-
-async def cmd_delete_expense(
-    message: Message, state: FSMContext, client: ExpenseBackendClient
+async def cmd_list_expenses(
+    message: Message, client: ExpenseBackendClient, language: Language = Language.EN
 ) -> None:
     try:
         expenses = await client.list_expenses()
     except httpx.HTTPError:
         logger.exception("Failed to fetch expenses")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "expense.backendUnreachable"))
         return
     if not expenses:
-        await message.answer("No expenses to delete yet.")
+        await message.answer(t(language, "expense.noExpenses"))
         return
     try:
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "expense.backendUnreachable"))
+        return
+    category_names = {category.id: category.name for category in categories}
+    await message.answer(_format_expenses_list(expenses, category_names, language))
+
+
+# -- delete flow: picker -> detail view -> delete-with-confirm ---------------
+
+
+def _format_expense_detail(
+    expense: ExpenseResponse, category_name: str, language: Language = Language.EN
+) -> str:
+    lines = [
+        f"{t(language, 'expense.field.date')} {expense.created_at:%Y-%m-%d}",
+        f"{t(language, 'expense.field.category')} {category_name}",
+        f"{t(language, 'expense.field.amount')} {_format_amount(expense.amount)}",
+    ]
+    if expense.comment:
+        lines.append(f"{t(language, 'expense.field.comment')} {expense.comment}")
+    if expense.user_name:
+        lines.append(f"{t(language, 'expense.field.addedBy')} {expense.user_name}")
+    if expense.tags:
+        tag_names = ", ".join(tag.name for tag in expense.tags)
+        lines.append(f"{t(language, 'expense.field.tags')} {tag_names}")
+    return "\n".join(lines)
+
+
+async def cmd_delete_expense(
+    message: Message,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
+) -> None:
+    try:
+        expenses = await client.list_expenses()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch expenses")
+        await message.answer(t(language, "expense.backendUnreachable"))
+        return
+    if not expenses:
+        await message.answer(t(language, "expense.noExpensesToDelete"))
+        return
+    try:
+        categories = await client.list_categories()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch categories")
+        await message.answer(t(language, "expense.backendUnreachable"))
         return
     category_names = {category.id: category.name for category in categories}
     # Sorted here rather than relying on the backend's return order: U2.5 is
@@ -378,32 +435,40 @@ async def cmd_delete_expense(
         (expense.id, f"{expense.created_at:%m-%d} {_format_amount(expense.amount)}")
         for expense in recent
     ]
-    await message.answer("Pick an expense to delete:", reply_markup=expenses_keyboard(items))
+    await message.answer(t(language, "expense.pickToDelete"), reply_markup=expenses_keyboard(items))
 
 
 async def on_delete_expense_selected(
-    callback: CallbackQuery, callback_data: ExpenseCallback, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: ExpenseCallback,
+    state: FSMContext,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     expenses_by_id: dict[str, ExpenseResponse] = data.get("expenses_by_id", {})
     expense = expenses_by_id.get(str(callback_data.expense_id))
     if expense is None:
-        await callback.answer("Unknown expense, please pick again.", show_alert=True)
+        await callback.answer(t(language, "expense.unknownExpense"), show_alert=True)
         return
     category_names: dict[UUID, str] = data.get("category_names", {})
-    category_name = category_names.get(expense.category_id, "Unknown")
+    category_name = category_names.get(expense.category_id, t(language, "common.unknown"))
     await state.update_data(delete_target_id=str(expense.id))
     await state.set_state(DeleteExpense.confirm)
     await callback.answer()
     if isinstance(callback.message, Message):
         await callback.message.edit_text(
-            "Delete this expense?\n\n" + _format_expense_detail(expense, category_name),
-            reply_markup=confirm_keyboard(),
+            t(language, "expense.deleteConfirmTitle")
+            + "\n\n"
+            + _format_expense_detail(expense, category_name, language),
+            reply_markup=confirm_keyboard(language),
         )
 
 
 async def on_delete_expense_confirmed(
-    callback: CallbackQuery, state: FSMContext, client: ExpenseBackendClient
+    callback: CallbackQuery,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     data = await state.get_data()
@@ -424,22 +489,24 @@ async def on_delete_expense_confirmed(
     except httpx.HTTPStatusError as exc:
         logger.exception("Failed to delete expense")
         if isinstance(callback.message, Message):
-            await callback.message.edit_text(_error_message(exc))
+            await callback.message.edit_text(_error_message(exc, language))
         return
     except httpx.HTTPError:
         logger.exception("Failed to delete expense")
         if isinstance(callback.message, Message):
-            await callback.message.edit_text(_BACKEND_UNREACHABLE)
+            await callback.message.edit_text(t(language, "expense.backendUnreachable"))
         return
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Expense deleted.")
+        await callback.message.edit_text(t(language, "expense.deleted"))
 
 
-async def on_delete_expense_cancelled(callback: CallbackQuery, state: FSMContext) -> None:
+async def on_delete_expense_cancelled(
+    callback: CallbackQuery, state: FSMContext, language: Language = Language.EN
+) -> None:
     await state.clear()
-    await callback.answer("Cancelled")
+    await callback.answer(t(language, "expense.cancelledToast"))
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Cancelled.")
+        await callback.message.edit_text(t(language, "expense.cancelled"))
 
 
 # -- edit flow: picker -> detail view -> field -> new value -> update -------
@@ -453,22 +520,25 @@ _EDIT_FIELD_CALLBACKS = {
 
 
 async def cmd_edit_expense(
-    message: Message, state: FSMContext, client: ExpenseBackendClient
+    message: Message,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         expenses = await client.list_expenses()
     except httpx.HTTPError:
         logger.exception("Failed to fetch expenses")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "expense.backendUnreachable"))
         return
     if not expenses:
-        await message.answer("No expenses to edit yet.")
+        await message.answer(t(language, "expense.noExpensesToEdit"))
         return
     try:
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "expense.backendUnreachable"))
         return
     category_names = {category.id: category.name for category in categories}
     # Same "recent N, sorted client-side" pattern as cmd_delete_expense (D118)
@@ -484,54 +554,62 @@ async def cmd_edit_expense(
         (expense.id, f"{expense.created_at:%m-%d} {_format_amount(expense.amount)}")
         for expense in recent
     ]
-    await message.answer("Pick an expense to edit:", reply_markup=expenses_keyboard(items))
+    await message.answer(t(language, "expense.pickToEdit"), reply_markup=expenses_keyboard(items))
 
 
 async def on_edit_expense_selected(
-    callback: CallbackQuery, callback_data: ExpenseCallback, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: ExpenseCallback,
+    state: FSMContext,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     expenses_by_id: dict[str, ExpenseResponse] = data.get("expenses_by_id", {})
     expense = expenses_by_id.get(str(callback_data.expense_id))
     if expense is None:
-        await callback.answer("Unknown expense, please pick again.", show_alert=True)
+        await callback.answer(t(language, "expense.unknownExpense"), show_alert=True)
         return
     category_names: dict[UUID, str] = data.get("category_names", {})
-    category_name = category_names.get(expense.category_id, "Unknown")
+    category_name = category_names.get(expense.category_id, t(language, "common.unknown"))
     await state.update_data(edit_target_id=str(expense.id))
     await state.set_state(EditExpense.field)
     await callback.answer()
     if isinstance(callback.message, Message):
         await callback.message.edit_text(
-            "What do you want to edit?\n\n" + _format_expense_detail(expense, category_name),
-            reply_markup=edit_field_keyboard(),
+            t(language, "expense.editPromptTitle")
+            + "\n\n"
+            + _format_expense_detail(expense, category_name, language),
+            reply_markup=edit_field_keyboard(language),
         )
 
 
 async def on_edit_field_chosen(
-    callback: CallbackQuery, state: FSMContext, client: ExpenseBackendClient
+    callback: CallbackQuery,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     if not isinstance(callback.message, Message):
         return
     if callback.data == EDIT_FIELD_AMOUNT_CALLBACK:
         await state.set_state(EditExpense.amount)
-        await callback.message.edit_text("Enter the new amount (e.g. 12.50 or 12,50):")
+        await callback.message.edit_text(t(language, "expense.editEnterAmount"))
         return
     if callback.data == EDIT_FIELD_COMMENT_CALLBACK:
         await state.set_state(EditExpense.comment)
-        await callback.message.edit_text("Enter the new comment:")
+        await callback.message.edit_text(t(language, "expense.editEnterComment"))
         return
     if callback.data == EDIT_FIELD_CATEGORY_CALLBACK:
         try:
             categories = await client.list_categories()
         except httpx.HTTPError:
             logger.exception("Failed to fetch categories")
-            await callback.message.edit_text(_BACKEND_UNREACHABLE)
+            await callback.message.edit_text(t(language, "expense.backendUnreachable"))
             return
         await state.set_state(EditExpense.category)
         await callback.message.edit_text(
-            "Choose a new category:", reply_markup=categories_keyboard(categories)
+            t(language, "expense.editChooseCategory"), reply_markup=categories_keyboard(categories)
         )
         return
     # EDIT_FIELD_TAGS_CALLBACK
@@ -542,14 +620,14 @@ async def on_edit_field_chosen(
         tags = await client.list_tags()
     except httpx.HTTPError:
         logger.exception("Failed to fetch tags")
-        await callback.message.edit_text(_BACKEND_UNREACHABLE)
+        await callback.message.edit_text(t(language, "expense.backendUnreachable"))
         return
     selected = {str(tag.id) for tag in (target.tags if target else [])}
     await state.update_data(tags=tags, selected_tag_ids=list(selected))
     await state.set_state(EditExpense.tags)
     await callback.message.edit_text(
-        "Pick tags (tap Done when finished):",
-        reply_markup=tags_keyboard(tags, {UUID(tid) for tid in selected}),
+        t(language, "expense.pickTags"),
+        reply_markup=tags_keyboard(tags, {UUID(tid) for tid in selected}, language),
     )
 
 
@@ -558,6 +636,7 @@ async def _finish_edit(
     state: FSMContext,
     client: ExpenseBackendClient,
     update: ExpenseUpdate,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     target_id = data.get("edit_target_id")
@@ -568,30 +647,36 @@ async def _finish_edit(
         expense = await client.update_expense(UUID(target_id), update)
     except httpx.HTTPStatusError as exc:
         logger.exception("Failed to update expense")
-        await reply(_error_message(exc))
+        await reply(_error_message(exc, language))
         return
     except httpx.HTTPError:
         logger.exception("Failed to update expense")
-        await reply(_BACKEND_UNREACHABLE)
+        await reply(t(language, "expense.backendUnreachable"))
         return
-    await reply(f"Expense updated: {_format_amount(expense.amount)}")
+    await reply(t(language, "expense.updated", amount=_format_amount(expense.amount)))
 
 
 async def on_edit_amount_entered(
-    message: Message, state: FSMContext, client: ExpenseBackendClient
+    message: Message,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         amount = parse_amount_to_minor_units(message.text or "")
     except ValueError:
-        await message.answer("That doesn't look like a valid amount. Try again (e.g. 12.50):")
+        await message.answer(t(language, "expense.invalidAmount"))
         return
-    await _finish_edit(message.answer, state, client, ExpenseUpdate(amount=amount))
+    await _finish_edit(message.answer, state, client, ExpenseUpdate(amount=amount), language)
 
 
 async def on_edit_comment_entered(
-    message: Message, state: FSMContext, client: ExpenseBackendClient
+    message: Message,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
-    await _finish_edit(message.answer, state, client, ExpenseUpdate(comment=message.text))
+    await _finish_edit(message.answer, state, client, ExpenseUpdate(comment=message.text), language)
 
 
 async def on_edit_category_chosen(
@@ -599,6 +684,7 @@ async def on_edit_category_chosen(
     callback_data: CategoryCallback,
     state: FSMContext,
     client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     if not isinstance(callback.message, Message):
@@ -608,11 +694,15 @@ async def on_edit_category_chosen(
         state,
         client,
         ExpenseUpdate(category_id=callback_data.category_id),
+        language,
     )
 
 
 async def on_edit_tags_done(
-    callback: CallbackQuery, state: FSMContext, client: ExpenseBackendClient
+    callback: CallbackQuery,
+    state: FSMContext,
+    client: ExpenseBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     if not isinstance(callback.message, Message):
@@ -620,7 +710,7 @@ async def on_edit_tags_done(
     data = await state.get_data()
     selected_ids = [UUID(tid) for tid in data.get("selected_tag_ids", [])]
     await _finish_edit(
-        callback.message.edit_text, state, client, ExpenseUpdate(tag_ids=selected_ids)
+        callback.message.edit_text, state, client, ExpenseUpdate(tag_ids=selected_ids), language
     )
 
 
