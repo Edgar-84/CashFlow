@@ -26,6 +26,10 @@ def _user_json(tg_id: int) -> dict[str, Any]:
         "role": "member",
         "account_id": str(uuid4()),
         "created_at": "2026-01-01T00:00:00Z",
+        "currency": "USD",
+        "language": "en",
+        "account_name": "Test Account",
+        "today": "2026-01-01",
     }
 
 

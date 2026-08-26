@@ -356,7 +356,7 @@ implementation unit may start before *its own* spec exists.
       without a manual reload, and shows a success haptic; a non-admin sees the
       current language and cannot change it; a failed PATCH keeps the selection
       and shows the error; the three languages are listed by endonym.
-- [ ] **U3.12** `bot/i18n.py` + language resolution, EN catalogue only.
+- [x] **U3.12** `bot/i18n.py` + language resolution, EN catalogue only.
       **AC:** the language is resolved **from the `GET /users/me` probe
       `AllowlistMiddleware` already makes** and cached beside the allow verdict
       (D707) — no extra round-trip per update; handlers receive it as injected
@@ -1316,9 +1316,48 @@ touching auth or scoping goes through the reviewer subagent.
   `initData` the backend's HMAC check won't fake. Covered instead by the 62
   tests above plus `tsc`/`eslint`/`vite build`. Worth a `/run-skill-generator`
   pass if manual verification of Mini App units becomes a recurring need.
-- **Next:** `/clear`, then **U3.12** (`bot/i18n.py` + language resolution,
-  EN catalogue only — D707's cached `AllowlistMiddleware` probe, not a
-  second fetch).
+- **U3.12 is done**: `bot/i18n.py` is new — mirrors `webapp/src/lib/i18n.ts`'s
+  shape (a `Catalogue` dict, a `t()` lookup-and-fill function) but adapted to
+  the bot's per-update, multi-account-in-one-process nature: there is no
+  module-level `currentLang` state; every `t(language, key, **vars)` call
+  takes the caller's resolved `Language` explicitly, sourced from injected
+  handler data, never a global. Seeded with two placeholder-style global
+  keys (`readonly`, `error.tryAgain`) — same "infra lands before extraction"
+  shape U3.3 used on the webapp side (its three seed keys weren't consumed
+  by that unit's own diff either); real bot strings move in at U3.13/U3.14.
+  RU/UK both alias the same `_en` dict object (`webapp`'s U3.3 precedent)
+  until U3.15's catalogues ship. No HTML-escaping in `t()` (unlike the
+  webapp's) — checked bot-wide first: no handler passes `parse_mode`, so
+  every outgoing message is plain text, and escaping plain text would corrupt
+  it. Language resolution lives in `bot/middlewares.py::AllowlistMiddleware`:
+  `BackendClient.get_me()` now parses the `/users/me` probe response into
+  `UserMeResponse` instead of the narrower `UserResponse` (D707 — the probe
+  already fetches `language`, this just stops discarding it), and the
+  verdict cache's tuple grew a `Language` field (`(allowed, language,
+  expires_at)`), read on a cache hit and stored on a cache miss identically
+  to `allowed`. Handlers get it via `data["language"]`, injected the same
+  update `data["client"]` already is; none read it yet since no handler has
+  been extracted. A denied probe (`me is None`, e.g. a clean 401) resolves
+  to `Language.EN` via `_resolve_language(me)` — cheap and correct since a
+  denied update is dropped immediately after (the language is never read),
+  but it still belongs in the cache entry so a repeat call from a denied
+  tg_id costs no second probe either. This does not relax D302: a malformed
+  response body still raises inside `client.get_me()`'s own parsing and is
+  caught by the pre-existing broad `except Exception` a transport error or
+  5xx already was, so it fails exactly as closed as before — reviewer round
+  1 flagged the module docstring for briefly overclaiming a language lookup
+  "never fails closed," fixed by naming the D302 boundary explicitly instead
+  of implying language resolution bypasses it. Touched but not owned by this
+  unit: `tests/test_bot_bot.py`'s
+  and `tests/test_bot_middlewares.py`'s `_user_json`/probe-response fixtures
+  needed `currency`/`language`/`account_name`/`today` added — both were
+  building the narrower `UserResponse` shape by hand and `UserMeResponse`
+  validation now rejects a payload missing them; caught by `verify.sh`'s
+  pytest step, not by inspection. 8 new tests across `test_bot_i18n.py`
+  (new) and `test_bot_middlewares.py`; `verify.sh` green (700 backend +
+  874 webapp tests).
+- **Next:** `/clear`, then **U3.13** (extract `bot/keyboards.py` +
+  `bot/handlers/common.py` + `expenses.py` into the i18n catalogue).
 - **Gotchas the next session must know:**
   - **Re-scan the whole file for literals after the first pass, not just the
     obvious render/copy sites.** U3.8's `budgetForm.err.planGone` was a

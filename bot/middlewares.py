@@ -18,6 +18,18 @@ minutes, not one per update. A probe that fails (5xx or transport error)
 drops the update and logs an ERROR — fail closed (D302): the alternative,
 letting the update through, would open the handler stack to everyone
 precisely during a backend outage.
+
+The same probe also resolves the caller's account `Language` (D707, U3.12):
+it is cached beside the allow verdict (same entry, same TTL) and injected
+into handler data as "language", so handlers read it off `data` and never
+fetch it themselves. A denied probe (`me is None`, e.g. a clean 401) resolves
+to `Language.EN` rather than raising — cheap and correct, since that update
+is dropped immediately after regardless of language. This does NOT relax
+D302 above: a malformed response body still surfaces as a `ValidationError`
+from `client.get_me()`'s own parsing and is caught by the same broad,
+deliberately fail-closed `except Exception` a transport error or 5xx is —
+a response CashFlow's own backend can't produce correctly is exactly the
+kind of probe anomaly D302 says to fail closed on, language included.
 """
 
 import logging
@@ -31,6 +43,8 @@ from aiogram.dispatcher.middlewares.user_context import EVENT_FROM_USER_KEY
 from aiogram.types import TelegramObject
 
 from bot.client import BackendClient
+from models.enums import Language
+from models.user import UserMeResponse
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +64,8 @@ class AllowlistMiddleware(BaseMiddleware):
         self._ttl_ok = ttl_ok
         self._ttl_deny = ttl_deny
         self._max_entries = max_entries
-        # tg_id -> (allowed, expires_at monotonic seconds)
-        self._cache: dict[int, tuple[bool, float]] = {}
+        # tg_id -> (allowed, language, expires_at monotonic seconds)
+        self._cache: dict[int, tuple[bool, Language, float]] = {}
 
     async def __call__(
         self,
@@ -69,37 +83,49 @@ class AllowlistMiddleware(BaseMiddleware):
         # outcome so an allow always injects a fresh, correctly-scoped client.
         client = BackendClient(self._http_client, tg_id, self._internal_token)
 
-        allowed = self._cached_verdict(tg_id)
-        if allowed is None:
+        entry = self._cached_entry(tg_id)
+        if entry is None:
             try:
-                allowed = await client.get_me() is not None
+                me = await client.get_me()
             except Exception:
                 # Deliberately broad (D302): a transport error, a 5xx, or a
                 # malformed response body must all fail closed the same way.
                 logger.exception("Allowlist probe failed for tg_id=%s", tg_id)
                 return None
-            self._store_verdict(tg_id, allowed)
+            allowed = me is not None
+            language = _resolve_language(me)
+            self._store_verdict(tg_id, allowed, language)
+        else:
+            allowed, language = entry
 
         if not allowed:
             logger.warning("Dropped update from non-allowlisted tg_id=%s", tg_id)
             return None
 
         data["client"] = client
+        data["language"] = language
         return await handler(event, data)
 
-    def _cached_verdict(self, tg_id: int) -> bool | None:
+    def _cached_entry(self, tg_id: int) -> tuple[bool, Language] | None:
         entry = self._cache.get(tg_id)
         if entry is None:
             return None
-        allowed, expires_at = entry
+        allowed, language, expires_at = entry
         if time.monotonic() >= expires_at:
             del self._cache[tg_id]
             return None
-        return allowed
+        return allowed, language
 
-    def _store_verdict(self, tg_id: int, allowed: bool) -> None:
+    def _store_verdict(self, tg_id: int, allowed: bool, language: Language) -> None:
         if tg_id not in self._cache and len(self._cache) >= self._max_entries:
             oldest_tg_id = next(iter(self._cache))
             del self._cache[oldest_tg_id]
         ttl = self._ttl_ok if allowed else self._ttl_deny
-        self._cache[tg_id] = (allowed, time.monotonic() + ttl)
+        self._cache[tg_id] = (allowed, language, time.monotonic() + ttl)
+
+
+def _resolve_language(me: UserMeResponse | None) -> Language:
+    # A denied probe (me is None) still needs a language for the cache entry
+    # even though the update is about to be dropped anyway (D707): default
+    # to EN rather than making the caller special-case it.
+    return me.language if me is not None else Language.EN

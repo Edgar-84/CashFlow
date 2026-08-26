@@ -1,6 +1,8 @@
 """Unit tests for bot/middlewares.py — AllowlistMiddleware, hermetic (no real
 Telegram/network). U2 AC (bot-allowlist-db plan): the allowlist is a
-`GET /users/me` probe behind a per-tg_id TTL cache, not an in-memory set."""
+`GET /users/me` probe behind a per-tg_id TTL cache, not an in-memory set.
+U3.12 AC: that same probe also resolves the caller's `Language`, cached
+beside the verdict and injected into handler data — no second round-trip."""
 
 from collections.abc import Callable
 from typing import Any
@@ -11,13 +13,14 @@ import httpx
 import pytest
 
 from bot.client import BackendClient
-from bot.middlewares import AllowlistMiddleware
+from bot.middlewares import AllowlistMiddleware, _resolve_language
+from models.enums import Language
 
 ALLOWED_TG_ID = 555
 DENIED_TG_ID = 999
 
 
-def _user_json(tg_id: int) -> dict[str, Any]:
+def _user_json(tg_id: int, *, language: str = "en") -> dict[str, Any]:
     return {
         "id": str(uuid4()),
         "tg_id": tg_id,
@@ -25,17 +28,25 @@ def _user_json(tg_id: int) -> dict[str, Any]:
         "role": "member",
         "account_id": str(uuid4()),
         "created_at": "2026-01-01T00:00:00Z",
+        "currency": "USD",
+        "language": language,
+        "account_name": "Test Account",
+        "today": "2026-01-01",
     }
 
 
 def make_probe_responder(
-    *, known_tg_ids: set[int], captured: list[httpx.Request]
+    *,
+    known_tg_ids: set[int],
+    captured: list[httpx.Request],
+    languages: dict[int, str] | None = None,
 ) -> Callable[[httpx.Request], httpx.Response]:
     def responder(request: httpx.Request) -> httpx.Response:
         captured.append(request)
         tg_id = int(request.headers["X-Telegram-User-Id"])
         if tg_id in known_tg_ids:
-            return httpx.Response(200, json=_user_json(tg_id))
+            language = (languages or {}).get(tg_id, "en")
+            return httpx.Response(200, json=_user_json(tg_id, language=language))
         return httpx.Response(401)
 
     return responder
@@ -216,3 +227,58 @@ async def test_dropped_update_is_logged(caplog: pytest.LogCaptureFixture) -> Non
         await _run(middleware, DENIED_TG_ID)
 
     assert any(str(DENIED_TG_ID) in r.getMessage() for r in caplog.records)
+
+
+async def test_allowlisted_tg_id_injects_resolved_language() -> None:
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(
+        responder=make_probe_responder(
+            known_tg_ids={ALLOWED_TG_ID}, captured=captured, languages={ALLOWED_TG_ID: "ru"}
+        )
+    )
+    received_language: Language | None = None
+
+    async def handler(event: Any, data: dict[str, Any]) -> str:
+        nonlocal received_language
+        received_language = data["language"]
+        return "handled"
+
+    await middleware(handler, Mock(), {"event_from_user": Mock(id=ALLOWED_TG_ID)})
+
+    assert received_language == Language.RU
+
+
+async def test_second_update_within_ttl_reuses_cached_language_with_no_second_probe() -> None:
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(
+        responder=make_probe_responder(
+            known_tg_ids={ALLOWED_TG_ID}, captured=captured, languages={ALLOWED_TG_ID: "uk"}
+        )
+    )
+    languages: list[Language] = []
+
+    async def handler(event: Any, data: dict[str, Any]) -> str:
+        languages.append(data["language"])
+        return "handled"
+
+    await middleware(handler, Mock(), {"event_from_user": Mock(id=ALLOWED_TG_ID)})
+    await middleware(handler, Mock(), {"event_from_user": Mock(id=ALLOWED_TG_ID)})
+
+    assert languages == [Language.UK, Language.UK]
+    assert len(captured) == 1
+
+
+def test_resolve_language_returns_en_when_probe_denied() -> None:
+    assert _resolve_language(None) is Language.EN
+
+
+async def test_denied_tg_id_still_caches_en_language_with_no_second_probe() -> None:
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(
+        responder=make_probe_responder(known_tg_ids=set(), captured=captured)
+    )
+
+    await _run(middleware, DENIED_TG_ID)
+    await _run(middleware, DENIED_TG_ID)
+
+    assert len(captured) == 1

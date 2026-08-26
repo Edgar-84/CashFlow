@@ -725,7 +725,9 @@ Hermetic — `httpx.AsyncClient` given a fake `httpx.MockTransport`, no real net
 Hermetic — no real Telegram/network; middleware called directly with a fake
 `handler`/`data` dict and a `MockTransport`-backed http client standing in
 for the backend (bot-allowlist-db plan U2 AC: the allowlist is a
-`GET /users/me` probe behind a per-tg_id TTL cache).
+`GET /users/me` probe behind a per-tg_id TTL cache; U3.12 AC: that same
+probe also resolves the caller's `Language`, cached beside the verdict and
+injected into handler data, no second round-trip).
 
 | Test | Checks |
 |---|---|
@@ -739,6 +741,21 @@ for the backend (bot-allowlist-db plan U2 AC: the allowlist is a
 | `test_cache_never_exceeds_max_entries` | The verdict cache never grows past `max_entries` (AC) |
 | `test_injected_client_carries_headers_for_the_calling_tg_id` | The injected `BackendClient`'s requests carry that tg_id's `X-Telegram-User-Id` and the configured `X-Internal-Token` |
 | `test_dropped_update_is_logged` | Dropping a non-allowlisted update logs a `WARNING` record naming the tg_id |
+| `test_allowlisted_tg_id_injects_resolved_language` | An allowed tg_id's probe response `language` reaches the handler as `data["language"]` (U3.12 AC) |
+| `test_second_update_within_ttl_reuses_cached_language_with_no_second_probe` | The cached language survives a second update inside `ttl_ok` with no second probe (U3.12 AC: no extra round-trip) |
+| `test_resolve_language_returns_en_when_probe_denied` | `_resolve_language(None)` (a denied/failed probe) defaults to `Language.EN` rather than raising (U3.12 AC) |
+| `test_denied_tg_id_still_caches_en_language_with_no_second_probe` | A denied tg_id's cache entry still carries a language so a second update inside `ttl_deny` issues no second probe |
+
+## Bot tests (`test_bot_i18n.py`) → [`bot/i18n.py`](../bot/i18n.py)
+Hermetic — pure functions, no fakes needed (U3.12 AC: EN catalogue only; RU
+and UK fall back to EN until U3.15's catalogues ship).
+
+| Test | Checks |
+|---|---|
+| `test_returns_the_en_string_for_a_plain_key` | `t(Language.EN, key)` returns the EN catalogue's string |
+| `test_falls_back_to_en_for_ru_and_uk` | `t(Language.RU/UK, key)` returns the same string as EN (no catalogue ships for either yet) |
+| `test_extra_var_with_no_matching_placeholder_is_ignored` | A `**variables` kwarg with no matching `{var}` in the template does not raise or alter the output |
+| `test_leave_unmatched_fills_a_known_var_and_leaves_an_unknown_one_literal` | `_LeaveUnmatched` fills a known `{var}` and leaves an unmatched one as the literal `{name}` text rather than dropping it |
 
 ## Bot tests (`test_bot_handlers_common.py`) → [`bot/handlers/common.py`](../bot/handlers/common.py)
 Hermetic — no FSM state, no backend calls, so no fakes needed (U2.5 AC:
