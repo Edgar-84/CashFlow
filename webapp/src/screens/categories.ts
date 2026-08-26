@@ -20,6 +20,7 @@
  */
 
 import { assignCategoryColors, categorySlotCssVar } from "../lib/category-colors";
+import { t } from "../lib/i18n";
 import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ApiError, ForbiddenError } from "../api/client";
 import { mountColorPicker, renderColorQuickRow, renderColorSheet, SHEET_COLUMNS } from "../components/color-picker";
@@ -85,36 +86,51 @@ export function categoryDeleteOutcomeKind(expenseCount: number): CategoryDeleteO
   return expenseCount > 0 ? "archived" : "deleted";
 }
 
+// Private, non-escaping substitution for strings fed to native Telegram
+// chrome (`confirmAction`) or that are escaped a second time by their own
+// render call site — same "pure modules don't share helpers" convention
+// every other screen's own copy already follows.
+function fillTemplate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
+}
+
 /** Region 5's own label previews the branch before the popup even opens
  * (docs/ui/screens/06c-category-delete.md). */
 export function categoryDeleteTriggerLabel(expenseCount: number): string {
-  return expenseCount > 0 ? "Hide category" : "Delete category";
+  return expenseCount > 0 ? t("categories.hideTrigger") : t("categories.deleteTrigger");
 }
 
 function expenseCountPhrase(expenseCount: number): string {
-  return expenseCount === 1 ? "1 expense keeps it for reports." : `${expenseCount} expenses keep it for reports.`;
+  return expenseCount === 1
+    ? t("categories.delete.expenseCountOne")
+    : fillTemplate(t("categories.delete.expenseCountMany"), { count: expenseCount });
 }
 
 /** The Telegram `showConfirm` message — matches `docs/design/mini-app-ux.md`
  * §4's exact copy pattern ("Hide Groceries? 42 expenses keep it for
  * reports" / "Delete Groceries?"), plus the last-remaining-active-category
- * warning appended regardless of which branch applies. */
+ * warning appended regardless of which branch applies. Composed with
+ * `fillTemplate`, not `t()`'s vars — this feeds `confirmAction` (native
+ * Telegram chrome, not innerHTML), which must never see HTML entities. */
 export function categoryDeleteConfirmMessage(input: { name: string; expenseCount: number; isLastActive: boolean }): string {
   const base =
     input.expenseCount > 0
-      ? `Hide ${input.name}? ${expenseCountPhrase(input.expenseCount)}`
-      : `Delete ${input.name}?`;
-  const suffix = input.isLastActive
-    ? " This is your only category — new expenses will have nowhere to go."
-    : "";
+      ? fillTemplate(t("categories.delete.confirmHide"), { name: input.name, phrase: expenseCountPhrase(input.expenseCount) })
+      : fillTemplate(t("categories.delete.confirmDelete"), { name: input.name });
+  const suffix = input.isLastActive ? t("categories.delete.lastActiveWarning") : "";
   return base + suffix;
 }
 
 /** The retryable-failure banner's message on 06a — names the category and
  * which action failed, never a status code. The 403 case uses
- * `error.readonly` instead (see main.ts's delete-outcome handling). */
+ * `error.readonly` instead (see main.ts's delete-outcome handling). Composed
+ * with `fillTemplate`, not `t()`'s vars — `renderDeleteFailureBanner` already
+ * `escapeHtml`s this value once at its own render site, so escaping the name
+ * here too would double-escape it. */
 export function categoryDeleteFailureMessage(name: string, expenseCount: number): string {
-  return expenseCount > 0 ? `Couldn't hide ${name}.` : `Couldn't delete ${name}.`;
+  return expenseCount > 0
+    ? fillTemplate(t("categories.delete.failureHide"), { name })
+    : fillTemplate(t("categories.delete.failureDelete"), { name });
 }
 
 /** Optimistic forward transform for a confirmed delete/hide: moves the row
@@ -207,7 +223,7 @@ export async function loadCategories(api: CategoriesApi, cache: CategoriesCache)
     if (cached) {
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
-    const message = err instanceof Error ? err.message : "Something went wrong.";
+    const message = err instanceof Error ? err.message : t("error.fallback");
     return { status: "error", message };
   }
 }
@@ -240,14 +256,14 @@ function renderCell(row: CategoryRow): string {
 }
 
 function renderAddCell(): string {
-  return `<button type="button" class="cat-cell cat-cell-add" data-testid="cat-cell-add" aria-label="Add category">
+  return `<button type="button" class="cat-cell cat-cell-add" data-testid="cat-cell-add" aria-label="${t("categories.addCategory")}">
     <span class="cat-cell-swatch cat-cell-add-swatch" aria-hidden="true">
       <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
         <line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
         <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
       </svg>
     </span>
-    <span class="cat-cell-name" aria-hidden="true">Add category</span>
+    <span class="cat-cell-name" aria-hidden="true">${t("categories.addCategory")}</span>
   </button>`;
 }
 
@@ -278,12 +294,12 @@ function renderArchivedSection(archived: CategoryRow[], expanded: boolean): stri
   }
   return `<div class="cat-archived" data-testid="cat-archived">
     <button type="button" class="cat-archived-header" data-action="toggle-archived" aria-expanded="${expanded}">
-      <span>Archived (${archived.length})</span>
+      <span>${t("categories.archivedHeader", { count: archived.length })}</span>
       <span class="cat-archived-chevron${expanded ? " cat-archived-chevron--open" : ""}" aria-hidden="true"></span>
     </button>
     ${
       expanded
-        ? `<p class="cat-archived-explain">Archived categories keep their history in reports, but you can't pick them for new expenses.</p>
+        ? `<p class="cat-archived-explain">${t("categories.archivedExplain")}</p>
     ${archived.map(renderArchivedRow).join("")}`
         : ""
     }
@@ -309,7 +325,7 @@ export interface CategoriesViewState {
 function renderDeleteFailureBanner(failure: CategoryDeleteFailure): string {
   return `<div class="cat-delete-failed" data-testid="cat-delete-failed" aria-live="polite">
     <p>${escapeHtml(failure.message)}</p>
-    ${failure.retryable ? `<button type="button" data-action="retry-delete" data-category-id="${failure.categoryId}">Try again</button>` : ""}
+    ${failure.retryable ? `<button type="button" data-action="retry-delete" data-category-id="${failure.categoryId}">${t("error.retry")}</button>` : ""}
   </div>`;
 }
 
@@ -320,8 +336,8 @@ export function renderCategoriesView(state: CategoriesViewState): string {
   const { active, archived } = state.data;
   return `<div class="categories-ready" data-testid="ready">
     ${state.deleteFailure ? renderDeleteFailureBanner(state.deleteFailure) : ""}
-    ${state.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(state.lastSyncedAt)}</div>` : ""}
-    ${active.length === 0 ? `<p class="categories-empty-note" data-testid="empty-note">No categories yet</p>` : ""}
+    ${state.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">${t("offline.banner", { time: state.lastSyncedAt })}</div>` : ""}
+    ${active.length === 0 ? `<p class="categories-empty-note" data-testid="empty-note">${t("categories.empty")}</p>` : ""}
     ${renderGrid(active)}
     ${renderArchivedSection(archived, state.archivedExpanded)}
   </div>`;
@@ -337,13 +353,13 @@ function renderSkeleton(): string {
 function renderError(message: string): string {
   return `<div class="categories-error" data-testid="error">
     <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <button type="button" data-action="retry">${t("error.retry")}</button>
   </div>`;
 }
 
 function renderForbidden(): string {
   return `<div class="categories-readonly" data-testid="forbidden">
-    <p>You have read-only access to this account.</p>
+    <p>${t("readonly")}</p>
   </div>`;
 }
 
@@ -510,7 +526,7 @@ export function isCategoryFormDirty(draft: CategoryFormDraft, original: Category
 /** The inline name error — never a popup, per the AC. `null` while the
  * trimmed name is non-empty. */
 export function categoryNameError(name: string): string | null {
-  return name.trim() === "" ? "Give this category a name." : null;
+  return name.trim() === "" ? t("categoryForm.nameError") : null;
 }
 
 /** Non-blocking duplicate-name warning, scoped to active categories only
@@ -528,7 +544,7 @@ export function categoryDuplicateWarning(
   }
   const lower = trimmed.toLowerCase();
   const match = activeSiblings.some((s) => s.id !== ownId && s.name.trim().toLowerCase() === lower);
-  return match ? `Another category is already named "${trimmed}".` : null;
+  return match ? fillTemplate(t("categoryForm.duplicateWarning"), { name: trimmed }) : null;
 }
 
 /** MainButton's enabled rule: dirty alone, per the spec — a blank name stays
@@ -551,12 +567,12 @@ export type CategoryFormOutcome =
 
 function categoryFormErrorMessage(err: unknown): string {
   if (err instanceof ForbiddenError) {
-    return "You have read-only access to this account.";
+    return t("readonly");
   }
   if (err instanceof ApiError) {
     return err.message;
   }
-  return "Couldn't save this category.";
+  return t("categoryForm.saveError.fallback");
 }
 
 export interface CategoryFormController {
@@ -611,7 +627,7 @@ export function createCategoryFormController(
 // -- form chrome --------------------------------------------------------
 
 export function applyCategoryFormChrome(draft: CategoryFormDraft, original: CategoryFormDraft): void {
-  mainButton.show("Save");
+  mainButton.show(t("categoryForm.save"));
   mainButton.setEnabled(categoryFormMainButtonEnabled(draft, original));
 }
 
@@ -629,7 +645,7 @@ export function wireCategoryFormBackButton(
         onClose();
         return;
       }
-      const discard = await confirmDiscard("Discard changes to this category?");
+      const discard = await confirmDiscard(t("categoryForm.discardChanges"));
       if (discard) {
         onClose();
       }
@@ -648,8 +664,8 @@ const noop = () => {};
 function renderNameField(draft: CategoryFormDraft, message: { text: string; kind: "error" | "warning" } | null): string {
   return `<div>
     <div class="cat-form-field">
-      <label class="cat-form-label" for="cat-name-input">Name</label>
-      <input id="cat-name-input" class="cat-form-input" type="text" data-testid="cat-name-input" placeholder="Category name" value="${escapeHtml(draft.name)}" />
+      <label class="cat-form-label" for="cat-name-input">${t("categoryForm.nameLabel")}</label>
+      <input id="cat-name-input" class="cat-form-input" type="text" data-testid="cat-name-input" placeholder="${t("categoryForm.namePlaceholder")}" value="${escapeHtml(draft.name)}" />
     </div>
     <p class="cat-form-message${message ? ` cat-form-message--${message.kind}` : ""}" data-testid="cat-form-message" aria-live="polite">${message ? escapeHtml(message.text) : ""}</p>
   </div>`;
@@ -687,7 +703,7 @@ export function renderCategoryForm(state: CategoryFormViewState): string {
   return `<div class="cat-form" data-testid="cat-form">
     ${renderNameField(draft, message)}
     <div class="cat-form-section">
-      <p class="cat-form-label">Colour</p>
+      <p class="cat-form-label">${t("categoryForm.colourLabel")}</p>
       <div class="cat-color-picker-slot" data-testid="cat-color-picker-slot">${colorPicker}</div>
     </div>
     ${state.submitError ? `<p class="submit-error" data-testid="cat-form-submit-error">${escapeHtml(state.submitError)}</p>` : ""}
