@@ -38,6 +38,10 @@ done
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || { echo "usage: bash scripts/auto-units.sh <plan-file> [--only P] [--from ID] [--until ID] [--max N] [--dry-run] [--model M]"; echo "       (run with --help for what each flag does)"; exit 2; }
 command -v claude >/dev/null || { echo "FATAL: claude CLI not on PATH"; exit 2; }
 command -v gh     >/dev/null || { echo "FATAL: gh CLI not on PATH"; exit 2; }
+command -v jq     >/dev/null || { echo "FATAL: jq not on PATH (needed to render the event stream)"; exit 2; }
+
+FMT="$(dirname "$0")/auto-units.fmt.jq"
+[ -f "$FMT" ] || { echo "FATAL: formatter missing: $FMT"; exit 2; }
 
 RUN_DIR=".auto-units/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN_DIR"
@@ -108,18 +112,25 @@ for UNIT in $UNITS; do
   fi
 
   say "$UNIT — starting ($(date +%H:%M:%S))"
+  echo "   plan  $PLAN"
   LOG="$RUN_DIR/$UNIT.log"
+  RAW="$RUN_DIR/$UNIT.jsonl"
+  # stream-json, not text: text buffers the whole transcript until the
+  # process exits cleanly, so an interrupted unit loses everything. This
+  # writes every event as it happens. stdin is pinned to /dev/null — the
+  # CLI otherwise waits 3s on it and warns into the log.
   claude -p "/unit-auto $UNIT $PLAN" \
     --model "$MODEL" \
-    --output-format text \
+    --output-format stream-json --verbose \
     --permission-mode acceptEdits \
     --allowedTools 'Bash(cat:*)' 'Bash(ls:*)' 'Bash(sed -n:*)' 'Bash(head:*)' \
                    'Bash(grep:*)' 'Bash(rg:*)' 'Bash(find:*)' 'Bash(wc:*)' \
                    'Bash(gh pr:*)' 'Bash(git:*)' 'Task' 'TodoWrite' \
-    2>&1 | tee "$LOG"
+    < /dev/null 2>&1 | tee "$RAW" | jq -rR --unbuffered -f "$FMT" | tee "$LOG"
 
   # --- verdict: trust the merge, not the transcript --------------------
   RESULT="$(grep -oE 'AUTO_UNIT_RESULT: (DONE|STOPPED).*' "$LOG" | tail -1)"
+  SID="$(grep '^{' "$RAW" 2>/dev/null | jq -r 'select(.subtype=="init") | .session_id' 2>/dev/null | head -1)"
   git checkout master >/dev/null 2>&1
   git pull --ff-only  >/dev/null 2>&1
   if grep -qE "^- \[x\] \*\*$UNIT\*\*" "$PLAN" && [ -z "$(git status --porcelain)" ]; then
@@ -129,7 +140,10 @@ for UNIT in $UNITS; do
   else
     say "$UNIT — STOPPED"
     echo "${RESULT:-no AUTO_UNIT_RESULT line — session died or was interrupted}"
-    echo "Checkbox on master is still unchecked. Log: $LOG"
+    echo "Checkbox on master is still unchecked."
+    echo "  rendered log : $LOG"
+    echo "  raw events   : $RAW"
+    [ -n "${SID:-}" ] && echo "  reopen that session with:  claude --resume $SID"
     echo "Nothing further will run. Branch left in place for inspection."
     exit 4
   fi
