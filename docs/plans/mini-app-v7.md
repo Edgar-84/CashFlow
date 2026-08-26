@@ -339,7 +339,7 @@ implementation unit may start before *its own* spec exists.
       and fails on a missing or extra key; no catalogue contains markup.
 - [x] **U3.5** Extract `home.ts` + `components/side-menu.ts`.
 - [x] **U3.6** Extract `add-expense.ts` (the largest single file, ~33 strings).
-- [ ] **U3.7** Extract `expenses.ts` + `expense-detail.ts`.
+- [x] **U3.7** Extract `expenses.ts` + `expense-detail.ts`.
 - [ ] **U3.8** Extract `budgets.ts` + `budget-form.ts`.
 - [ ] **U3.9** Extract `categories.ts` + `tags.ts`.
 - [ ] **U3.10** Extract `settings.ts` + `statistics.ts` + the remaining
@@ -1082,9 +1082,53 @@ touching auth or scoping goes through the reviewer subagent.
   existing suite doubles as the AC's byte-identical-output regression test.
   `i18n.test.ts`'s generic per-language loops pick up all 24 new keys with no
   changes needed there either.
-- **Next:** `/clear`, then **U3.7** (extract `expenses.ts` +
-  `expense-detail.ts`).
+- **U3.7 is done**: every user-visible literal in `expenses.ts` and
+  `expense-detail.ts` now goes through `t()`. Four strings reused U3.5's
+  global keys byte-identically (`category.unknown`, `error.retry`,
+  `error.fallback`, `offline.banner` — the last via `t()`'s own vars
+  mechanism, `renderOfflineBanner`'s existing convention, mirroring
+  `home.ts`/`add-expense.ts`). New keys: `expenses.unknownCategory` (the
+  "this category" fallback label for a filter whose category id no longer
+  resolves), `expenses.forbidden`, `expenses.loadMore`, `expenses.endOfList`,
+  and the two templated groups `expenses.filter.both`/`expenses.empty.*`
+  (both/categoryOnly/periodOnly/unfiltered) — composed with a private,
+  non-escaping `fillTemplate` (a fourth per-file copy of `home.ts`'s helper,
+  same "pure modules don't share helpers" convention U3.6 already
+  reaffirmed) and escaped exactly once by the existing outer `escapeHtml`
+  wrap in `renderReady`/`renderEmpty`, since `t()`'s own vars mechanism would
+  have double-escaped the category/period labels otherwise. `expense-detail.ts`
+  gained `detail.action.edit`/`detail.action.delete`, `detail.forbidden`,
+  `detail.notFound`, `detail.err.forbidden`/`detail.err.delete`
+  (`deleteErrorMessage`'s two branches) and `detail.confirm.message`, passed
+  to `confirmAction()` as a plain `t(key)` call with no escaping — Telegram's
+  native popup, not innerHTML, same rule as U3.6's MainButton labels.
+  Both files had one pre-existing `t`-shadowing `.map((t) => t.name)` tag
+  callback (harmless as shipped — neither body called `t()` — but caught by
+  the review's own grep-for-`(t) =>` check); renamed to `tag`, matching
+  U3.5/U3.6's precedent.
+  Both test files needed **no changes** to their existing exact-EN-string
+  assertions (no `vi.mock` on `../src/lib/i18n` in either, same as
+  `add-expense.test.ts`) — they doubled as the AC's byte-identical-output
+  regression test unchanged. Added: one `setLanguage("ru")` pass per test
+  file (reset in a scoped `afterEach`) asserting real RU strings render for
+  the forbidden/empty/end-of-list and action/forbidden/not-found copy,
+  mirroring `side-menu.test.ts`'s convention; `i18n.test.ts`'s generic
+  per-language loops pick up all 19 new keys with no changes needed there.
+  **Doc/reality mismatch found, not fixed (out of scope — this unit's AC
+  requires byte-identical EN output):** `03b-expense-detail.md`'s Copy table
+  lists `author`: "Added by {name}" as an existing `[repo]` string, but the
+  shipped `renderCard` only ever prints the bare name with no "Added by"
+  prefix — nothing to catalogue here since there is no static literal at that
+  call site, only user data. Flagged for whoever next touches that spec or
+  screen; not this unit's job to reconcile.
+- **Next:** `/clear`, then **U3.8** (extract `budgets.ts` + `budget-form.ts`).
 - **Gotchas the next session must know:**
+  - **`confirmAction`/`confirmDiscard` (`lib/telegram.ts`) take only a
+    `message` string** — Telegram's `showConfirm` has no title or
+    custom-button-text parameter, so a Copy table's `confirm.title`/
+    `confirm.yes`/`confirm.cancel`-style rows (03b's `09-...`-style docs) are
+    native Telegram chrome, not literals this codebase renders — only the
+    `message` row is ever an actual `t()` call site.
   - **Check for an existing global key before adding a screen-prefixed one.**
     U3.6 found three strings (`error.retry`, `error.fallback`,
     `offline.banner`) that U3.5 had already catalogued under a global,

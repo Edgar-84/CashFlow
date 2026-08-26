@@ -80,6 +80,25 @@ const en = {
   "addExpense.comment": "Comment",
   "addExpense.categories": "Categories",
   "addExpense.empty": "Add a category first — every expense needs one.",
+  // U3.7 (expenses.ts + expense-detail.ts). "Unknown"/"Try again"/the offline
+  // banner/the generic fallback message are U3.5's global keys, reused as-is
+  // per that unit's own gotcha note.
+  "expenses.unknownCategory": "this category",
+  "expenses.forbidden": "You don't have permission to view expenses.",
+  "expenses.filter.both": "{category} · {period}",
+  "expenses.empty.both": "Nothing in {period} for {category}.",
+  "expenses.empty.categoryOnly": "Nothing here yet for {category}.",
+  "expenses.empty.periodOnly": "Nothing in {period}.",
+  "expenses.empty.unfiltered": "No expenses yet.",
+  "expenses.loadMore": "Load more",
+  "expenses.endOfList": "You've reached the end.",
+  "detail.action.edit": "Edit",
+  "detail.action.delete": "Delete expense",
+  "detail.confirm.message": "Are you sure you want to delete this expense?",
+  "detail.err.forbidden": "You don't have permission to do that.",
+  "detail.err.delete": "Couldn't delete that expense.",
+  "detail.forbidden": "You don't have permission to view this expense.",
+  "detail.notFound": "That expense no longer exists.",
 } as const;
 
 export type Catalogue = Record<keyof typeof en, string>;
@@ -134,6 +153,22 @@ const ru: Catalogue = {
   "addExpense.comment": "Комментарий",
   "addExpense.categories": "Категории",
   "addExpense.empty": "Сначала добавьте категорию — она нужна для каждого расхода.",
+  "expenses.unknownCategory": "этой категории",
+  "expenses.forbidden": "У вас нет прав на просмотр расходов.",
+  "expenses.filter.both": "{category} · {period}",
+  "expenses.empty.both": "За {period} для категории {category} ничего нет.",
+  "expenses.empty.categoryOnly": "Пока ничего нет для категории {category}.",
+  "expenses.empty.periodOnly": "За {period} ничего нет.",
+  "expenses.empty.unfiltered": "Расходов пока нет.",
+  "expenses.loadMore": "Загрузить ещё",
+  "expenses.endOfList": "Вы дошли до конца списка.",
+  "detail.action.edit": "Изменить",
+  "detail.action.delete": "Удалить расход",
+  "detail.confirm.message": "Вы уверены, что хотите удалить этот расход?",
+  "detail.err.forbidden": "У вас нет прав на это действие.",
+  "detail.err.delete": "Не удалось удалить этот расход.",
+  "detail.forbidden": "У вас нет прав на просмотр этого расхода.",
+  "detail.notFound": "Этот расход больше не существует.",
 };
 
 const uk: Catalogue = {
@@ -186,6 +221,22 @@ const uk: Catalogue = {
   "addExpense.comment": "Коментар",
   "addExpense.categories": "Категорії",
   "addExpense.empty": "Спочатку додайте категорію — вона потрібна для кожної витрати.",
+  "expenses.unknownCategory": "цієї категорії",
+  "expenses.forbidden": "У вас немає прав на перегляд витрат.",
+  "expenses.filter.both": "{category} · {period}",
+  "expenses.empty.both": "За {period} для категорії {category} нічого немає.",
+  "expenses.empty.categoryOnly": "Поки що нічого немає для категорії {category}.",
+  "expenses.empty.periodOnly": "За {period} нічого немає.",
+  "expenses.empty.unfiltered": "Витрат поки немає.",
+  "expenses.loadMore": "Завантажити ще",
+  "expenses.endOfList": "Ви дійшли до кінця списку.",
+  "detail.action.edit": "Змінити",
+  "detail.action.delete": "Видалити витрату",
+  "detail.confirm.message": "Ви впевнені, що хочете видалити цю витрату?",
+  "detail.err.forbidden": "У вас немає прав на цю дію.",
+  "detail.err.delete": "Не вдалося видалити цю витрату.",
+  "detail.forbidden": "У вас немає прав на перегляд цієї витрати.",
+  "detail.notFound": "Ця витрата більше не існує.",
 };
 
 // Exported (not just module-private) so `tests/i18n.test.ts` can assert the

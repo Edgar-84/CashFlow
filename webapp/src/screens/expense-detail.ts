@@ -24,6 +24,7 @@
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
+import { t } from "../lib/i18n";
 import { formatAmount } from "../lib/money";
 import { confirmAction, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ForbiddenError, NotFoundError } from "../api/client";
@@ -82,7 +83,7 @@ export function buildDetailData(
     amountMinor: expense.amount,
     currency,
     categoryId: expense.category_id,
-    categoryLabel: category?.name ?? "Unknown",
+    categoryLabel: category?.name ?? t("category.unknown"),
     colorVar: category ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
     authorName: expense.user_name,
     comment: expense.comment,
@@ -120,7 +121,7 @@ export async function loadDetail(api: ExpenseDetailApi, id: Uuid): Promise<Detai
     if (err instanceof NotFoundError) {
       return { status: "not-found" };
     }
-    const message = err instanceof Error ? err.message : "Something went wrong.";
+    const message = err instanceof Error ? err.message : t("error.fallback");
     return { status: "error", message };
   }
 }
@@ -140,9 +141,9 @@ export type DeleteOutcome = { status: "success" } | { status: "error"; message: 
 
 function deleteErrorMessage(err: unknown): string {
   if (err instanceof ForbiddenError) {
-    return "You don't have permission to do that.";
+    return t("detail.err.forbidden");
   }
-  return "Couldn't delete that expense.";
+  return t("detail.err.delete");
 }
 
 /** Owns the one piece of mutable state left on this screen: the in-flight
@@ -199,7 +200,7 @@ function renderCard(data: DetailData): string {
   const author = data.authorName
     ? `<span class="detail-author">${escapeHtml(data.authorName)}</span>`
     : "";
-  const tagNames = data.tags.map((t) => t.name);
+  const tagNames = data.tags.map((tag) => tag.name);
   const tags =
     tagNames.length > 0
       ? `<div class="detail-tags" data-testid="detail-tags">${escapeHtml(tagNames.join(", "))}</div>`
@@ -228,8 +229,8 @@ function renderCard(data: DetailData): string {
 function renderActions(deleting: boolean): string {
   const disabled = deleting ? " disabled" : "";
   return `<div class="detail-actions" data-testid="detail-actions">
-    <button type="button" data-action="open-picker"${disabled}>Edit</button>
-    <button type="button" class="danger" data-action="delete"${disabled}>Delete expense</button>
+    <button type="button" data-action="open-picker"${disabled}>${escapeHtml(t("detail.action.edit"))}</button>
+    <button type="button" class="danger" data-action="delete"${disabled}>${escapeHtml(t("detail.action.delete"))}</button>
   </div>`;
 }
 
@@ -250,19 +251,19 @@ function renderSkeleton(): string {
 function renderError(message: string): string {
   return `<div class="detail-error" data-testid="error">
     <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <button type="button" data-action="retry">${escapeHtml(t("error.retry"))}</button>
   </div>`;
 }
 
 function renderForbidden(): string {
   return `<div class="detail-readonly" data-testid="forbidden">
-    <p>You don't have permission to view this expense.</p>
+    <p>${escapeHtml(t("detail.forbidden"))}</p>
   </div>`;
 }
 
 function renderNotFound(): string {
   return `<div class="detail-not-found" data-testid="not-found">
-    <p>That expense no longer exists.</p>
+    <p>${escapeHtml(t("detail.notFound"))}</p>
   </div>`;
 }
 
@@ -350,7 +351,7 @@ export function mount(root: HTMLElement, state: DetailLoadState, api: ExpenseDet
         return;
       }
       confirming = true;
-      void confirmAction("Are you sure you want to delete this expense?").then(async (confirmed) => {
+      void confirmAction(t("detail.confirm.message")).then(async (confirmed) => {
         confirming = false;
         if (!confirmed || !active) {
           return;
