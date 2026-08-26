@@ -23,6 +23,7 @@
  * (docs/ui/screens/07b-tag-form.md's Delta).
  */
 
+import { t } from "../lib/i18n";
 import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ApiError, ForbiddenError } from "../api/client";
 import type { Currency, TagResponse, Uuid } from "../api/types";
@@ -74,31 +75,49 @@ export function tagDeleteOutcomeKind(expenseCount: number): TagDeleteOutcomeKind
   return expenseCount > 0 ? "archived" : "deleted";
 }
 
+// Private, non-escaping substitution for strings fed to native Telegram
+// chrome (`confirmAction`) or that are escaped a second time by their own
+// render call site — same "pure modules don't share helpers" convention
+// every other screen's own copy already follows (mirrors
+// `categories.ts::fillTemplate`).
+function fillTemplate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
+}
+
 /** Region 4's own label previews the branch before the popup even opens
  * (docs/ui/screens/07b-tag-form.md). */
 export function tagDeleteTriggerLabel(expenseCount: number): string {
-  return expenseCount > 0 ? "Hide tag" : "Delete tag";
+  return expenseCount > 0 ? t("tags.hideTrigger") : t("tags.deleteTrigger");
 }
 
 function tagExpenseCountPhrase(expenseCount: number): string {
-  return expenseCount === 1 ? "1 expense keeps it tagged." : `${expenseCount} expenses keep it tagged.`;
+  return expenseCount === 1
+    ? t("tags.delete.expenseCountOne")
+    : fillTemplate(t("tags.delete.expenseCountMany"), { count: expenseCount });
 }
 
 /** The Telegram `showConfirm` message. Unlike categories' equivalent, there is
  * no last-remaining-tag suffix — deleting the last tag has no consequence
  * comparable to a category-less expense (docs/ui/screens/07b-tag-form.md's
- * Delta). */
+ * Delta). Composed with `fillTemplate`, not `t()`'s vars — this feeds
+ * `confirmAction` (native Telegram chrome, not innerHTML), which must never
+ * see HTML entities. */
 export function tagDeleteConfirmMessage(input: { name: string; expenseCount: number }): string {
   return input.expenseCount > 0
-    ? `Hide ${input.name}? ${tagExpenseCountPhrase(input.expenseCount)}`
-    : `Delete ${input.name}?`;
+    ? fillTemplate(t("tags.delete.confirmHide"), { name: input.name, phrase: tagExpenseCountPhrase(input.expenseCount) })
+    : fillTemplate(t("tags.delete.confirmDelete"), { name: input.name });
 }
 
 /** The retryable-failure banner's message on 07a — names the tag and which
  * action failed, never a status code. The 403 case uses `error.readonly`
- * instead (see main.ts's delete-outcome handling). */
+ * instead (see main.ts's delete-outcome handling). Composed with
+ * `fillTemplate`, not `t()`'s vars — `renderDeleteFailureBanner` already
+ * `escapeHtml`s this value once at its own render site, so escaping the name
+ * here too would double-escape it. */
 export function tagDeleteFailureMessage(name: string, expenseCount: number): string {
-  return expenseCount > 0 ? `Couldn't hide ${name}.` : `Couldn't delete ${name}.`;
+  return expenseCount > 0
+    ? fillTemplate(t("tags.delete.failureHide"), { name })
+    : fillTemplate(t("tags.delete.failureDelete"), { name });
 }
 
 /** Optimistic forward transform for a confirmed delete/hide: moves the row
@@ -178,7 +197,7 @@ export async function loadTags(api: TagsApi, cache: TagsCache): Promise<TagsStat
     if (cached) {
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
-    const message = err instanceof Error ? err.message : "Something went wrong.";
+    const message = err instanceof Error ? err.message : t("error.fallback");
     return { status: "error", message };
   }
 }
@@ -210,14 +229,14 @@ function renderRow(row: TagRow): string {
 }
 
 function renderAddRow(): string {
-  return `<div class="card row tag-row tag-row-add" data-testid="tag-row-add" role="button" tabindex="0" aria-label="Add tag">
+  return `<div class="card row tag-row tag-row-add" data-testid="tag-row-add" role="button" tabindex="0" aria-label="${t("tags.addTag")}">
     <span class="tag-row-add-icon" aria-hidden="true">
       <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
         <line x1="12" y1="4" x2="12" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
         <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
       </svg>
     </span>
-    <span class="nm" aria-hidden="true">Add tag</span>
+    <span class="nm" aria-hidden="true">${t("tags.addTag")}</span>
   </div>`;
 }
 
@@ -243,12 +262,12 @@ function renderArchivedSection(archived: TagRow[], expanded: boolean): string {
   }
   return `<div class="tag-archived" data-testid="tag-archived">
     <button type="button" class="tag-archived-header" data-action="toggle-archived" aria-expanded="${expanded}">
-      <span>Archived (${archived.length})</span>
+      <span>${t("tags.archivedHeader", { count: archived.length })}</span>
       <span class="tag-archived-chevron${expanded ? " tag-archived-chevron--open" : ""}" aria-hidden="true"></span>
     </button>
     ${
       expanded
-        ? `<p class="tag-archived-explain">Archived tags keep their history in reports, but you can't pick them for new expenses.</p>
+        ? `<p class="tag-archived-explain">${t("tags.archivedExplain")}</p>
     ${archived.map(renderArchivedRow).join("")}`
         : ""
     }
@@ -274,7 +293,7 @@ export interface TagsViewState {
 function renderDeleteFailureBanner(failure: TagDeleteFailure): string {
   return `<div class="cat-delete-failed" data-testid="tag-delete-failed" aria-live="polite">
     <p>${escapeHtml(failure.message)}</p>
-    ${failure.retryable ? `<button type="button" data-action="retry-delete" data-tag-id="${failure.tagId}">Try again</button>` : ""}
+    ${failure.retryable ? `<button type="button" data-action="retry-delete" data-tag-id="${failure.tagId}">${t("error.retry")}</button>` : ""}
   </div>`;
 }
 
@@ -285,8 +304,8 @@ export function renderTagsView(state: TagsViewState): string {
   const { active, archived } = state.data;
   return `<div class="tags-ready" data-testid="ready">
     ${state.deleteFailure ? renderDeleteFailureBanner(state.deleteFailure) : ""}
-    ${state.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(state.lastSyncedAt)}</div>` : ""}
-    ${active.length === 0 ? `<p class="tags-empty-note" data-testid="empty-note">Tags cut across categories — add #vacation to a café, a flight and a hotel, and see it as one thing.</p>` : ""}
+    ${state.lastSyncedAt ? `<div class="offline-banner" data-testid="offline">${t("offline.banner", { time: state.lastSyncedAt })}</div>` : ""}
+    ${active.length === 0 ? `<p class="tags-empty-note" data-testid="empty-note">${t("tags.empty")}</p>` : ""}
     ${renderList(active)}
     ${renderArchivedSection(archived, state.archivedExpanded)}
   </div>`;
@@ -302,13 +321,13 @@ function renderSkeleton(): string {
 function renderError(message: string): string {
   return `<div class="tags-error" data-testid="error">
     <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <button type="button" data-action="retry">${t("error.retry")}</button>
   </div>`;
 }
 
 function renderForbidden(): string {
   return `<div class="tags-readonly" data-testid="forbidden">
-    <p>You have read-only access to this account.</p>
+    <p>${t("readonly")}</p>
   </div>`;
 }
 
@@ -442,7 +461,7 @@ export function isTagFormDirty(draft: TagFormDraft, original: TagFormDraft): boo
 /** The inline name error — never a popup, per the AC. `null` while the
  * trimmed name is non-empty. */
 export function tagNameError(name: string): string | null {
-  return name.trim() === "" ? "Give this tag a name." : null;
+  return name.trim() === "" ? t("tagForm.nameError") : null;
 }
 
 /** MainButton's enabled rule: dirty alone, per the spec — a blank name stays
@@ -464,12 +483,12 @@ export type TagFormOutcome =
 
 function tagFormErrorMessage(err: unknown): string {
   if (err instanceof ForbiddenError) {
-    return "You have read-only access to this account.";
+    return t("readonly");
   }
   if (err instanceof ApiError) {
     return err.message;
   }
-  return "Couldn't save this tag.";
+  return t("tagForm.saveError.fallback");
 }
 
 export interface TagFormController {
@@ -516,7 +535,7 @@ export function createTagFormController(api: TagFormApi, original: TagFormDraft)
 // -- form chrome ----------------------------------------------------------
 
 export function applyTagFormChrome(draft: TagFormDraft, original: TagFormDraft): void {
-  mainButton.show("Save");
+  mainButton.show(t("tagForm.save"));
   mainButton.setEnabled(tagFormMainButtonEnabled(draft, original));
 }
 
@@ -534,7 +553,7 @@ export function wireTagFormBackButton(
         onClose();
         return;
       }
-      const discard = await confirmDiscard("Discard changes to this tag?");
+      const discard = await confirmDiscard(t("tagForm.discardChanges"));
       if (discard) {
         onClose();
       }
@@ -547,8 +566,8 @@ export function wireTagFormBackButton(
 function renderNameField(draft: TagFormDraft, error: string | null): string {
   return `<div>
     <div class="cat-form-field">
-      <label class="cat-form-label" for="tag-name-input">Name</label>
-      <input id="tag-name-input" class="cat-form-input" type="text" data-testid="tag-name-input" placeholder="Tag name" value="${escapeHtml(draft.name)}" />
+      <label class="cat-form-label" for="tag-name-input">${t("tagForm.nameLabel")}</label>
+      <input id="tag-name-input" class="cat-form-input" type="text" data-testid="tag-name-input" placeholder="${t("tagForm.namePlaceholder")}" value="${escapeHtml(draft.name)}" />
     </div>
     <p class="cat-form-message${error ? " cat-form-message--error" : ""}" data-testid="tag-form-message" aria-live="polite">${error ? escapeHtml(error) : ""}</p>
   </div>`;

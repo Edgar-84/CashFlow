@@ -341,7 +341,7 @@ implementation unit may start before *its own* spec exists.
 - [x] **U3.6** Extract `add-expense.ts` (the largest single file, ~33 strings).
 - [x] **U3.7** Extract `expenses.ts` + `expense-detail.ts`.
 - [x] **U3.8** Extract `budgets.ts` + `budget-form.ts`.
-- [ ] **U3.9** Extract `categories.ts` + `tags.ts`.
+- [x] **U3.9** Extract `categories.ts` + `tags.ts`.
 - [ ] **U3.10** Extract `settings.ts` + `statistics.ts` + the remaining
       components (`period-selector`, `date-range-picker`, `category-picker`,
       `color-picker`, `toast`) + `main.ts`.
@@ -1173,7 +1173,58 @@ touching auth or scoping goes through the reviewer subagent.
   generic per-language loops pick up all 24 new keys with no changes needed
   there. Grepped both files for the `(t) =>`/`(t:` shadowing hazard flagged
   by U3.5/U3.6's gotchas — none found, nothing to rename.
-- **Next:** `/clear`, then **U3.9** (extract `categories.ts` + `tags.ts`).
+- **U3.9 is done**: every user-visible literal in `categories.ts` and `tags.ts`
+  now goes through `t()`. Four strings reused global keys byte-identically
+  (`readonly`, `error.retry`, `error.fallback`, `offline.banner` via `t()`'s
+  own vars mechanism). New keys, split `categories.*`/`categoryForm.*` and
+  `tags.*`/`tagForm.*` exactly as `budgets.*`/`budgetForm.*` split in U3.8:
+  `categories.addCategory` (the Add-category cell's aria-label and visible
+  text, one key for both since they were byte-identical strings already),
+  `categories.empty`, `categories.archivedHeader` (`{count}`, inserted via
+  `t()`'s own vars with no extra wrap — the call site never `escapeHtml`d a
+  bare number either), `categories.archivedExplain`,
+  `categories.{hideTrigger,deleteTrigger}`,
+  `categories.delete.{expenseCountOne,expenseCountMany,confirmHide,
+  confirmDelete,lastActiveWarning,failureHide,failureDelete}`, and
+  `categoryForm.{nameLabel,namePlaceholder,colourLabel,nameError,
+  duplicateWarning,saveError.fallback,save,discardChanges}`; the tags side
+  mirrors it 1:1 (`tags.addTag`, `tags.empty`, `tags.archivedHeader`,
+  `tags.archivedExplain`, `tags.{hideTrigger,deleteTrigger}`,
+  `tags.delete.{expenseCountOne,expenseCountMany,confirmHide,confirmDelete,
+  failureHide,failureDelete}` — no `lastActiveWarning` counterpart, tags never
+  had one — and `tagForm.{nameLabel,namePlaceholder,nameError,
+  saveError.fallback,save,discardChanges}`). Both files gained their own
+  private, non-escaping `fillTemplate` (a sixth/seventh per-file copy, same
+  "pure modules don't share helpers" convention U3.5–U3.8 established),
+  used for every templated string with **two** distinct reasons to avoid
+  `t()`'s auto-escaping vars, not just the usual native-chrome one:
+  `categoryDeleteConfirmMessage`/`tagDeleteConfirmMessage` (and the
+  `expenseCountPhrase`/`tagExpenseCountPhrase` helpers they compose) feed
+  `confirmAction` — native Telegram chrome, the established reason — but
+  `categoryDeleteFailureMessage`/`tagDeleteFailureMessage` and
+  `categoryDuplicateWarning` feed a value that its **own caller**
+  (`renderDeleteFailureBanner`/`renderNameField`) already wraps in
+  `escapeHtml()` once; using `t()`'s auto-escaping vars there would have
+  escaped the interpolated name **twice**. This second reason wasn't in any
+  prior unit's gotcha list — flagged here since U3.10 (`settings.ts` +
+  `statistics.ts` + several components) is likely to hit the same shape
+  wherever a screen builds a message string in one function and escapes it in
+  another. `categoryFormErrorMessage`/`tagFormErrorMessage`'s forbidden branch
+  and both files' `renderForbidden()` reuse the global `readonly` key rather
+  than adding a screen-prefixed duplicate (checked per U3.6's gotcha — the
+  English text was already byte-identical to the existing global). Neither
+  test file needed changes to its existing exact-EN-string assertions (no
+  `vi.mock` on `../src/lib/i18n` in either) — they doubled as the AC's
+  byte-identical-output regression test unchanged. Added: a scoped
+  `setLanguage("ru")`/`afterEach(() => setLanguage("en"))` block per test file
+  asserting real RU strings render for the forbidden/empty/archived copy, the
+  delete-trigger labels/confirm/failure messages, the form's
+  labels/placeholder/name-error/duplicate-warning copy, and the MainButton
+  "Save" label; `i18n.test.ts`'s generic per-language loops pick up all 39 new
+  keys with no changes needed there. Grepped both files for the
+  `(t) =>`/`(t:` shadowing hazard — none found, nothing to rename.
+- **Next:** `/clear`, then **U3.10** (extract `settings.ts` + `statistics.ts`
+  + the remaining components + `main.ts`).
 - **Gotchas the next session must know:**
   - **Re-scan the whole file for literals after the first pass, not just the
     obvious render/copy sites.** U3.8's `budgetForm.err.planGone` was a
@@ -1234,3 +1285,11 @@ touching auth or scoping goes through the reviewer subagent.
   - The webapp's vitest DOM tests need the per-file
     `// @vitest-environment jsdom` docblock — the config sets no global default
     (V6's U0.5).
+  - **A private `fillTemplate` isn't only for native chrome.** U3.9 found a
+    second reason to skip `t()`'s auto-escaping vars: a helper function (e.g.
+    `categoryDeleteFailureMessage`) whose return value is `escapeHtml`'d once
+    by its *caller*'s own render function. Using `t()`'s vars there would
+    escape the interpolated value twice. Before wiring a templated string
+    through `t(key, vars)`, check whether anything downstream already
+    escapes the result — if so, use `fillTemplate` and let that one existing
+    `escapeHtml()` call do the only escaping.

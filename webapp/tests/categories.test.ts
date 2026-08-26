@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { CategoryResponse } from "../src/api/types";
+import { setLanguage } from "../src/lib/i18n";
 import {
   applyCategoriesChrome,
   applyCategoryDeleteOutcome,
@@ -850,6 +851,70 @@ describe("wireCategoryFormBackButton", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(onClose).not.toHaveBeenCalled();
+    delete (globalThis as { window?: Window }).window;
+  });
+});
+
+// -- i18n ----------------------------------------------------------------
+
+describe("renders real RU content, not an EN fallback", () => {
+  afterEach(() => {
+    setLanguage("en");
+  });
+
+  it("translates the forbidden, empty and archived copy", () => {
+    setLanguage("ru");
+    expect(renderCategories({ status: "forbidden" })).toContain("доступ только для чтения");
+    const data = buildCategoriesData({ categories: [], currency: "EUR" });
+    expect(renderCategories({ status: "ready", ...data })).toContain("Категорий пока нет");
+    const withArchived = buildCategoriesData({
+      categories: [category("cat-old", "Old category", { is_active: false, expense_count: 3 })],
+      currency: "EUR",
+    });
+    const html = renderCategoriesView({ data: withArchived, archivedExpanded: true });
+    expect(html).toContain("Архив (1)");
+    expect(html).toContain("Архивные категории сохраняют историю");
+  });
+
+  it("translates the delete-trigger labels, confirm message and failure message", () => {
+    setLanguage("ru");
+    expect(categoryDeleteTriggerLabel(0)).toBe("Удалить категорию");
+    expect(categoryDeleteTriggerLabel(5)).toBe("Скрыть категорию");
+    expect(categoryDeleteConfirmMessage({ name: "Groceries", expenseCount: 0, isLastActive: false })).toBe(
+      "Удалить Groceries?",
+    );
+    expect(categoryDeleteConfirmMessage({ name: "Groceries", expenseCount: 1, isLastActive: true })).toBe(
+      "Скрыть Groceries? 1 расход сохраняет её для отчётов. Это ваша единственная категория — новым расходам будет некуда деваться.",
+    );
+    expect(categoryDeleteFailureMessage("Groceries", 0)).toBe("Не удалось удалить Groceries.");
+    expect(categoryDeleteFailureMessage("Groceries", 5)).toBe("Не удалось скрыть Groceries.");
+  });
+
+  it("translates the form's field labels, errors and duplicate warning", () => {
+    setLanguage("ru");
+    expect(categoryNameError("")).toBe("Дайте этой категории название.");
+    const siblings = [{ id: "cat-1", name: "Groceries" }];
+    expect(categoryDuplicateWarning("groceries", "cat-new", siblings)).toBe(
+      'Категория с названием "groceries" уже существует.',
+    );
+    const html = renderCategoryForm({
+      draft: emptyCategoryFormDraft(),
+      activeSiblings: siblings,
+      nameInteracted: false,
+      submitError: null,
+      expenseCount: 0,
+    });
+    expect(html).toContain("Название");
+    expect(html).toContain('placeholder="Название категории"');
+    expect(html).toContain("Цвет");
+  });
+
+  it("translates the MainButton label and the discard-confirm popup", () => {
+    setLanguage("ru");
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    applyCategoryFormChrome(emptyCategoryFormDraft(), emptyCategoryFormDraft());
+    expect(webApp.MainButton.setText).toHaveBeenCalledWith("Сохранить");
     delete (globalThis as { window?: Window }).window;
   });
 });

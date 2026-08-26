@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { TagResponse } from "../src/api/types";
+import { setLanguage } from "../src/lib/i18n";
 import {
   applyTagDeleteOutcome,
   applyTagFormChrome,
@@ -699,6 +700,62 @@ describe("wireTagFormBackButton", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(onClose).not.toHaveBeenCalled();
+    delete (globalThis as { window?: Window }).window;
+  });
+});
+
+// -- i18n ----------------------------------------------------------------
+
+describe("renders real RU content, not an EN fallback", () => {
+  afterEach(() => {
+    setLanguage("en");
+  });
+
+  it("translates the forbidden, empty and archived copy", () => {
+    setLanguage("ru");
+    expect(renderTags({ status: "forbidden" })).toContain("доступ только для чтения");
+    const data = buildTagsData({ tags: [], currency: "EUR" });
+    expect(renderTags({ status: "ready", ...data })).toContain("Теги объединяют расходы из разных категорий");
+    const withArchived = buildTagsData({
+      tags: [tag("tag-old", "old", { is_active: false, expense_count: 3 })],
+      currency: "EUR",
+    });
+    const html = renderTagsView({ data: withArchived, archivedExpanded: true });
+    expect(html).toContain("Архив (1)");
+    expect(html).toContain("Архивные теги сохраняют историю");
+  });
+
+  it("translates the delete-trigger labels, confirm message and failure message", () => {
+    setLanguage("ru");
+    expect(tagDeleteTriggerLabel(0)).toBe("Удалить тег");
+    expect(tagDeleteTriggerLabel(5)).toBe("Скрыть тег");
+    expect(tagDeleteConfirmMessage({ name: "vacation", expenseCount: 0 })).toBe("Удалить vacation?");
+    expect(tagDeleteConfirmMessage({ name: "vacation", expenseCount: 1 })).toBe(
+      "Скрыть vacation? 1 расход помечен этим тегом.",
+    );
+    expect(tagDeleteFailureMessage("vacation", 0)).toBe("Не удалось удалить vacation.");
+    expect(tagDeleteFailureMessage("vacation", 5)).toBe("Не удалось скрыть vacation.");
+  });
+
+  it("translates the form's field label, placeholder and name error", () => {
+    setLanguage("ru");
+    expect(tagNameError("")).toBe("Дайте этому тегу название.");
+    const html = renderTagForm({
+      draft: emptyTagFormDraft(),
+      nameInteracted: false,
+      submitError: null,
+      expenseCount: 0,
+    });
+    expect(html).toContain("Название");
+    expect(html).toContain('placeholder="Название тега"');
+  });
+
+  it("translates the MainButton label and the discard-confirm popup", () => {
+    setLanguage("ru");
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    applyTagFormChrome(emptyTagFormDraft(), emptyTagFormDraft());
+    expect(webApp.MainButton.setText).toHaveBeenCalledWith("Сохранить");
     delete (globalThis as { window?: Window }).window;
   });
 });
