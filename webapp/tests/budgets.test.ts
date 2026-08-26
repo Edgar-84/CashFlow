@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
+import { setLanguage } from "../src/lib/i18n";
 import type { BudgetPlanResponse, BudgetProgress, CategoryResponse } from "../src/api/types";
 import {
   applyBudgetsChrome,
@@ -351,5 +352,49 @@ describe("applyBudgetsChrome", () => {
       { categoryId: "cat-groceries", label: "Groceries", colorVar: "var(--category-slot-1)" },
       "EUR",
     );
+  });
+});
+
+// -- i18n ----------------------------------------------------------------
+
+describe("renders real RU content, not an EN fallback", () => {
+  afterEach(() => {
+    setLanguage("en");
+  });
+
+  it("translates the forbidden, empty and no-budgets copy", () => {
+    setLanguage("ru");
+    expect(renderBudgets({ status: "forbidden" })).toContain("У вас нет прав на просмотр бюджетов.");
+    expect(renderBudgets({ status: "empty" })).toContain("Сначала добавьте категорию");
+    const data = buildBudgetsData({ categories: CATEGORIES, plans: [], progress: [], currency: "EUR" });
+    expect(renderBudgets({ status: "ready", ...data })).toContain("Бюджетов пока нет");
+  });
+
+  it("translates the status lines", () => {
+    setLanguage("ru");
+    const overData = buildBudgetsData({
+      categories: CATEGORIES,
+      plans: [plan()],
+      progress: [progress({ spent: 25000, remaining: -5000, fill_pct: 125, is_over_threshold: true, is_exceeded: true })],
+      currency: "EUR",
+    });
+    expect(renderBudgets({ status: "ready", ...overData })).toContain("⚠ Превышение на 50.00 EUR");
+
+    const warnData = buildBudgetsData({
+      categories: CATEGORIES,
+      plans: [plan()],
+      progress: [progress({ spent: 17000, fill_pct: 85, is_over_threshold: true, is_exceeded: false })],
+      currency: "EUR",
+    });
+    expect(renderBudgets({ status: "ready", ...warnData })).toContain("Приближается к лимиту");
+  });
+
+  it("translates the contextual MainButton label", () => {
+    setLanguage("ru");
+    const webApp = fakeWebApp();
+    installWebApp(webApp);
+    const data = buildBudgetsData({ categories: CATEGORIES, plans: [plan()], progress: [progress()], currency: "EUR" });
+    applyBudgetsChrome({ status: "ready", ...data }, vi.fn());
+    expect(webApp.MainButton.setText).toHaveBeenCalledWith("Установить бюджет для Transport");
   });
 });

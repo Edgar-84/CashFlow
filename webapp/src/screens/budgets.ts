@@ -34,6 +34,7 @@
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
+import { t } from "../lib/i18n";
 import { formatAmount } from "../lib/money";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ForbiddenError } from "../api/client";
@@ -129,7 +130,7 @@ export function buildBudgetsData(input: {
     if (!progress) {
       continue;
     }
-    budgeted.push(rowFrom(plan, progress, "Unknown category", OTHER_COLOR_VAR));
+    budgeted.push(rowFrom(plan, progress, t("budgets.unknownCategory"), OTHER_COLOR_VAR));
   }
 
   return { currency: input.currency, budgeted, unbudgeted };
@@ -196,7 +197,7 @@ export async function loadBudgets(api: BudgetsApi, cache: BudgetsCache): Promise
     if (cached) {
       return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
     }
-    const message = err instanceof Error ? err.message : "Something went wrong.";
+    const message = err instanceof Error ? err.message : t("error.fallback");
     return { status: "error", message };
   }
 }
@@ -206,6 +207,13 @@ export async function loadBudgets(api: BudgetsApi, cache: BudgetsCache): Promise
  * category has a plan. */
 export function nextUnbudgeted(data: Pick<BudgetsData, "unbudgeted">): UnbudgetedRow | null {
   return data.unbudgeted[0] ?? null;
+}
+
+// Private, non-escaping substitution for strings fed to native Telegram
+// chrome (MainButton) rather than innerHTML — same "pure modules don't share
+// helpers" convention every other screen's own copy already follows.
+function fillTemplate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
 }
 
 // -- chrome ------------------------------------------------------------------
@@ -232,7 +240,7 @@ export function applyBudgetsChrome(
     mainButton.hide();
     return;
   }
-  mainButton.show(`Set budget for ${next.label}`);
+  mainButton.show(fillTemplate(t("budgets.mainButtonLabel"), { category: next.label }));
   mainButton.setEnabled(true);
   if (onMainButtonTap) {
     mainButton.onClick(() => onMainButtonTap(next, state.currency));
@@ -255,18 +263,18 @@ function renderBudgetRow(row: BudgetRow, currency: Currency): string {
   let statusClass = "budget-status--ok";
   let statusText: string;
   if (row.fillPct === null) {
-    statusText = "No limit set";
+    statusText = t("budgets.status.noLimit");
   } else if (row.isExceeded) {
     statusClass = "budget-status--over";
     // `remaining` is the API's own number (BudgetProgress.remaining,
     // negative once exceeded) — never re-derived from spent/amount here,
     // so this can't silently drift from budget_service's own formula.
-    statusText = `⚠ Over by ${formatAmount(-row.remainingMinor)} ${currency}`;
+    statusText = t("budgets.status.over", { amount: formatAmount(-row.remainingMinor), currency });
   } else if (row.isOverThreshold) {
     statusClass = "budget-status--warn";
-    statusText = "⚠ Approaching limit";
+    statusText = t("budgets.status.warn");
   } else {
-    statusText = "On track";
+    statusText = t("budgets.status.ok");
   }
   return `<div class="budget-row" data-testid="budget-row" data-plan-id="${row.planId}">
     <div class="budget-row-head">
@@ -284,7 +292,7 @@ function renderBudgetRow(row: BudgetRow, currency: Currency): string {
 
 function renderBudgetedList(rows: BudgetRow[], currency: Currency): string {
   if (rows.length === 0) {
-    return `<div class="budgets-empty-note" data-testid="no-budgets"><p>No budgets yet — set one below.</p></div>`;
+    return `<div class="budgets-empty-note" data-testid="no-budgets"><p>${escapeHtml(t("budgets.empty.noBudgets"))}</p></div>`;
   }
   return `<div class="card" data-testid="budgeted-list">${rows.map((row) => renderBudgetRow(row, currency)).join("")}</div>`;
 }
@@ -299,7 +307,7 @@ function renderUnbudgetedList(rows: UnbudgetedRow[]): string {
         `<button type="button" class="budget-invite" data-testid="budget-invite" data-category-id="${r.categoryId}">
           <span class="dot" style="background:${r.colorVar}"></span>
           <span class="budget-invite-nm">${escapeHtml(r.label)}</span>
-          <span class="budget-invite-cta">Set a budget</span>
+          <span class="budget-invite-cta">${escapeHtml(t("budgets.invite.cta"))}</span>
         </button>`,
     )
     .join("");
@@ -308,7 +316,7 @@ function renderUnbudgetedList(rows: UnbudgetedRow[]): string {
 
 export function renderBudgetsView(data: BudgetsData, lastSyncedAt?: string): string {
   return `<div class="budgets-ready" data-testid="ready">
-    ${lastSyncedAt ? `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(lastSyncedAt)}</div>` : ""}
+    ${lastSyncedAt ? `<div class="offline-banner" data-testid="offline">${t("offline.banner", { time: lastSyncedAt })}</div>` : ""}
     ${renderBudgetedList(data.budgeted, data.currency)}
     ${renderUnbudgetedList(data.unbudgeted)}
   </div>`;
@@ -324,19 +332,19 @@ function renderSkeleton(): string {
 function renderError(message: string): string {
   return `<div class="budgets-error" data-testid="error">
     <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <button type="button" data-action="retry">${escapeHtml(t("error.retry"))}</button>
   </div>`;
 }
 
 function renderForbidden(): string {
   return `<div class="budgets-readonly" data-testid="forbidden">
-    <p>You don't have permission to view budgets.</p>
+    <p>${escapeHtml(t("budgets.forbidden"))}</p>
   </div>`;
 }
 
 function renderEmpty(): string {
   return `<div class="budgets-empty" data-testid="empty">
-    <p>Add a category first — every budget needs one.</p>
+    <p>${escapeHtml(t("budgets.empty.noCategories"))}</p>
   </div>`;
 }
 

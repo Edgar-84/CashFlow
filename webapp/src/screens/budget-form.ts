@@ -22,6 +22,7 @@
  * never re-render the form while a field has focus.
  */
 
+import { t } from "../lib/i18n";
 import { formatAmount, parseAmount } from "../lib/money";
 import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ApiError, ForbiddenError, NotFoundError } from "../api/client";
@@ -58,7 +59,7 @@ export function amountFieldError(amountDraft: string): string | null {
   if (amountDraft.trim() === "") {
     return null;
   }
-  return parseAmount(amountDraft) === null ? "Enter an amount greater than 0." : null;
+  return parseAmount(amountDraft) === null ? t("budgetForm.amountError") : null;
 }
 
 /** Mirrors the bot's `_parse_notify_threshold` (bot/handlers/budgets.py):
@@ -69,10 +70,10 @@ export function thresholdFieldError(thresholdDraft: string): string | null {
     return null;
   }
   if (!/^\d+$/.test(trimmed)) {
-    return "Enter a whole number 0-100.";
+    return t("budgetForm.thresholdError");
   }
   const value = Number(trimmed);
-  return value >= 0 && value <= 100 ? null : "Enter a whole number 0-100.";
+  return value >= 0 && value <= 100 ? null : t("budgetForm.thresholdError");
 }
 
 export function budgetFormValid(amountDraft: string, thresholdDraft: string): boolean {
@@ -122,18 +123,18 @@ export interface BudgetFormController {
  * (screen doc's Edge cases: "the PATCH 404s and surfaces error.gone"). */
 function saveErrorMessage(err: unknown): string {
   if (err instanceof ForbiddenError) {
-    return "You don't have permission to do that.";
+    return t("budgetForm.err.forbidden");
   }
   if (err instanceof NotFoundError) {
-    return "That category no longer exists.";
+    return t("budgetForm.err.gone");
   }
   if (err instanceof ApiError && err.status === 409) {
-    return "A budget plan already exists for this category and period.";
+    return t("budgetForm.err.duplicate");
   }
   if (err instanceof ApiError) {
     return err.message;
   }
-  return "Something went wrong. Please try again.";
+  return t("budgetForm.err.fallback");
 }
 
 /** Owns the draft and its two round trips. `saving`/`deleting` flip true
@@ -183,7 +184,7 @@ export function createBudgetFormController(api: BudgetFormApi, mode: BudgetFormM
     },
     async deleteBudget(): Promise<DeleteOutcome> {
       if (mode.kind !== "edit" || deleting) {
-        return { status: "error", message: "That budget plan no longer exists." };
+        return { status: "error", message: t("budgetForm.err.planGone") };
       }
       deleting = true;
       saveError = null;
@@ -217,10 +218,10 @@ export function renderBudgetForm(state: BudgetFormViewState): string {
   const thresholdErr = thresholdFieldError(thresholdDraft);
   const valid = budgetFormValid(amountDraft, thresholdDraft);
   const spentLine = isEdit
-    ? `<p class="budget-form-spent" data-testid="budget-form-spent">Spent ${escapeHtml(formatAmount(mode.spentMinor))} of ${escapeHtml(formatAmount(mode.amountMinor))} ${escapeHtml(mode.currency)} this month</p>`
+    ? `<p class="budget-form-spent" data-testid="budget-form-spent">${t("budgetForm.spent", { spent: formatAmount(mode.spentMinor), limit: formatAmount(mode.amountMinor), currency: mode.currency })}</p>`
     : "";
   const deleteTrigger = isEdit
-    ? `<button type="button" class="budget-form-delete" data-testid="budget-form-delete" data-action="delete-budget">Delete budget</button>`
+    ? `<button type="button" class="budget-form-delete" data-testid="budget-form-delete" data-action="delete-budget">${escapeHtml(t("budgetForm.delete"))}</button>`
     : "";
   return `<div class="budget-form-screen" data-testid="budget-form-screen">
     <div class="budget-form-header">
@@ -229,7 +230,7 @@ export function renderBudgetForm(state: BudgetFormViewState): string {
     </div>
     ${spentLine}
     <div class="budget-form-field">
-      <label class="cat-form-label" for="budget-amount-input">Monthly limit</label>
+      <label class="cat-form-label" for="budget-amount-input">${escapeHtml(t("budgetForm.amountLabel"))}</label>
       <div class="card field">
         <input id="budget-amount-input" class="amount-input" data-testid="budget-amount-input" inputmode="decimal" value="${escapeHtml(amountDraft)}" placeholder="0.00" />
         <div class="currency-suffix">${escapeHtml(mode.currency)}</div>
@@ -237,7 +238,7 @@ export function renderBudgetForm(state: BudgetFormViewState): string {
       <p class="field-error" data-testid="budget-amount-error" aria-live="polite">${amountErr ? escapeHtml(amountErr) : ""}</p>
     </div>
     <div class="budget-form-field">
-      <label class="cat-form-label" for="budget-threshold-input">Warn me at</label>
+      <label class="cat-form-label" for="budget-threshold-input">${escapeHtml(t("budgetForm.thresholdLabel"))}</label>
       <div class="card field">
         <input id="budget-threshold-input" class="amount-input" data-testid="budget-threshold-input" inputmode="numeric" value="${escapeHtml(thresholdDraft)}" placeholder="${DEFAULT_NOTIFY_THRESHOLD}" />
         <div class="currency-suffix">%</div>
@@ -246,8 +247,8 @@ export function renderBudgetForm(state: BudgetFormViewState): string {
     </div>
     ${saveError ? `<p class="submit-error" data-testid="budget-form-save-error">${escapeHtml(saveError)}</p>` : ""}
     <div class="detail-edit-actions budget-form-actions">
-      <button type="button" data-action="save-budget"${valid ? "" : " disabled"}>Save</button>
-      <button type="button" data-action="cancel-budget">Cancel</button>
+      <button type="button" data-action="save-budget"${valid ? "" : " disabled"}>${escapeHtml(t("budgetForm.save"))}</button>
+      <button type="button" data-action="cancel-budget">${escapeHtml(t("budgetForm.cancel"))}</button>
     </div>
     ${deleteTrigger}
   </div>`;
@@ -289,7 +290,7 @@ export function mount(root: HTMLElement, mode: BudgetFormMode, api: BudgetFormAp
       handlers.onCancelled();
       return;
     }
-    void confirmDiscard("Discard changes?").then((confirmed) => {
+    void confirmDiscard(t("budgetForm.discardChanges")).then((confirmed) => {
       if (confirmed && active) {
         active = false;
         handlers.onCancelled();
@@ -375,7 +376,7 @@ export function mount(root: HTMLElement, mode: BudgetFormMode, api: BudgetFormAp
         return;
       }
       confirming = true;
-      void confirmAction("Delete this budget plan?").then(async (confirmed) => {
+      void confirmAction(t("budgetForm.confirmDelete")).then(async (confirmed) => {
         confirming = false;
         if (!confirmed || !active) {
           return;
