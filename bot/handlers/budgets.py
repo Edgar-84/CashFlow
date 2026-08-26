@@ -13,6 +13,15 @@ skippable via /skip to keep the current value); and picking an existing plan
 reuses `budgets_keyboard`/`BudgetCallback` (keyed on budget_plan_id, not
 category_id, since one category maps to at most one plan but the keyboard
 still needs to carry the plan's id to PATCH/DELETE the right row).
+
+Every user-visible string goes through `bot/i18n.py::t()` (U3.14). Every
+handler and helper below takes a `language: Language`, defaulting to
+`Language.EN` — aiogram injects the caller's real resolved language
+(`AllowlistMiddleware`, D707) into every registered handler regardless of
+that default, since dispatch matches by parameter name; the default only
+matters for direct calls (tests, and this module's own handler-to-helper
+calls, which always pass `language` through explicitly rather than relying
+on it).
 """
 
 import logging
@@ -27,6 +36,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot.handlers.expenses import parse_amount_to_minor_units
+from bot.i18n import t
 from bot.keyboards import BudgetCallback, CategoryCallback, budgets_keyboard, categories_keyboard
 from bot.states import BudgetManage
 from models.budget_plan import (
@@ -36,6 +46,7 @@ from models.budget_plan import (
     BudgetProgress,
 )
 from models.category import CategoryResponse
+from models.enums import Language
 
 logger = logging.getLogger(__name__)
 
@@ -54,17 +65,16 @@ class BudgetBackendClient(Protocol):
     async def delete_budget_plan(self, budget_plan_id: UUID) -> None: ...
 
 
-_BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
 _BAR_WIDTH = 10
 _DEFAULT_NOTIFY_THRESHOLD = 70  # D507; was 80
 
 
-def _error_message(exc: httpx.HTTPStatusError) -> str:
+def _error_message(exc: httpx.HTTPStatusError, language: Language = Language.EN) -> str:
     if exc.response.status_code == 403:
-        return "You don't have permission to do that."
+        return t(language, "readonly")
     if exc.response.status_code == 409:
-        return "A budget plan already exists for this category and period."
-    return "Something went wrong. Please try again."
+        return t(language, "budgets.error.duplicate")
+    return t(language, "error.fallback")
 
 
 def _parse_notify_threshold(text: str) -> int:
@@ -81,128 +91,148 @@ def _format_amount(minor_units: int) -> str:
     return f"{Decimal(minor_units) / 100:.2f}"
 
 
-def _render_progress_bar(fill_pct: float | None) -> str:
+def _render_progress_bar(fill_pct: float | None, language: Language = Language.EN) -> str:
     if fill_pct is None:
-        return "[no limit set]"
+        return t(language, "budgets.noLimitSet")
     filled = min(_BAR_WIDTH, max(0, round(_BAR_WIDTH * fill_pct / 100)))
     bar = "█" * filled + "░" * (_BAR_WIDTH - filled)
     return f"[{bar}] {fill_pct:.0f}%"
 
 
-def _format_budget_block(category_name: str, progress: BudgetProgress) -> str:
+def _format_budget_block(
+    category_name: str, progress: BudgetProgress, language: Language = Language.EN
+) -> str:
     lines = [
         f"{category_name}: {_format_amount(progress.spent)} / {_format_amount(progress.amount)}",
-        _render_progress_bar(progress.fill_pct),
+        _render_progress_bar(progress.fill_pct, language),
     ]
     if progress.is_exceeded:
-        lines.append("⚠️ Budget exceeded!")
+        lines.append(t(language, "budgets.exceeded"))
     elif progress.is_over_threshold:
-        lines.append("⚠️ Approaching limit")
+        lines.append(t(language, "budgets.approachingLimit"))
     return "\n".join(lines)
 
 
-async def cmd_list_budgets(message: Message, client: BudgetBackendClient) -> None:
+async def cmd_list_budgets(
+    message: Message, client: BudgetBackendClient, language: Language = Language.EN
+) -> None:
     try:
         plans = await client.list_budget_plans()
     except httpx.HTTPError:
         logger.exception("Failed to fetch budget plans")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     if not plans:
-        await message.answer("No budget plans yet.")
+        await message.answer(t(language, "budgets.empty"))
         return
     try:
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     category_names = {category.id: category.name for category in categories}
 
     blocks = []
     for plan in plans:
-        name = category_names.get(plan.category_id, "Unknown")
+        name = category_names.get(plan.category_id, t(language, "common.unknown"))
         try:
             progress = await client.get_budget_plan_progress(plan.id)
         except httpx.HTTPError:
             logger.exception("Failed to fetch budget progress for %s", plan.id)
-            blocks.append(f"{name}: couldn't load progress.")
+            blocks.append(t(language, "budgets.progressLoadFailed", name=name))
             continue
-        blocks.append(_format_budget_block(name, progress))
-    await message.answer("Budgets:\n\n" + "\n\n".join(blocks))
+        blocks.append(_format_budget_block(name, progress, language))
+    await message.answer(t(language, "budgets.listTitle") + "\n\n" + "\n\n".join(blocks))
 
 
 # -- add --------------------------------------------------------------------
 
 
-async def cmd_add_budget(message: Message, state: FSMContext, client: BudgetBackendClient) -> None:
+async def cmd_add_budget(
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    language: Language = Language.EN,
+) -> None:
     try:
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     if not categories:
-        await message.answer("No categories to set a budget for yet.")
+        await message.answer(t(language, "budgets.noCategories"))
         return
     await state.set_state(BudgetManage.add_category)
     await state.update_data(categories=categories)
     await message.answer(
-        "Which category do you want to set a budget for?",
+        t(language, "budgets.pickCategory"),
         reply_markup=categories_keyboard(categories),
     )
 
 
 async def on_add_budget_category_selected(
-    callback: CallbackQuery, callback_data: CategoryCallback, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: CategoryCallback,
+    state: FSMContext,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     categories: list[CategoryResponse] = data.get("categories", [])
     category = next((c for c in categories if c.id == callback_data.category_id), None)
     if category is None:
-        await callback.answer("Unknown category, please pick again.", show_alert=True)
+        await callback.answer(t(language, "budgets.unknownCategory"), show_alert=True)
         return
     await state.update_data(category_id=str(category.id), category_name=category.name)
     await state.set_state(BudgetManage.add_amount)
     await callback.answer()
     if isinstance(callback.message, Message):
-        await callback.message.edit_text(
-            f"Enter the monthly limit for {category.name} (e.g. 100.00):"
-        )
+        await callback.message.edit_text(t(language, "budgets.enterLimit", category=category.name))
 
 
-async def on_add_budget_amount_entered(message: Message, state: FSMContext) -> None:
+async def on_add_budget_amount_entered(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
     try:
         amount = parse_amount_to_minor_units(message.text or "")
     except ValueError:
-        await message.answer("That doesn't look like a valid amount. Try again (e.g. 100.00):")
+        await message.answer(t(language, "budgets.invalidAmount"))
         return
     await state.update_data(amount=amount)
     await state.set_state(BudgetManage.add_threshold)
-    await message.answer(
-        f"Alert threshold percent 0-100 (default {_DEFAULT_NOTIFY_THRESHOLD}), or /skip:"
-    )
+    await message.answer(t(language, "budgets.thresholdPrompt", default=_DEFAULT_NOTIFY_THRESHOLD))
 
 
 async def on_add_budget_threshold_skipped(
-    message: Message, state: FSMContext, client: BudgetBackendClient
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    language: Language = Language.EN,
 ) -> None:
-    await _finish_add_budget(message, state, client, _DEFAULT_NOTIFY_THRESHOLD)
+    await _finish_add_budget(message, state, client, _DEFAULT_NOTIFY_THRESHOLD, language)
 
 
 async def on_add_budget_threshold_entered(
-    message: Message, state: FSMContext, client: BudgetBackendClient
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         threshold = _parse_notify_threshold(message.text or "")
     except ValueError:
-        await message.answer("Enter a whole number 0-100, or /skip:")
+        await message.answer(t(language, "budgets.thresholdInvalid"))
         return
-    await _finish_add_budget(message, state, client, threshold)
+    await _finish_add_budget(message, state, client, threshold, language)
 
 
 async def _finish_add_budget(
-    message: Message, state: FSMContext, client: BudgetBackendClient, notify_threshold: int
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    notify_threshold: int,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     try:
@@ -216,18 +246,23 @@ async def _finish_add_budget(
     except httpx.HTTPStatusError as exc:
         logger.exception("Failed to create budget plan")
         await state.clear()
-        await message.answer(_error_message(exc))
+        await message.answer(_error_message(exc, language))
         return
     except httpx.HTTPError:
         logger.exception("Failed to create budget plan")
         await state.clear()
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     await state.clear()
-    category_name = data.get("category_name", "the category")
+    category_name = data.get("category_name", t(language, "budgets.theCategoryFallback"))
     await message.answer(
-        f"Budget set: {category_name} — {_format_amount(plan.amount)} / month, "
-        f"alert at {plan.notify_threshold}%."
+        t(
+            language,
+            "budgets.set",
+            category=category_name,
+            amount=_format_amount(plan.amount),
+            threshold=plan.notify_threshold,
+        )
     )
 
 
@@ -247,84 +282,110 @@ async def _fetch_plans_and_category_names(
 
 
 async def cmd_update_budget(
-    message: Message, state: FSMContext, client: BudgetBackendClient
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         plans, category_names = await _fetch_plans_and_category_names(client)
     except httpx.HTTPError:
         logger.exception("Failed to fetch budget plans")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     if not plans:
-        await message.answer("No budget plans to update yet.")
+        await message.answer(t(language, "budgets.noneToUpdate"))
         return
     await state.set_state(BudgetManage.update_select)
     await state.update_data(plans=plans, category_names=category_names)
     await message.answer(
-        "Which budget do you want to update?", reply_markup=budgets_keyboard(plans, category_names)
+        t(language, "budgets.pickToUpdate"),
+        reply_markup=budgets_keyboard(plans, category_names, language),
     )
 
 
 async def on_update_budget_selected(
-    callback: CallbackQuery, callback_data: BudgetCallback, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: BudgetCallback,
+    state: FSMContext,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     plans: list[BudgetPlanResponse] = data.get("plans", [])
     plan = next((p for p in plans if p.id == callback_data.budget_plan_id), None)
     if plan is None:
-        await callback.answer("Unknown budget plan, please pick again.", show_alert=True)
+        await callback.answer(t(language, "budgets.unknownPlan"), show_alert=True)
         return
     category_names: dict[UUID, str] = data.get("category_names", {})
-    category_name = category_names.get(plan.category_id, "Unknown")
+    category_name = category_names.get(plan.category_id, t(language, "common.unknown"))
     await state.update_data(update_target_id=str(plan.id), category_name=category_name)
     await state.set_state(BudgetManage.update_amount)
     await callback.answer()
     if isinstance(callback.message, Message):
         await callback.message.edit_text(
-            f"Enter the new monthly limit for {category_name} "
-            f"(currently {_format_amount(plan.amount)}), or /skip to keep it:"
+            t(
+                language,
+                "budgets.enterNewLimit",
+                category=category_name,
+                current=_format_amount(plan.amount),
+            )
         )
 
 
-async def on_update_budget_amount_skipped(message: Message, state: FSMContext) -> None:
-    await _prompt_update_threshold(message, state)
+async def on_update_budget_amount_skipped(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
+    await _prompt_update_threshold(message, state, language)
 
 
-async def on_update_budget_amount_entered(message: Message, state: FSMContext) -> None:
+async def on_update_budget_amount_entered(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
     try:
         amount = parse_amount_to_minor_units(message.text or "")
     except ValueError:
-        await message.answer("That doesn't look like a valid amount. Try again, or /skip:")
+        await message.answer(t(language, "budgets.invalidAmountSkip"))
         return
     await state.update_data(new_amount=amount)
-    await _prompt_update_threshold(message, state)
+    await _prompt_update_threshold(message, state, language)
 
 
-async def _prompt_update_threshold(message: Message, state: FSMContext) -> None:
+async def _prompt_update_threshold(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
     await state.set_state(BudgetManage.update_threshold)
-    await message.answer("New alert threshold percent 0-100, or /skip to keep it:")
+    await message.answer(t(language, "budgets.newThresholdPrompt"))
 
 
 async def on_update_budget_threshold_skipped(
-    message: Message, state: FSMContext, client: BudgetBackendClient
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    language: Language = Language.EN,
 ) -> None:
-    await _finish_update_budget(message, state, client)
+    await _finish_update_budget(message, state, client, language)
 
 
 async def on_update_budget_threshold_entered(
-    message: Message, state: FSMContext, client: BudgetBackendClient
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         threshold = _parse_notify_threshold(message.text or "")
     except ValueError:
-        await message.answer("Enter a whole number 0-100, or /skip:")
+        await message.answer(t(language, "budgets.thresholdInvalid"))
         return
     await state.update_data(new_threshold=threshold)
-    await _finish_update_budget(message, state, client)
+    await _finish_update_budget(message, state, client, language)
 
 
 async def _finish_update_budget(
-    message: Message, state: FSMContext, client: BudgetBackendClient
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     data = await state.get_data()
     kwargs: dict[str, int] = {}
@@ -334,7 +395,7 @@ async def _finish_update_budget(
         kwargs["notify_threshold"] = data["new_threshold"]
     if not kwargs:
         await state.clear()
-        await message.answer("Nothing changed.")
+        await message.answer(t(language, "budgets.nothingChanged"))
         return
     plan_id = UUID(data["update_target_id"])
     try:
@@ -342,18 +403,23 @@ async def _finish_update_budget(
     except httpx.HTTPStatusError as exc:
         logger.exception("Failed to update budget plan")
         await state.clear()
-        await message.answer(_error_message(exc))
+        await message.answer(_error_message(exc, language))
         return
     except httpx.HTTPError:
         logger.exception("Failed to update budget plan")
         await state.clear()
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     await state.clear()
-    category_name = data.get("category_name", "the category")
+    category_name = data.get("category_name", t(language, "budgets.theCategoryFallback"))
     await message.answer(
-        f"Budget updated: {category_name} — {_format_amount(plan.amount)} / month, "
-        f"alert at {plan.notify_threshold}%."
+        t(
+            language,
+            "budgets.updated",
+            category=category_name,
+            amount=_format_amount(plan.amount),
+            threshold=plan.notify_threshold,
+        )
     )
 
 
@@ -361,21 +427,25 @@ async def _finish_update_budget(
 
 
 async def cmd_delete_budget(
-    message: Message, state: FSMContext, client: BudgetBackendClient
+    message: Message,
+    state: FSMContext,
+    client: BudgetBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         plans, category_names = await _fetch_plans_and_category_names(client)
     except httpx.HTTPError:
         logger.exception("Failed to fetch budget plans")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     if not plans:
-        await message.answer("No budget plans to delete yet.")
+        await message.answer(t(language, "budgets.noneToDelete"))
         return
     await state.set_state(BudgetManage.delete_select)
     await state.update_data(category_names=category_names)
     await message.answer(
-        "Which budget do you want to delete?", reply_markup=budgets_keyboard(plans, category_names)
+        t(language, "budgets.pickToDelete"),
+        reply_markup=budgets_keyboard(plans, category_names, language),
     )
 
 
@@ -384,6 +454,7 @@ async def on_delete_budget_selected(
     callback_data: BudgetCallback,
     state: FSMContext,
     client: BudgetBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     try:
@@ -392,22 +463,24 @@ async def on_delete_budget_selected(
         logger.exception("Failed to delete budget plan")
         await state.clear()
         if isinstance(callback.message, Message):
-            await callback.message.edit_text(_error_message(exc))
+            await callback.message.edit_text(_error_message(exc, language))
         return
     except httpx.HTTPError:
         logger.exception("Failed to delete budget plan")
         await state.clear()
         if isinstance(callback.message, Message):
-            await callback.message.edit_text(_BACKEND_UNREACHABLE)
+            await callback.message.edit_text(t(language, "common.backendUnreachable"))
         return
     await state.clear()
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Budget deleted.")
+        await callback.message.edit_text(t(language, "budgets.deleted"))
 
 
-async def on_cancel_command(message: Message, state: FSMContext) -> None:
+async def on_cancel_command(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
     await state.clear()
-    await message.answer("Cancelled.")
+    await message.answer(t(language, "common.cancelled"))
 
 
 def create_router() -> Router:

@@ -6,6 +6,15 @@ state to capture the text reply rather than a multi-step flow. Rename/delete
 reuse `categories_keyboard`/`CategoryCallback` from bot/keyboards.py (already
 generic id-carrying selectors, not expense-specific) to let the user pick a
 target category by name instead of typing a UUID.
+
+Every user-visible string goes through `bot/i18n.py::t()` (U3.14). Every
+handler and helper below takes a `language: Language`, defaulting to
+`Language.EN` — aiogram injects the caller's real resolved language
+(`AllowlistMiddleware`, D707) into every registered handler regardless of
+that default, since dispatch matches by parameter name; the default only
+matters for direct calls (tests, and this module's own handler-to-helper
+calls, which always pass `language` through explicitly rather than relying
+on it).
 """
 
 import logging
@@ -18,9 +27,11 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from bot.i18n import t
 from bot.keyboards import CategoryCallback, categories_keyboard
 from bot.states import CategoryManage
 from models.category import CategoryCreate, CategoryResponse, CategoryUpdate
+from models.enums import Language
 
 logger = logging.getLogger(__name__)
 
@@ -38,28 +49,22 @@ class CategoryBackendClient(Protocol):
     async def delete_category(self, category_id: UUID) -> None: ...
 
 
-_BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
-_DELETED_MESSAGE = "Category deleted."
-_ARCHIVED_MESSAGE = (
-    "Category hidden — it's still attached to past expenses, so it no longer "
-    "appears when adding new ones, but old expenses keep showing it."
-)
-
-
-def _error_message(exc: httpx.HTTPStatusError) -> str:
+def _error_message(exc: httpx.HTTPStatusError, language: Language = Language.EN) -> str:
     if exc.response.status_code == 403:
-        return "You don't have permission to do that."
+        return t(language, "readonly")
     if exc.response.status_code == 409:
         # D302 (U0.4): an in-use category is archived, not rejected — this
         # only fires on the repo's defensive race-condition branch
         # (services/category_service.py), where it stays true: something
         # started referencing the category between the usage check and the
         # delete call.
-        return "This category is still in use by expenses or budget plans."
-    return "Something went wrong. Please try again."
+        return t(language, "categories.error.inUse")
+    return t(language, "error.fallback")
 
 
-async def _delete_confirmation_message(client: CategoryBackendClient, category_id: UUID) -> str:
+async def _delete_confirmation_message(
+    client: CategoryBackendClient, category_id: UUID, language: Language = Language.EN
+) -> str:
     # D302: DELETE always returns 204, whether the category was archived
     # (is_active=False, in use) or hard-deleted (gone) — GET is the only way
     # to tell them apart, and it needs no new endpoint (models/category.py
@@ -70,89 +75,111 @@ async def _delete_confirmation_message(client: CategoryBackendClient, category_i
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code != 404:
             logger.exception("Failed to confirm category deletion outcome")
-        return _DELETED_MESSAGE
+        return t(language, "categories.deleted")
     except httpx.HTTPError:
         logger.exception("Failed to confirm category deletion outcome")
-        return _DELETED_MESSAGE
-    return _DELETED_MESSAGE if category.is_active else _ARCHIVED_MESSAGE
+        return t(language, "categories.deleted")
+    return (
+        t(language, "categories.deleted")
+        if category.is_active
+        else t(language, "categories.archived")
+    )
 
 
-async def cmd_list_categories(message: Message, client: CategoryBackendClient) -> None:
+async def cmd_list_categories(
+    message: Message, client: CategoryBackendClient, language: Language = Language.EN
+) -> None:
     try:
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     if not categories:
-        await message.answer("No categories yet.")
+        await message.answer(t(language, "categories.empty"))
         return
-    lines = ["Categories:"] + [f"- {category.name}" for category in categories]
+    lines = [t(language, "categories.listTitle")] + [
+        f"- {category.name}" for category in categories
+    ]
     await message.answer("\n".join(lines))
 
 
-async def cmd_add_category(message: Message, state: FSMContext) -> None:
+async def cmd_add_category(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
     await state.set_state(CategoryManage.add_name)
-    await message.answer("Enter the new category's name:")
+    await message.answer(t(language, "categories.enterName"))
 
 
 async def on_add_category_name_entered(
-    message: Message, state: FSMContext, client: CategoryBackendClient
+    message: Message,
+    state: FSMContext,
+    client: CategoryBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     name = (message.text or "").strip()
     if not name:
-        await message.answer("Name can't be empty. Try again:")
+        await message.answer(t(language, "categories.nameEmpty"))
         return
     try:
         category = await client.create_category(CategoryCreate(name=name))
     except httpx.HTTPStatusError as exc:
         logger.exception("Failed to create category")
         await state.clear()
-        await message.answer(_error_message(exc))
+        await message.answer(_error_message(exc, language))
         return
     except httpx.HTTPError:
         logger.exception("Failed to create category")
         await state.clear()
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     await state.clear()
-    await message.answer(f"Category added: {category.name}")
+    await message.answer(t(language, "categories.added", name=category.name))
 
 
 async def cmd_rename_category(
-    message: Message, state: FSMContext, client: CategoryBackendClient
+    message: Message,
+    state: FSMContext,
+    client: CategoryBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     if not categories:
-        await message.answer("No categories to rename yet.")
+        await message.answer(t(language, "categories.noneToRename"))
         return
     await state.set_state(CategoryManage.rename_select)
     await message.answer(
-        "Which category do you want to rename?", reply_markup=categories_keyboard(categories)
+        t(language, "categories.pickToRename"), reply_markup=categories_keyboard(categories)
     )
 
 
 async def on_rename_category_selected(
-    callback: CallbackQuery, callback_data: CategoryCallback, state: FSMContext
+    callback: CallbackQuery,
+    callback_data: CategoryCallback,
+    state: FSMContext,
+    language: Language = Language.EN,
 ) -> None:
     await state.update_data(rename_target_id=str(callback_data.category_id))
     await state.set_state(CategoryManage.rename_name)
     await callback.answer()
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Enter the new name:")
+        await callback.message.edit_text(t(language, "categories.enterNewName"))
 
 
 async def on_rename_category_name_entered(
-    message: Message, state: FSMContext, client: CategoryBackendClient
+    message: Message,
+    state: FSMContext,
+    client: CategoryBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     name = (message.text or "").strip()
     if not name:
-        await message.answer("Name can't be empty. Try again:")
+        await message.answer(t(language, "categories.nameEmpty"))
         return
     data = await state.get_data()
     category_id = UUID(data["rename_target_id"])
@@ -161,32 +188,35 @@ async def on_rename_category_name_entered(
     except httpx.HTTPStatusError as exc:
         logger.exception("Failed to rename category")
         await state.clear()
-        await message.answer(_error_message(exc))
+        await message.answer(_error_message(exc, language))
         return
     except httpx.HTTPError:
         logger.exception("Failed to rename category")
         await state.clear()
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     await state.clear()
-    await message.answer(f"Category renamed to: {category.name}")
+    await message.answer(t(language, "categories.renamed", name=category.name))
 
 
 async def cmd_delete_category(
-    message: Message, state: FSMContext, client: CategoryBackendClient
+    message: Message,
+    state: FSMContext,
+    client: CategoryBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     try:
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await message.answer(_BACKEND_UNREACHABLE)
+        await message.answer(t(language, "common.backendUnreachable"))
         return
     if not categories:
-        await message.answer("No categories to delete yet.")
+        await message.answer(t(language, "categories.noneToDelete"))
         return
     await state.set_state(CategoryManage.delete_select)
     await message.answer(
-        "Which category do you want to delete?", reply_markup=categories_keyboard(categories)
+        t(language, "categories.pickToDelete"), reply_markup=categories_keyboard(categories)
     )
 
 
@@ -195,6 +225,7 @@ async def on_delete_category_selected(
     callback_data: CategoryCallback,
     state: FSMContext,
     client: CategoryBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     try:
@@ -203,23 +234,25 @@ async def on_delete_category_selected(
         logger.exception("Failed to delete category")
         await state.clear()
         if isinstance(callback.message, Message):
-            await callback.message.edit_text(_error_message(exc))
+            await callback.message.edit_text(_error_message(exc, language))
         return
     except httpx.HTTPError:
         logger.exception("Failed to delete category")
         await state.clear()
         if isinstance(callback.message, Message):
-            await callback.message.edit_text(_BACKEND_UNREACHABLE)
+            await callback.message.edit_text(t(language, "common.backendUnreachable"))
         return
     await state.clear()
-    text = await _delete_confirmation_message(client, callback_data.category_id)
+    text = await _delete_confirmation_message(client, callback_data.category_id, language)
     if isinstance(callback.message, Message):
         await callback.message.edit_text(text)
 
 
-async def on_cancel_command(message: Message, state: FSMContext) -> None:
+async def on_cancel_command(
+    message: Message, state: FSMContext, language: Language = Language.EN
+) -> None:
     await state.clear()
-    await message.answer("Cancelled.")
+    await message.answer(t(language, "common.cancelled"))
 
 
 def create_router() -> Router:

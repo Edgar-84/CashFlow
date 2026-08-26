@@ -27,9 +27,11 @@ from aiogram.types import Chat, Message, Update
 from aiogram.types import User as TelegramUser
 
 from bot.handlers import categories as h
+from bot.i18n import t
 from bot.keyboards import CategoryCallback
 from bot.states import CategoryManage
 from models.category import CategoryCreate, CategoryResponse, CategoryUpdate
+from models.enums import Language
 
 
 def make_state() -> FSMContext:
@@ -329,6 +331,63 @@ async def test_cancel_command_clears_state() -> None:
 
     assert await state.get_state() is None
     message.answer.assert_awaited_once_with("Cancelled.")
+
+
+# -- language threading (U3.14 AC: RU/UK render for an account set to them) -
+# RU/UK alias the EN catalogue until U3.15 ships real translations
+# (bot/i18n.py), so these assert the *mechanism* — the injected `language`
+# reaches every t() call along the way — not that the rendered text differs
+# from English yet.
+
+
+async def test_list_categories_empty_renders_in_the_injected_language() -> None:
+    client = FakeCategoryBackendClient(categories=[])
+    message = make_message("/categories")
+
+    await h.cmd_list_categories(message, client, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "categories.empty"))
+
+
+async def test_add_category_renders_in_the_injected_language() -> None:
+    client = FakeCategoryBackendClient()
+    state = make_state()
+    await state.set_state(CategoryManage.add_name)
+    message = make_message("Utilities")
+
+    await h.on_add_category_name_entered(message, state, client, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "categories.added", name="Utilities"))
+
+
+async def test_delete_category_renders_in_the_injected_language() -> None:
+    category = make_category("Groceries")
+    client = FakeCategoryBackendClient(categories=[category])
+    state = make_state()
+    callback = make_callback()
+
+    await h.on_delete_category_selected(
+        callback, CategoryCallback(category_id=category.id), state, client, language=Language.RU
+    )
+
+    callback.message.edit_text.assert_awaited_once_with(t(Language.RU, "categories.deleted"))
+
+
+async def test_error_message_maps_status_codes_in_the_injected_language() -> None:
+    assert h._error_message(_status_error(403), Language.RU) == t(Language.RU, "readonly")
+    assert h._error_message(_status_error(409), Language.RU) == t(
+        Language.RU, "categories.error.inUse"
+    )
+    assert h._error_message(_status_error(500), Language.RU) == t(Language.RU, "error.fallback")
+
+
+async def test_cancel_command_renders_in_the_injected_language() -> None:
+    state = make_state()
+    message = make_message("/cancel")
+
+    await h.on_cancel_command(message, state, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "common.cancelled"))
 
 
 # -- real-dispatch regression test: catch router-registration-order bugs ----

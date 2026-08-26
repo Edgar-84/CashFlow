@@ -21,6 +21,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message as TelegramMessage
 
 from bot.handlers import statistics as h
+from bot.i18n import t
 from bot.keyboards import (
     STATISTICS_BY_CATEGORY_CALLBACK,
     STATISTICS_BY_TAG_CALLBACK,
@@ -33,6 +34,7 @@ from bot.keyboards import (
 )
 from bot.states import Statistics
 from models.category import CategoryResponse
+from models.enums import Language
 from models.statistics import CategoryTotal, PeriodTotal, TagTotal
 from models.tag import TagResponse
 
@@ -579,6 +581,41 @@ async def test_chart_command_sets_view_state_with_the_active_preset() -> None:
 
     assert await state.get_state() == Statistics.view.state
     assert (await state.get_data())["preset"] == STATISTICS_PERIOD_THIS_MONTH_CALLBACK
+
+
+# -- language threading (U3.14 AC: RU/UK render for an account set to them) -
+# RU/UK alias the EN catalogue until U3.15 ships real translations
+# (bot/i18n.py), so these assert the *mechanism* — the injected `language`
+# reaches every t() call along the way — not that the rendered text differs
+# from English yet.
+
+
+async def test_statistics_empty_period_renders_in_the_injected_language() -> None:
+    client = FakeStatisticsBackendClient()
+    message = make_message()
+
+    await h.cmd_statistics(message, make_state(), client, language=Language.RU)
+
+    assert t(Language.RU, "statistics.emptyPeriod") in message.answer.await_args.args[0]
+
+
+async def test_by_category_clicked_no_categories_renders_in_the_injected_language() -> None:
+    client = FakeStatisticsBackendClient(categories=[])
+    message = make_message()
+    callback = make_callback(STATISTICS_BY_CATEGORY_CALLBACK, message)
+
+    await h.on_by_category_clicked(callback, make_state(), client, language=Language.RU)
+
+    assert t(Language.RU, "statistics.noCategoriesFound") in message.edit_text.await_args.args[0]
+
+
+async def test_chart_command_zero_total_renders_in_the_injected_language() -> None:
+    client = FakeStatisticsBackendClient(by_category=[CategoryTotal(category_id=uuid4(), total=0)])
+    message = make_message()
+
+    await h.cmd_chart(message, make_state(), client, language=Language.RU)
+
+    assert message.answer.await_args.args[0] == t(Language.RU, "statistics.nothingToChart")
 
 
 async def test_chart_button_clicked_renders_the_chart_via_edit_text() -> None:

@@ -31,8 +31,10 @@ from aiogram.types import Chat, Message, Update
 from aiogram.types import User as TelegramUser
 
 from bot.handlers import tags as h
+from bot.i18n import t
 from bot.keyboards import TagCallback
 from bot.states import TagManage
+from models.enums import Language
 from models.tag import TagCreate, TagResponse, TagUpdate
 
 
@@ -327,6 +329,60 @@ async def test_cancel_command_clears_state() -> None:
 
     assert await state.get_state() is None
     message.answer.assert_awaited_once_with("Cancelled.")
+
+
+# -- language threading (U3.14 AC: RU/UK render for an account set to them) -
+# RU/UK alias the EN catalogue until U3.15 ships real translations
+# (bot/i18n.py), so these assert the *mechanism* — the injected `language`
+# reaches every t() call along the way — not that the rendered text differs
+# from English yet.
+
+
+async def test_list_tags_empty_renders_in_the_injected_language() -> None:
+    client = FakeTagBackendClient(tags=[])
+    message = make_message("/tags")
+
+    await h.cmd_list_tags(message, client, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "tags.empty"))
+
+
+async def test_add_tag_renders_in_the_injected_language() -> None:
+    client = FakeTagBackendClient()
+    state = make_state()
+    await state.set_state(TagManage.add_name)
+    message = make_message("Vacation")
+
+    await h.on_add_tag_name_entered(message, state, client, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "tags.added", name="Vacation"))
+
+
+async def test_delete_tag_renders_in_the_injected_language() -> None:
+    tag = make_tag("Vacation")
+    client = FakeTagBackendClient(tags=[tag])
+    state = make_state()
+    callback = make_callback()
+
+    await h.on_delete_tag_selected(
+        callback, TagCallback(tag_id=tag.id), state, client, language=Language.RU
+    )
+
+    callback.message.edit_text.assert_awaited_once_with(t(Language.RU, "tags.deleted"))
+
+
+async def test_error_message_maps_status_codes_in_the_injected_language() -> None:
+    assert h._error_message(_status_error(403), Language.RU) == t(Language.RU, "readonly")
+    assert h._error_message(_status_error(500), Language.RU) == t(Language.RU, "error.fallback")
+
+
+async def test_cancel_command_renders_in_the_injected_language() -> None:
+    state = make_state()
+    message = make_message("/cancel")
+
+    await h.on_cancel_command(message, state, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "common.cancelled"))
 
 
 # -- real-dispatch regression test: catch router-registration-order bugs ----

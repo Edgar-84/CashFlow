@@ -28,6 +28,7 @@ from aiogram.types import Chat, Message, Update
 from aiogram.types import User as TelegramUser
 
 from bot.handlers import budgets as h
+from bot.i18n import t
 from bot.keyboards import BudgetCallback, CategoryCallback
 from bot.states import BudgetManage
 from models.budget_plan import (
@@ -37,6 +38,7 @@ from models.budget_plan import (
     BudgetProgress,
 )
 from models.category import CategoryResponse
+from models.enums import Language
 
 
 def make_state() -> FSMContext:
@@ -553,6 +555,52 @@ async def test_cancel_command_clears_state() -> None:
 
     assert await state.get_state() is None
     message.answer.assert_awaited_once_with("Cancelled.")
+
+
+# -- language threading (U3.14 AC: RU/UK render for an account set to them) -
+# RU/UK alias the EN catalogue until U3.15 ships real translations
+# (bot/i18n.py), so these assert the *mechanism* — the injected `language`
+# reaches every t() call along the way — not that the rendered text differs
+# from English yet.
+
+
+async def test_list_budgets_empty_renders_in_the_injected_language() -> None:
+    client = FakeBudgetBackendClient(plans=[])
+    message = make_message()
+
+    await h.cmd_list_budgets(message, client, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "budgets.empty"))
+
+
+async def test_delete_budget_renders_in_the_injected_language() -> None:
+    plan = make_plan(uuid4())
+    client = FakeBudgetBackendClient(plans=[plan])
+    state = make_state()
+    callback = make_callback()
+
+    await h.on_delete_budget_selected(
+        callback, BudgetCallback(budget_plan_id=plan.id), state, client, language=Language.RU
+    )
+
+    callback.message.edit_text.assert_awaited_once_with(t(Language.RU, "budgets.deleted"))
+
+
+async def test_error_message_maps_status_codes_in_the_injected_language() -> None:
+    assert h._error_message(_status_error(403), Language.RU) == t(Language.RU, "readonly")
+    assert h._error_message(_status_error(409), Language.RU) == t(
+        Language.RU, "budgets.error.duplicate"
+    )
+    assert h._error_message(_status_error(500), Language.RU) == t(Language.RU, "error.fallback")
+
+
+async def test_cancel_command_renders_in_the_injected_language() -> None:
+    state = make_state()
+    message = make_message("/cancel")
+
+    await h.on_cancel_command(message, state, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "common.cancelled"))
 
 
 # -- real-dispatch regression test: catch router-registration-order bugs ----
