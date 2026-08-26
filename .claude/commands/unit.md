@@ -57,6 +57,13 @@ Implement exactly ONE unit from an approved plan.
    (this blocks until the CI workflow finishes; the Deploy workflow is
    separate and only fires after a merge to master, so don't watch for it
    here).
+   - **`no checks reported` is a race, not a green.** Run straight after
+     `gh pr create`, `gh pr checks` often returns before the workflow
+     registers, and `--watch` then exits 0 with nothing listed — no
+     failures, success exit code, and CI has not started. Never read
+     that as passing. Treat it as "not yet": retry every 15s, up to 5
+     times, then confirm with `gh run list --branch <branch> --limit 3`
+     before concluding there is genuinely no CI for this PR.
    - If checks fail, report which ones and stop — do not ask about
      merging a red PR.
    - If checks pass, ask: "CI is green — do you have an approve and want
