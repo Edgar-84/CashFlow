@@ -3,8 +3,11 @@
 One method per endpoint the bot milestone (M4) actually drives — expenses,
 categories, tags, budgets, statistics — plus `get_me()`, used by
 `AllowlistMiddleware` to probe whether the caller's tg_id has a `users` row
-(bot-allowlist-db plan, D300). Full user management is still admin-panel/V2
-scope (project CLAUDE.md "Out of scope") and has no bot handler planned.
+(bot-allowlist-db plan, D300). That same probe response also carries the
+caller's `language` (D707, U3.12) — `AllowlistMiddleware` reads it off the
+`UserMeResponse` this method returns, so resolving language never costs a
+second round-trip. Full user management is still admin-panel/V2 scope
+(project CLAUDE.md "Out of scope") and has no bot handler planned.
 
 Every request carries X-Telegram-User-Id + X-Internal-Token (D1); the caller
 supplies both once at construction so handlers never touch headers directly.
@@ -28,7 +31,7 @@ from models.category import CategoryCreate, CategoryResponse, CategoryUpdate
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.statistics import CategoryTotal, PeriodTotal, TagTotal
 from models.tag import TagCreate, TagResponse, TagUpdate
-from models.user import UserResponse
+from models.user import UserMeResponse
 
 
 class BackendClient:
@@ -51,14 +54,14 @@ class BackendClient:
 
     # -- auth --------------------------------------------------------
 
-    async def get_me(self) -> UserResponse | None:
+    async def get_me(self) -> UserMeResponse | None:
         try:
             response = await self._request("GET", "/users/me")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 401:
                 return None
             raise
-        return UserResponse.model_validate(response.json())
+        return UserMeResponse.model_validate(response.json())
 
     # -- expenses --------------------------------------------------------
 
