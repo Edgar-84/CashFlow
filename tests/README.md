@@ -932,6 +932,11 @@ race case (D302 archives in-use categories on 204 instead).
 | `test_delete_category_conflict_shows_friendly_message` | A 409 from `delete_category` (the defensive race branch — D302 archives in-use categories instead, so 409 is now unreachable except via a genuine race) shows a human message, not a traceback (AC) |
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `CategoryManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_category_name_entered` |
+| `test_list_categories_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message (mechanism only — RU aliases EN until U3.15) |
+| `test_add_category_renders_in_the_injected_language` | Same mechanism check for the "Category added" confirmation |
+| `test_delete_category_renders_in_the_injected_language` | Same mechanism check for the "Category deleted" confirmation |
+| `test_error_message_maps_status_codes_in_the_injected_language` | `_error_message` maps 403/409/other status codes through the injected language |
+| `test_cancel_command_renders_in_the_injected_language` | Same mechanism check for "Cancelled." |
 
 ## Bot tests (`test_bot_handlers_tags.py`) → [`bot/handlers/tags.py`](../bot/handlers/tags.py)
 Hermetic — a `FakeTagBackendClient` stands in for `bot/client.py`'s
@@ -964,6 +969,11 @@ hidden, not removed (D302 mirrored for tags).
 | `test_delete_tag_permission_denied_shows_friendly_message` | A 403 from `delete_tag` shows a permission message, not a traceback (AC) |
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `TagManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_tag_name_entered` |
+| `test_list_tags_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message (mechanism only — RU aliases EN until U3.15) |
+| `test_add_tag_renders_in_the_injected_language` | Same mechanism check for the "Tag added" confirmation |
+| `test_delete_tag_renders_in_the_injected_language` | Same mechanism check for the "Tag deleted" confirmation |
+| `test_error_message_maps_status_codes_in_the_injected_language` | `_error_message` maps 403/other status codes through the injected language |
+| `test_cancel_command_renders_in_the_injected_language` | Same mechanism check for "Cancelled." |
 
 ## Bot tests (`test_bot_handlers_budgets.py`) → [`bot/handlers/budgets.py`](../bot/handlers/budgets.py)
 Hermetic — a `FakeBudgetBackendClient` stands in for `bot/client.py`'s
@@ -1006,6 +1016,10 @@ registration-order class of bug as `test_bot_handlers_categories.py`
 | `test_delete_budget_permission_denied_shows_friendly_message` | A 403 from `delete_budget_plan` shows a permission message, not a traceback (AC) |
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_amount_catchall` | Through a real `Dispatcher`: `/cancel` while in `BudgetManage.add_amount` reaches `on_cancel_command`, not the catch-all `on_add_budget_amount_entered` |
+| `test_list_budgets_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message (mechanism only — RU aliases EN until U3.15) |
+| `test_delete_budget_renders_in_the_injected_language` | Same mechanism check for the "Budget deleted" confirmation |
+| `test_error_message_maps_status_codes_in_the_injected_language` | `_error_message` maps 403/409/other status codes through the injected language |
+| `test_cancel_command_renders_in_the_injected_language` | Same mechanism check for "Cancelled." |
 
 ## Bot tests (`test_bot_handlers_statistics.py`) → [`bot/handlers/statistics.py`](../bot/handlers/statistics.py)
 Hermetic — a `FakeStatisticsBackendClient` stands in for `bot/client.py`'s
@@ -1062,6 +1076,9 @@ in this period." without calling the formatter at all.
 | `test_chart_command_backend_error_shows_friendly_message` | A `statistics_by_category` transport failure shows a human message instead of raising |
 | `test_chart_command_sets_view_state_with_the_active_preset` | `/chart` leaves FSM state in `Statistics.view` with the preset recorded, so the period-picker keyboard keeps working afterward |
 | `test_chart_button_clicked_renders_the_chart_via_edit_text` | The "📊 Chart" button on `/statistics` renders the same breakdown in place (`edit_text`), keeping the period-picker keyboard |
+| `test_statistics_empty_period_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-period line (mechanism only — RU aliases EN until U3.15) |
+| `test_by_category_clicked_no_categories_renders_in_the_injected_language` | Same mechanism check for the "No categories found." message |
+| `test_chart_command_zero_total_renders_in_the_injected_language` | Same mechanism check for the "Nothing to chart" message |
 
 ---
 

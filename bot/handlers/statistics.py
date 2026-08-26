@@ -25,6 +25,15 @@ silently swallowed: it re-renders the last period view.
 machinery to render a text category-breakdown (`bot/charts.py`) instead of
 the plain totals list — no image, no new dependency (plan Decision log D121
 supersedes the original matplotlib-PNG plan, D101).
+
+Every user-visible string goes through `bot/i18n.py::t()` (U3.14). Every
+handler and helper below takes a `language: Language`, defaulting to
+`Language.EN` — aiogram injects the caller's real resolved language
+(`AllowlistMiddleware`, D707) into every registered handler regardless of
+that default, since dispatch matches by parameter name; the default only
+matters for direct calls (tests, and this module's own handler-to-helper
+calls, which always pass `language` through explicitly rather than relying
+on it).
 """
 
 import logging
@@ -41,6 +50,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot.charts import render_category_breakdown
+from bot.i18n import t
 from bot.keyboards import (
     STATISTICS_BY_CATEGORY_CALLBACK,
     STATISTICS_BY_TAG_CALLBACK,
@@ -56,6 +66,7 @@ from bot.keyboards import (
 )
 from bot.states import Statistics
 from models.category import CategoryResponse
+from models.enums import Language
 from models.statistics import CategoryTotal, PeriodTotal, TagTotal
 from models.tag import TagResponse
 
@@ -83,9 +94,6 @@ class StatisticsBackendClient(Protocol):
     async def list_tags(self) -> list[TagResponse]: ...
 
 
-_BACKEND_UNREACHABLE = "Couldn't reach the backend. Please try again in a moment."
-_EMPTY_PERIOD = "No expenses in this period."
-_NOTHING_TO_CHART = "Nothing to chart in this period."
 _DEFAULT_PRESET = STATISTICS_PERIOD_THIS_MONTH_CALLBACK
 
 _PRESET_CALLBACKS = {
@@ -123,14 +131,20 @@ def preset_bounds(preset: str, now: datetime | None = None) -> tuple[datetime, d
     return start, start_of_this_month
 
 
-def _period_lines(period: PeriodTotal, *, label: str | None = None) -> list[str]:
-    heading = f"Statistics for {label}, " if label else "Statistics for "
+def _period_lines(
+    period: PeriodTotal, *, label: str | None = None, language: Language = Language.EN
+) -> list[str]:
+    heading = (
+        t(language, "statistics.headingWithLabel", label=label)
+        if label
+        else t(language, "statistics.headingPlain")
+    )
     lines = [
         f"{heading}{period.start:%Y-%m-%d} – {period.end:%Y-%m-%d}",
-        f"Total: {_format_amount(period.total)}",
+        t(language, "statistics.total", amount=_format_amount(period.total)),
     ]
     if period.total == 0:
-        lines.append(_EMPTY_PERIOD)
+        lines.append(t(language, "statistics.emptyPeriod"))
     return lines
 
 
@@ -139,6 +153,7 @@ async def _render_full_view(
     state: FSMContext,
     client: StatisticsBackendClient,
     preset: str,
+    language: Language = Language.EN,
 ) -> None:
     """Fetch + render the period total plus category/tag breakdown for
     `preset`, then leave the FSM in `Statistics.view` with `preset` recorded
@@ -153,19 +168,22 @@ async def _render_full_view(
         tags = await client.list_tags()
     except httpx.HTTPError:
         logger.exception("Failed to fetch statistics")
-        await reply(_BACKEND_UNREACHABLE)
+        await reply(t(language, "common.backendUnreachable"))
         return
 
-    lines = _period_lines(period)
+    lines = _period_lines(period, language=language)
 
     if by_category:
         category_names = {category.id: category.name for category in categories}
         lines.append("")
-        lines.append("By category:")
+        lines.append(t(language, "statistics.byCategoryHeading"))
         lines.extend(
             _format_breakdown(
                 [
-                    (category_names.get(item.category_id, "Unknown"), item.total)
+                    (
+                        category_names.get(item.category_id, t(language, "common.unknown")),
+                        item.total,
+                    )
                     for item in by_category
                 ]
             )
@@ -174,16 +192,19 @@ async def _render_full_view(
     if by_tag:
         tag_names = {tag.id: tag.name for tag in tags}
         lines.append("")
-        lines.append("By tag:")
+        lines.append(t(language, "statistics.byTagHeading"))
         lines.extend(
             _format_breakdown(
-                [(tag_names.get(item.tag_id, "Unknown"), item.total) for item in by_tag]
+                [
+                    (tag_names.get(item.tag_id, t(language, "common.unknown")), item.total)
+                    for item in by_tag
+                ]
             )
         )
 
     await state.set_state(Statistics.view)
     await state.update_data(preset=preset)
-    await reply("\n".join(lines), reply_markup=statistics_keyboard(preset))
+    await reply("\n".join(lines), reply_markup=statistics_keyboard(preset, language))
 
 
 async def _render_chart(
@@ -191,6 +212,7 @@ async def _render_chart(
     state: FSMContext,
     client: StatisticsBackendClient,
     preset: str,
+    language: Language = Language.EN,
 ) -> None:
     """Fetch the by-category breakdown for `preset` (same bounds computation
     as `_render_full_view`, U2.3) and render it via
@@ -203,55 +225,78 @@ async def _render_chart(
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch statistics")
-        await reply(_BACKEND_UNREACHABLE)
+        await reply(t(language, "common.backendUnreachable"))
         return
 
     await state.set_state(Statistics.view)
     await state.update_data(preset=preset)
 
     if not by_category or sum(item.total for item in by_category) == 0:
-        await reply(_NOTHING_TO_CHART, reply_markup=statistics_keyboard(preset))
+        await reply(
+            t(language, "statistics.nothingToChart"),
+            reply_markup=statistics_keyboard(preset, language),
+        )
         return
 
     category_names = {category.id: category.name for category in categories}
-    totals = [(category_names.get(item.category_id, "Unknown"), item.total) for item in by_category]
+    totals = [
+        (category_names.get(item.category_id, t(language, "common.unknown")), item.total)
+        for item in by_category
+    ]
     text = render_category_breakdown(totals)
-    await reply(text, reply_markup=statistics_keyboard(preset))
+    await reply(text, reply_markup=statistics_keyboard(preset, language))
 
 
 async def cmd_statistics(
-    message: Message, state: FSMContext, client: StatisticsBackendClient
+    message: Message,
+    state: FSMContext,
+    client: StatisticsBackendClient,
+    language: Language = Language.EN,
 ) -> None:
-    await _render_full_view(message.answer, state, client, _DEFAULT_PRESET)
+    await _render_full_view(message.answer, state, client, _DEFAULT_PRESET, language)
 
 
-async def cmd_chart(message: Message, state: FSMContext, client: StatisticsBackendClient) -> None:
+async def cmd_chart(
+    message: Message,
+    state: FSMContext,
+    client: StatisticsBackendClient,
+    language: Language = Language.EN,
+) -> None:
     preset = (await state.get_data()).get("preset", _DEFAULT_PRESET)
-    await _render_chart(message.answer, state, client, preset)
+    await _render_chart(message.answer, state, client, preset, language)
 
 
 async def on_chart_clicked(
-    callback: CallbackQuery, state: FSMContext, client: StatisticsBackendClient
+    callback: CallbackQuery,
+    state: FSMContext,
+    client: StatisticsBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     if not isinstance(callback.message, Message):
         return
     preset = (await state.get_data()).get("preset", _DEFAULT_PRESET)
-    await _render_chart(callback.message.edit_text, state, client, preset)
+    await _render_chart(callback.message.edit_text, state, client, preset, language)
 
 
 async def on_period_selected(
-    callback: CallbackQuery, state: FSMContext, client: StatisticsBackendClient
+    callback: CallbackQuery,
+    state: FSMContext,
+    client: StatisticsBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     preset = callback.data
     await callback.answer()
     if preset not in _PRESET_CALLBACKS or not isinstance(callback.message, Message):
         return
-    await _render_full_view(callback.message.edit_text, state, client, preset)
+    await _render_full_view(callback.message.edit_text, state, client, preset, language)
 
 
 async def on_by_category_clicked(
-    callback: CallbackQuery, state: FSMContext, client: StatisticsBackendClient
+    callback: CallbackQuery,
+    state: FSMContext,
+    client: StatisticsBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     if not isinstance(callback.message, Message):
@@ -260,22 +305,26 @@ async def on_by_category_clicked(
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch categories")
-        await callback.message.edit_text(_BACKEND_UNREACHABLE)
+        await callback.message.edit_text(t(language, "common.backendUnreachable"))
         return
     if not categories:
         preset = (await state.get_data()).get("preset", _DEFAULT_PRESET)
         await callback.message.edit_text(
-            "No categories found.", reply_markup=statistics_keyboard(preset)
+            t(language, "statistics.noCategoriesFound"),
+            reply_markup=statistics_keyboard(preset, language),
         )
         return
     await state.set_state(Statistics.category)
     await callback.message.edit_text(
-        "Choose a category:", reply_markup=categories_keyboard(categories)
+        t(language, "statistics.chooseCategory"), reply_markup=categories_keyboard(categories)
     )
 
 
 async def on_by_tag_clicked(
-    callback: CallbackQuery, state: FSMContext, client: StatisticsBackendClient
+    callback: CallbackQuery,
+    state: FSMContext,
+    client: StatisticsBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     if not isinstance(callback.message, Message):
@@ -284,14 +333,19 @@ async def on_by_tag_clicked(
         tags = await client.list_tags()
     except httpx.HTTPError:
         logger.exception("Failed to fetch tags")
-        await callback.message.edit_text(_BACKEND_UNREACHABLE)
+        await callback.message.edit_text(t(language, "common.backendUnreachable"))
         return
     if not tags:
         preset = (await state.get_data()).get("preset", _DEFAULT_PRESET)
-        await callback.message.edit_text("No tags found.", reply_markup=statistics_keyboard(preset))
+        await callback.message.edit_text(
+            t(language, "statistics.noTagsFound"),
+            reply_markup=statistics_keyboard(preset, language),
+        )
         return
     await state.set_state(Statistics.tag)
-    await callback.message.edit_text("Choose a tag:", reply_markup=tags_keyboard(tags))
+    await callback.message.edit_text(
+        t(language, "statistics.chooseTag"), reply_markup=tags_keyboard(tags, language=language)
+    )
 
 
 async def on_category_drilldown(
@@ -299,6 +353,7 @@ async def on_category_drilldown(
     callback_data: CategoryCallback,
     state: FSMContext,
     client: StatisticsBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     if not isinstance(callback.message, Message):
@@ -314,16 +369,17 @@ async def on_category_drilldown(
         categories = await client.list_categories()
     except httpx.HTTPError:
         logger.exception("Failed to fetch statistics")
-        await callback.message.edit_text(_BACKEND_UNREACHABLE)
+        await callback.message.edit_text(t(language, "common.backendUnreachable"))
         return
     name = next(
         (category.name for category in categories if category.id == callback_data.category_id),
-        "Unknown",
+        t(language, "common.unknown"),
     )
     await state.set_state(Statistics.view)
     await state.update_data(preset=preset)
     await callback.message.edit_text(
-        "\n".join(_period_lines(period, label=name)), reply_markup=statistics_keyboard(preset)
+        "\n".join(_period_lines(period, label=name, language=language)),
+        reply_markup=statistics_keyboard(preset, language),
     )
 
 
@@ -332,6 +388,7 @@ async def on_tag_drilldown(
     callback_data: TagCallback,
     state: FSMContext,
     client: StatisticsBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     await callback.answer()
     if not isinstance(callback.message, Message):
@@ -347,21 +404,27 @@ async def on_tag_drilldown(
         tags = await client.list_tags()
     except httpx.HTTPError:
         logger.exception("Failed to fetch statistics")
-        await callback.message.edit_text(_BACKEND_UNREACHABLE)
+        await callback.message.edit_text(t(language, "common.backendUnreachable"))
         return
-    name = next((tag.name for tag in tags if tag.id == callback_data.tag_id), "Unknown")
+    name = next(
+        (tag.name for tag in tags if tag.id == callback_data.tag_id), t(language, "common.unknown")
+    )
     await state.set_state(Statistics.view)
     await state.update_data(preset=preset)
     await callback.message.edit_text(
-        "\n".join(_period_lines(period, label=name)), reply_markup=statistics_keyboard(preset)
+        "\n".join(_period_lines(period, label=name, language=language)),
+        reply_markup=statistics_keyboard(preset, language),
     )
 
 
 async def on_cancel_command(
-    message: Message, state: FSMContext, client: StatisticsBackendClient
+    message: Message,
+    state: FSMContext,
+    client: StatisticsBackendClient,
+    language: Language = Language.EN,
 ) -> None:
     preset = (await state.get_data()).get("preset", _DEFAULT_PRESET)
-    await _render_full_view(message.answer, state, client, preset)
+    await _render_full_view(message.answer, state, client, preset, language)
 
 
 def create_router() -> Router:

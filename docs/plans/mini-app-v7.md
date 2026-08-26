@@ -364,7 +364,7 @@ implementation unit may start before *its own* spec exists.
       logs, never raises.
 - [x] **U3.13** Extract `bot/keyboards.py` + `bot/handlers/common.py` +
       `expenses.py`.
-- [ ] **U3.14** Extract `bot/handlers/categories.py` + `tags.py` +
+- [x] **U3.14** Extract `bot/handlers/categories.py` + `tags.py` +
       `budgets.py` + `statistics.py` + `bot/charts.py` labels.
       **AC (U3.13–U3.14, each):** no user-visible literal remains in the files
       the unit owns, button captions included; the bot's EN output is
@@ -1397,14 +1397,54 @@ touching auth or scoping goes through the reviewer subagent.
   (an explicit `language=Language.RU` reaches `t()` and resolves correctly)
   rather than translated content, since RU/UK are still EN aliases;
   `verify.sh` green (711 backend + 874 webapp tests).
-- **Next:** `/clear`, then **U3.14** (extract
-  `bot/handlers/categories.py` + `tags.py` + `budgets.py` + `statistics.py` +
-  `bot/charts.py` labels into the i18n catalogue). Remember D718 above: when
-  touching `tags.py`/`categories.py`/`budgets.py`/`statistics.py`, also pass
-  the handler's real `language` into any `tags_keyboard`/`budgets_keyboard`/
-  `statistics_keyboard`/`categories_keyboard` call it makes — those calls
-  currently default to `Language.EN` and were deliberately left that way by
-  U3.13.
+- **U3.14 is done**: every literal in `bot/handlers/categories.py`,
+  `tags.py`, `budgets.py` and `statistics.py` now goes through
+  `bot/i18n.py::t()`; `bot/charts.py` turned out to carry no user-visible
+  literal at all (every rendered line is a formatted number/bar built from
+  caller-supplied data), so it needed no change — confirmed by re-reading the
+  file, not assumed. D718's gap is closed: `tags_keyboard`/`budgets_keyboard`/
+  `statistics_keyboard` calls from these four files now pass the handler's
+  real resolved `language` instead of relying on `keyboards.py`'s
+  `Language.EN` default (`categories_keyboard` takes no `language` parameter
+  at all — it renders only category names, never a static caption — so its
+  call sites were untouched). ~75 new EN keys: `categories.*`, `tags.*`
+  (mechanical mirror, D43's precedent), `budgets.*`, `statistics.*`, plus
+  three new shared keys reused within this unit's own four files —
+  `common.backendUnreachable`, `common.cancelled` (identical wording already
+  exists under `expense.*` from U3.13, but repointing that file at a new
+  global key would be a drive-by outside this unit's file list, so it kept
+  its own copy) and `error.fallback` (the generic catch-all, mirroring the
+  webapp's own `error.fallback` naming). RU/UK still alias EN (U3.15 ships
+  real catalogues). Every handler/helper in the four files takes
+  `language: Language = Language.EN`, threaded explicitly between calls, same
+  convention U3.13 established — aiogram injects the caller's real resolved
+  language by parameter name regardless of the default. Module-level string
+  constants that existed purely to hold literal text
+  (`categories.py`/`tags.py`'s `_BACKEND_UNREACHABLE`/`_DELETED_MESSAGE`/
+  `_ARCHIVED_MESSAGE`, `statistics.py`'s `_BACKEND_UNREACHABLE`/
+  `_EMPTY_PERIOD`/`_NOTHING_TO_CHART`) are gone, replaced by inline `t()`
+  calls, since the rendered string now depends on the caller's language and
+  a module constant can no longer hold it — same pattern U3.5 used removing
+  `WELCOME_TEXT`/`HELP_TEXT` from `common.py`. Every EN catalogue value is
+  byte-identical to the literal it replaced, so all four handler test files'
+  pre-existing exact-EN-string assertions passed with **no changes needed**
+  (728 backend tests, up from 711 only because of the new tests below) —
+  the AC's "bot's EN output is unchanged" regression test. New language-
+  threading tests (17 total, mirroring U3.13's
+  `test_bot_handlers_expenses.py` mechanism-not-content shape since RU/UK
+  still alias EN): 5 each in `test_bot_handlers_categories.py` and
+  `test_bot_handlers_tags.py`, 4 in `test_bot_handlers_budgets.py`, 3 in
+  `test_bot_handlers_statistics.py`; `tests/README.md` updated with a row per
+  new test in the same change (tests/CLAUDE.md's own rule). One ruff-format
+  wrap-up: several function signatures needed multi-line wrapping after
+  gaining the `language` parameter pushed them past the 100-column limit —
+  `ruff format` did the reflow, not hand-formatting.
+- **Next:** `/clear`, then **U3.15** (RU + UK bot catalogues + the
+  cross-surface key test). All bot-side EN keys now exist across
+  `common.py`/`keyboards.py`/`expenses.py` (U3.13) and
+  `categories.py`/`tags.py`/`budgets.py`/`statistics.py` (U3.14) — U3.15 is
+  pure translation content plus a test asserting both bot and webapp
+  catalogues are each internally key-complete, no further extraction work.
 - **Gotchas the next session must know:**
   - **Re-scan the whole file for literals after the first pass, not just the
     obvious render/copy sites.** U3.8's `budgetForm.err.planGone` was a
