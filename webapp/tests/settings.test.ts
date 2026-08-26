@@ -48,24 +48,24 @@ describe("CURRENCY_ORDER", () => {
 
 function fakeApi(overrides: Partial<SettingsApi> = {}): SettingsApi {
   return {
-    getMe: vi.fn().mockResolvedValue({ currency: "USD", role: "admin" }),
+    getMe: vi.fn().mockResolvedValue({ currency: "USD", language: "en", role: "admin" }),
     updateAccount: vi.fn().mockResolvedValue({ currency: "EUR" }),
     ...overrides,
   };
 }
 
 describe("loadSettings", () => {
-  it("returns ready with the account's currency and the caller's role", async () => {
-    const api = fakeApi({ getMe: vi.fn().mockResolvedValue({ currency: "EUR", role: "member" }) });
+  it("returns ready with the account's currency, language and the caller's role", async () => {
+    const api = fakeApi({ getMe: vi.fn().mockResolvedValue({ currency: "EUR", language: "ru", role: "member" }) });
     const state = await loadSettings(api, createMemoryCache());
-    expect(state).toEqual({ status: "ready", currency: "EUR", role: "member" });
+    expect(state).toEqual({ status: "ready", currency: "EUR", language: "ru", role: "member" });
   });
 
   it("falls back to the cached snapshot, marked offline, on a later failure", async () => {
     const cache = createMemoryCache();
     const getMe = vi
       .fn()
-      .mockResolvedValueOnce({ currency: "GBP", role: "admin" })
+      .mockResolvedValueOnce({ currency: "GBP", language: "en", role: "admin" })
       .mockRejectedValueOnce(new RetryableError());
     const api = fakeApi({ getMe });
 
@@ -260,19 +260,25 @@ describe("renderSettings", () => {
   });
 
   it("ready + admin: the account's currency is checked and rows are interactive (no admin line)", () => {
-    const html = renderSettings({ status: "ready", currency: "CAD", role: "admin" }, { selected: "CAD", saving: false });
+    const html = renderSettings(
+      { status: "ready", currency: "CAD", language: "en", role: "admin" },
+      { selected: "CAD", saving: false },
+    );
     expect(html).toMatch(/aria-checked="true"[^>]*data-code="CAD"/);
     expect(html).not.toContain("Only an account admin can change the currency.");
   });
 
   it("ready + non-admin: the admin-only line shows and rows are inert", () => {
-    const html = renderSettings({ status: "ready", currency: "CAD", role: "member" }, { selected: "CAD", saving: false });
+    const html = renderSettings(
+      { status: "ready", currency: "CAD", language: "en", role: "member" },
+      { selected: "CAD", saving: false },
+    );
     expect(html).toContain("Only an account admin can change the currency.");
   });
 
   it("offline: the last-synced banner shows even for an admin", () => {
     const html = renderSettings(
-      { status: "offline", currency: "JPY", role: "admin", lastSyncedAt: "2026-08-08T09:00:00.000Z" },
+      { status: "offline", currency: "JPY", language: "en", role: "admin", lastSyncedAt: "2026-08-08T09:00:00.000Z" },
       { selected: "JPY", saving: false },
     );
     expect(html).toContain("Offline");
@@ -280,9 +286,28 @@ describe("renderSettings", () => {
   });
 
   it("saving: no row is interactive regardless of role", () => {
-    const html = renderSettings({ status: "ready", currency: "USD", role: "admin" }, { selected: "EUR", saving: true });
+    const html = renderSettings(
+      { status: "ready", currency: "USD", language: "en", role: "admin" },
+      { selected: "EUR", saving: true },
+    );
     const disabledCount = (html.match(/ disabled>/g) ?? []).length;
     expect(disabledCount).toBe(CURRENCY_ORDER.length);
+  });
+
+  it("ready: renders the Language section below Currency with the endonym and code", () => {
+    const html = renderSettings(
+      { status: "ready", currency: "USD", language: "ru", role: "admin" },
+      { selected: "USD", saving: false },
+    );
+    expect(html).toContain("settings-language-row");
+    expect(html).toContain("Русский");
+    expect(html).toContain("RU");
+    expect(html).toContain('aria-label="Language, Русский"');
+  });
+
+  it("loading/error: the Language section is absent — the account's language isn't known yet", () => {
+    expect(renderSettings({ status: "loading" })).not.toContain("settings-language-row");
+    expect(renderSettings({ status: "error", message: "x" })).not.toContain("settings-language-row");
   });
 });
 
@@ -299,6 +324,16 @@ describe("renders in Russian", () => {
     expect(html).toContain(t("settings.readonlyAdmin"));
     expect(html).toContain(currencyName("EUR"));
     expect(html).toContain(t("settings.errSave"));
+  });
+
+  it("translates the Language section heading and the row's aria-label", () => {
+    setLanguage("ru");
+    const html = renderSettings(
+      { status: "ready", currency: "USD", language: "en", role: "admin" },
+      { selected: "USD", saving: false },
+    );
+    expect(html).toContain(t("settings.sectionLanguage"));
+    expect(html).toContain(t("settings.languageRowAria", { endonym: "English" }));
   });
 
   it("translates the load error, the confirm popup message and the discard prompt", async () => {

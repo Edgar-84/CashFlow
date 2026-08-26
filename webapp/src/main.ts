@@ -98,6 +98,13 @@ import {
   mount as mountSettings,
   type SettingsHandlers,
 } from "./screens/settings";
+import {
+  applyLanguageChrome,
+  createMemoryCache as createLanguageCache,
+  loadLanguage,
+  mount as mountLanguage,
+  type LanguageHandlers,
+} from "./screens/language";
 import type { CategoryResponse, Currency, ExpenseResponse, Uuid } from "./api/types";
 
 const client = new ApiClient({ getInitData });
@@ -110,6 +117,7 @@ const categoriesCache = createCategoriesCache();
 const tagsCache = createTagsCache();
 const statisticsCache = createStatisticsCache();
 const settingsCache = createSettingsCache();
+const languageCache = createLanguageCache();
 
 // Home's selected period. Module-level so it survives navigating to screen
 // 02 and back, and a retry (both just call `showHome`/`refreshHome` again,
@@ -165,7 +173,8 @@ type ActiveScreen =
   | "tags"
   | "tag-form"
   | "statistics"
-  | "settings";
+  | "settings"
+  | "language";
 let activeScreen: ActiveScreen | null = null;
 
 /** Central setter for `activeScreen`, called at the top of every `showX`
@@ -1050,11 +1059,47 @@ async function showSettings(): Promise<void> {
     onSaved: () => {
       void showHome();
     },
+    onOpenLanguage: () => {
+      void showLanguage();
+    },
   };
 
   mountSettings(root, { status: "loading" }, client, handlers);
   const state = await loadSettings(client, settingsCache);
   mountSettings(root, state, client, handlers);
+}
+
+/** Mounts Language (U3.11, screen 09), reached only from Settings' new
+ * "Language" row — never from the side menu (D706). `onBack`/`onSaved` both
+ * return to Settings (screen doc: "always returns to Settings" / "the
+ * screen returns to Settings"), unlike Settings' own Home-only destinations —
+ * `showSettings`'s own `loadSettings` re-fetches, so a changed language's
+ * new row label shows immediately, the same "always re-fetch on return"
+ * shape `showHome` gives Settings' own currency change. */
+async function showLanguage(): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  setActiveScreen("language");
+
+  const handlers: LanguageHandlers = {
+    onRetry: () => {
+      void showLanguage();
+    },
+    onBack: () => {
+      void showSettings();
+    },
+    onSaved: () => {
+      void showSettings();
+    },
+  };
+
+  applyLanguageChrome(handlers.onBack);
+  mountLanguage(root, { status: "loading" }, client, handlers);
+  const state = await loadLanguage(client, languageCache);
+  applyLanguageChrome(handlers.onBack);
+  mountLanguage(root, state, client, handlers);
 }
 
 /** Boots the app onto `#app`. Guarded the same way every DOM-touching export

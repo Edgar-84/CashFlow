@@ -209,17 +209,22 @@ export interface TagTotal {
 
 /** `models.account.AccountResponse` — `PATCH /accounts/me` only (U3.3). No
  * `GET /accounts/me`: the account's currency for display is read off
- * `UserMeResponse.currency` instead, already returned by `GET /users/me`. */
+ * `UserMeResponse.currency` instead, already returned by `GET /users/me`.
+ * `language` (D701/D702, U3.1) was live on the backend before any screen
+ * consumed it here — `screens/language.ts` (U3.11) is its first reader. */
 export interface AccountResponse {
   id: Uuid;
   name: string;
   currency: Currency;
+  language: Language;
   owner_id: Uuid | null;
   created_at: IsoTimestamp;
 }
 
 /** `models.account.AccountUpdate` — relabels the account's currency, never
- * converts `expenses.amount` (D400/D401). */
+ * converts `expenses.amount` (D400/D401); `language` (U3.1) relabels chrome
+ * only, never stored data (plan Non-goals). */
 export interface AccountUpdate {
   currency?: Currency;
+  language?: Language;
 }

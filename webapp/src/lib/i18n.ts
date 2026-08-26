@@ -199,6 +199,28 @@ const en = {
   "settings.currency.CAD": "Canadian Dollar",
   "settings.currency.AUD": "Australian Dollar",
   "settings.currency.TRY": "Turkish Lira",
+  // U3.11 (settings.ts's new region 4/5 — the "Language" row that navigates
+  // to screens/language.ts). "{endonym}" is filled from `language.name.*`
+  // below, via `t()`'s vars (auto-escaping is fine here — an endonym has no
+  // markup).
+  "settings.sectionLanguage": "Language",
+  "settings.languageRowAria": "Language, {endonym}",
+  // U3.11 (language.ts, screen 09). "Try again"/the offline banner are
+  // U3.5's global keys, reused as-is per that unit's own gotcha note. The
+  // `language.name.*` endonyms are deliberately **identical across all three
+  // catalogues** (screen doc's Copy note: a language's endonym does not
+  // change with the *viewer's* language — "Русский" is "Русский" whether the
+  // active catalogue is `en`, `ru` or `uk`), unlike `settings.currency.*`
+  // above, which *is* translated per catalogue.
+  "language.section": "Language",
+  "language.explainChrome":
+    "Changes what language the app's menus and buttons use. Category names, tag names, your account name and any comments are never translated.",
+  "language.readonlyAdmin": "Only an account admin can change the language.",
+  "language.errLoad": "Couldn't load your language setting.",
+  "language.errSave": "Couldn't change the language. Tap a language to try again.",
+  "language.name.en": "English",
+  "language.name.ru": "Русский",
+  "language.name.uk": "Українська",
   // U3.10 (statistics.ts). "Other"/"Something went wrong."/the offline banner
   // are U3.5's global keys, reused as-is per that unit's own gotcha note.
   "statistics.unknownCategory": "Unknown category",
@@ -416,6 +438,17 @@ const ru: Catalogue = {
   "settings.currency.CAD": "Канадский доллар",
   "settings.currency.AUD": "Австралийский доллар",
   "settings.currency.TRY": "Турецкая лира",
+  "settings.sectionLanguage": "Язык",
+  "settings.languageRowAria": "Язык, {endonym}",
+  "language.section": "Язык",
+  "language.explainChrome":
+    "Меняет язык меню и кнопок приложения. Названия категорий, тегов, название аккаунта и комментарии никогда не переводятся.",
+  "language.readonlyAdmin": "Только администратор аккаунта может изменить язык.",
+  "language.errLoad": "Не удалось загрузить настройку языка.",
+  "language.errSave": "Не удалось изменить язык. Нажмите на язык, чтобы попробовать снова.",
+  "language.name.en": "English",
+  "language.name.ru": "Русский",
+  "language.name.uk": "Українська",
   "statistics.unknownCategory": "Неизвестная категория",
   "statistics.unknownTag": "Неизвестный тег",
   "statistics.byCategory": "По категориям",
@@ -618,6 +651,17 @@ const uk: Catalogue = {
   "settings.currency.CAD": "Канадський долар",
   "settings.currency.AUD": "Австралійський долар",
   "settings.currency.TRY": "Турецька ліра",
+  "settings.sectionLanguage": "Мова",
+  "settings.languageRowAria": "Мова, {endonym}",
+  "language.section": "Мова",
+  "language.explainChrome":
+    "Змінює мову меню та кнопок застосунку. Назви категорій, тегів, назва акаунта та коментарі ніколи не перекладаються.",
+  "language.readonlyAdmin": "Лише адміністратор акаунта може змінити мову.",
+  "language.errLoad": "Не вдалося завантажити налаштування мови.",
+  "language.errSave": "Не вдалося змінити мову. Торкніться мови, щоб спробувати ще раз.",
+  "language.name.en": "English",
+  "language.name.ru": "Русский",
+  "language.name.uk": "Українська",
   "statistics.unknownCategory": "Невідома категорія",
   "statistics.unknownTag": "Невідомий тег",
   "statistics.byCategory": "За категорією",
