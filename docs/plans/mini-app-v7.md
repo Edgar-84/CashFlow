@@ -340,7 +340,7 @@ implementation unit may start before *its own* spec exists.
 - [x] **U3.5** Extract `home.ts` + `components/side-menu.ts`.
 - [x] **U3.6** Extract `add-expense.ts` (the largest single file, ~33 strings).
 - [x] **U3.7** Extract `expenses.ts` + `expense-detail.ts`.
-- [ ] **U3.8** Extract `budgets.ts` + `budget-form.ts`.
+- [x] **U3.8** Extract `budgets.ts` + `budget-form.ts`.
 - [ ] **U3.9** Extract `categories.ts` + `tags.ts`.
 - [ ] **U3.10** Extract `settings.ts` + `statistics.ts` + the remaining
       components (`period-selector`, `date-range-picker`, `category-picker`,
@@ -1121,8 +1121,67 @@ touching auth or scoping goes through the reviewer subagent.
   prefix — nothing to catalogue here since there is no static literal at that
   call site, only user data. Flagged for whoever next touches that spec or
   screen; not this unit's job to reconcile.
-- **Next:** `/clear`, then **U3.8** (extract `budgets.ts` + `budget-form.ts`).
+- **U3.8 is done**: every user-visible literal in `budgets.ts` and
+  `budget-form.ts` now goes through `t()`. Two strings reused global keys
+  byte-identically (`error.retry`, `offline.banner` via `t()`'s own vars
+  mechanism). New keys: `budgets.mainButtonLabel` (contextual MainButton
+  label, composed with a private, non-escaping `fillTemplate` — a fifth
+  per-file copy of the same helper, "pure modules don't share helpers"
+  convention U3.5–U3.7 already established — since it feeds native chrome,
+  not innerHTML), `budgets.status.{noLimit,over,warn,ok}` (the bar's status
+  line, inserted at its one render call site with **no** extra `escapeHtml`
+  wrap — `status.over`'s `{amount}`/`{currency}` vars are already escaped
+  once by `t()`'s own vars mechanism, and the other three branches are
+  trusted catalogue literals with no vars at all; the reviewer's first pass
+  caught an initial version that wrapped the whole thing in `escapeHtml`
+  anyway, double-escaping `status.over`'s vars — harmless today since
+  `formatAmount`/`currency` never contain HTML-special characters, but
+  fixed to keep the "escaped exactly once" rule actually true rather than
+  coincidentally harmless), `budgets.empty.{noBudgets,noCategories}`, `budgets.invite.cta`,
+  `budgets.forbidden`, and `budgets.unknownCategory` (the stale/deleted
+  category fallback label, previously a hardcoded "Unknown category" the
+  AC's literal-scan still catches even though the design doc calls it
+  unreachable under the DB's `ON DELETE RESTRICT`). `budget-form.ts` gained
+  `budgetForm.{amountError,thresholdError}` (inline field errors),
+  `budgetForm.err.{forbidden,gone,duplicate,fallback,planGone}`
+  (`saveErrorMessage`'s four branches plus `deleteBudget`'s create-mode
+  guard message — a fifth, previously-missed literal found only by a
+  post-edit re-scan of the file, not by the original literal inventory),
+  `budgetForm.spent` (the edit-mode spend line, `t()` vars only — no extra
+  `escapeHtml` wrap, matching `expenses.ts`'s `offline.banner` precedent for
+  a string whose vars are already escaped once by `t()` itself),
+  `budgetForm.{delete,amountLabel,thresholdLabel,save,cancel}`, and
+  `budgetForm.{discardChanges,confirmDelete}` (the two `confirmDiscard`/
+  `confirmAction` popup messages — `t()` with no vars, no escaping, same
+  native-chrome rule as every other screen's confirm popups). Deliberately
+  **not** reused across the two files despite near-duplicate EN wording with
+  `addExpense.*`/`detail.*` (e.g. "Enter an amount greater than 0.",
+  "You don't have permission to do that.", "Something went wrong. Please
+  try again."): the established rule from U3.6's gotcha only reuses a
+  **global, unprefixed** key, never another screen's own prefixed one, so
+  `budgetForm.*` catalogues its own copies even where the English text
+  happens to match verbatim — this keeps each screen's translations
+  independently editable later without cross-screen coupling.
+  Neither test file needed changes to its existing exact-EN-string
+  assertions (no `vi.mock` on `../src/lib/i18n` in either) — they doubled as
+  the AC's byte-identical-output regression test unchanged. Added: a scoped
+  `setLanguage("ru")`/`afterEach(() => setLanguage("en"))` block per test
+  file asserting real RU strings render for the forbidden/empty/status copy
+  (`budgets.test.ts`, plus the MainButton label via the existing
+  `fakeWebApp`/`installWebApp` helpers) and the labels/actions/spent-line/
+  field-errors/mapped-save-error copy (`budget-form.test.ts`); `i18n.test.ts`'s
+  generic per-language loops pick up all 24 new keys with no changes needed
+  there. Grepped both files for the `(t) =>`/`(t:` shadowing hazard flagged
+  by U3.5/U3.6's gotchas — none found, nothing to rename.
+- **Next:** `/clear`, then **U3.9** (extract `categories.ts` + `tags.ts`).
 - **Gotchas the next session must know:**
+  - **Re-scan the whole file for literals after the first pass, not just the
+    obvious render/copy sites.** U3.8's `budgetForm.err.planGone` was a
+    guard-clause message (`deleteBudget()`'s create-mode no-op branch) that
+    the initial spec-driven inventory missed entirely — it surfaced only on
+    a second full read of the file post-edit. The Copy table in a screen's
+    `docs/ui/screens/*.md` is a good starting inventory, not a complete one;
+    it won't list a defensive branch nobody designed on purpose.
   - **`confirmAction`/`confirmDiscard` (`lib/telegram.ts`) take only a
     `message` string** — Telegram's `showConfirm` has no title or
     custom-button-text parameter, so a Copy table's `confirm.title`/

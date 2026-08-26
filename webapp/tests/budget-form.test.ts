@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, ForbiddenError, NotFoundError } from "../src/api/client";
+import { setLanguage } from "../src/lib/i18n";
 import {
   amountFieldError,
   budgetFormValid,
@@ -320,5 +321,39 @@ describe("renderBudgetForm", () => {
     const usd: BudgetFormMode = { ...CREATE_MODE, currency: "USD" };
     const html = renderBudgetForm({ mode: usd, amountDraft: "", thresholdDraft: "70", saveError: null });
     expect(html).toContain('<div class="currency-suffix">USD</div>');
+  });
+});
+
+// -- i18n ------------------------------------------------------------------
+
+describe("renders real RU content, not an EN fallback", () => {
+  afterEach(() => {
+    setLanguage("en");
+  });
+
+  it("translates labels, actions and the spent line", () => {
+    setLanguage("ru");
+    const html = renderBudgetForm({ mode: EDIT_MODE, amountDraft: "200.00", thresholdDraft: "80", saveError: null });
+    expect(html).toContain("Лимит на месяц");
+    expect(html).toContain("Предупреждать при");
+    expect(html).toContain("Сохранить");
+    expect(html).toContain("Отмена");
+    expect(html).toContain("Удалить бюджет");
+    expect(html).toContain("Потрачено 100.00 из 200.00 EUR в этом месяце");
+  });
+
+  it("translates the inline field errors and the save error", () => {
+    setLanguage("ru");
+    expect(amountFieldError("abc")).toBe("Введите сумму больше 0.");
+    expect(thresholdFieldError("101")).toBe("Введите целое число от 0 до 100.");
+  });
+
+  it("translates saveErrorMessage's mapped error copy", async () => {
+    setLanguage("ru");
+    const api = fakeApi({ createBudgetPlan: vi.fn().mockRejectedValue(new ForbiddenError()) });
+    const controller = createBudgetFormController(api, CREATE_MODE);
+    controller.setAmountDraft("50.00");
+    const outcome = await controller.save();
+    expect(outcome).toEqual({ status: "error", message: "У вас нет прав на это действие." });
   });
 });
