@@ -26,3 +26,6 @@ webapp/dist/
 
 # OS
 .DS_Store
+
+# Unattended unit-runner logs (scripts/auto-units.sh)
+.auto-units/
