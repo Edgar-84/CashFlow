@@ -369,7 +369,7 @@ implementation unit may start before *its own* spec exists.
       **AC (U3.13–U3.14, each):** no user-visible literal remains in the files
       the unit owns, button captions included; the bot's EN output is
       unchanged; RU and UK render for an account set to them.
-- [ ] **U3.15** RU + UK bot catalogues + the cross-surface key test.
+- [x] **U3.15** RU + UK bot catalogues + the cross-surface key test.
       **AC:** bot and webapp catalogues are each internally key-complete; a
       test fails on any language missing a key in either surface.
 
@@ -1439,12 +1439,55 @@ touching auth or scoping goes through the reviewer subagent.
   wrap-up: several function signatures needed multi-line wrapping after
   gaining the `language` parameter pushed them past the 100-column limit —
   `ruff format` did the reflow, not hand-formatting.
-- **Next:** `/clear`, then **U3.15** (RU + UK bot catalogues + the
-  cross-surface key test). All bot-side EN keys now exist across
-  `common.py`/`keyboards.py`/`expenses.py` (U3.13) and
-  `categories.py`/`tags.py`/`budgets.py`/`statistics.py` (U3.14) — U3.15 is
-  pure translation content plus a test asserting both bot and webapp
-  catalogues are each internally key-complete, no further extraction work.
+- **U3.15 is done**: `bot/i18n.py`'s `_ru`/`_uk` catalogues ship real content
+  for all 123 EN keys (`_catalogues` now maps each `Language` to its own
+  dict, no more `Language.RU: _en` aliasing). Translation followed the
+  webapp catalogues' existing RU/UK vocabulary wherever a concept overlapped
+  (`readonly`, category/tag hide-vs-delete phrasing, budget/statistics
+  wording), so a family member reading both surfaces sees consistent terms.
+  `budgets.theCategoryFallback` (RU "категория"/UK "категорія", nominative)
+  is only substituted into `budgets.set`/`budgets.updated`'s subject
+  position, never into a `для {category}` (genitive-governing) slot — the
+  two call sites that need a category name in that position always have the
+  real name by then. Reviewer round 1 caught a real one, though:
+  `budgets.enterLimit`/`enterNewLimit` originally read "лимит для
+  {category}" — `для` governs the genitive case, but `{category}` fills
+  with the raw, undeclinable user-entered name, which read as broken
+  grammar for most names ("для Продукты" instead of "для Продуктов"). Fixed
+  by quoting the proper noun after a declined common noun instead — "для
+  категории «{category}»"/"для категорії «{category}»" — the idiomatic
+  Russian/Ukrainian way to hold a name that can't be declined. New tests in
+  `tests/test_bot_i18n.py`:
+  `test_every_language_has_exactly_ens_key_set` (fails on a missing/extra
+  key in any language — the AC's key-completeness test, mirroring
+  `webapp/tests/i18n.test.ts`'s existing per-language loop) and
+  `test_no_catalogue_contains_markup`; `test_falls_back_to_en_for_ru_and_uk`
+  is gone (the premise no longer holds) and two content tests
+  (`test_renders_real_ru/uk_content_not_an_en_fallback`) took its place. The
+  "cross-surface key test" of the unit's own title is two tests, not one —
+  bot and webapp use disjoint key namespaces (different screens/handlers),
+  so there is nothing to compare *across* them; each surface's own
+  completeness loop is what the AC actually asks for. Fallout outside this
+  unit's own files, fixed because U3.15 broke it: five tests in
+  `tests/test_bot_keyboards.py` hardcoded literal EN strings while passing
+  `language=Language.RU` (banking on the old alias) — switched to compare
+  against `t(Language.RU, key)` like every other language-threading test in
+  the suite already does, same fix pattern U3.13's own tests used. Several
+  now-stale "RU aliases EN until U3.15" notes in `tests/README.md` (this
+  file, `test_bot_handlers_common.py`, `_categories.py`, `_tags.py`,
+  `_budgets.py`, `_statistics.py` sections) were reworded in the same
+  change; the tests they describe needed no code change since they already
+  looked up expected values via `t()` rather than hardcoding content. 731
+  backend tests (up from 728), 874 webapp tests (unchanged — webapp side
+  was untouched). No new D-numbered decision: D702 already settled "every
+  catalogue stays key-complete, real content, no aliasing."
+- **Next:** `/clear`, then **U4.1** (Contracts + migration:
+  `Role.SYSTEM_ADMIN`, `users.is_blocked`, `accounts.is_blocked`). M3 (bot +
+  webapp i18n) is fully done. M4 starts the admin panel — U4.1 touches
+  `migrations/versions/`, which is on CLAUDE.md's do-not-edit-without-asking
+  list, and the unit's own text says **"Ask the human before writing the
+  migration file"** — the human must be in the loop for this one, not run
+  via `/unit-auto`.
 - **Gotchas the next session must know:**
   - **Re-scan the whole file for literals after the first pass, not just the
     obvious render/copy sites.** U3.8's `budgetForm.err.planGone` was a

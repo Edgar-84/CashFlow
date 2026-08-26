@@ -747,16 +747,20 @@ injected into handler data, no second round-trip).
 | `test_denied_tg_id_still_caches_en_language_with_no_second_probe` | A denied tg_id's cache entry still carries a language so a second update inside `ttl_deny` issues no second probe |
 
 ## Bot tests (`test_bot_i18n.py`) → [`bot/i18n.py`](../bot/i18n.py)
-Hermetic — pure functions, no fakes needed (U3.12 AC: EN catalogue only; RU
-and UK fall back to EN until U3.15's catalogues ship).
+Hermetic — pure functions, no fakes needed (U3.12 AC: EN catalogue; U3.15 AC:
+RU/UK ship real content and every language's catalogue is key-complete
+against EN's, D702).
 
 | Test | Checks |
 |---|---|
 | `test_returns_the_en_string_for_a_plain_key` | `t(Language.EN, key)` returns the EN catalogue's string |
-| `test_falls_back_to_en_for_ru_and_uk` | `t(Language.RU/UK, key)` returns the same string as EN (no catalogue ships for either yet) |
+| `test_renders_real_ru_content_not_an_en_fallback` | `t(Language.RU, key)` returns real RU text, not the EN string |
+| `test_renders_real_uk_content_not_an_en_fallback` | `t(Language.UK, key)` returns real UK text, not the EN string |
 | `test_extra_var_with_no_matching_placeholder_is_ignored` | A `**variables` kwarg with no matching `{var}` in the template does not raise or alter the output |
 | `test_leave_unmatched_fills_a_known_var_and_leaves_an_unknown_one_literal` | `_LeaveUnmatched` fills a known `{var}` and leaves an unmatched one as the literal `{name}` text rather than dropping it |
 | `test_fills_a_var_in_a_key_added_by_u3_13` | A key added by U3.13's `bot/keyboards.py`/`expenses.py` extraction (`expense.saved`) fills its `{var}` correctly |
+| `test_every_language_has_exactly_ens_key_set` | Every language's catalogue has exactly EN's key set — fails on a missing or extra key (U3.15 AC's key-completeness test) |
+| `test_no_catalogue_contains_markup` | No catalogue value contains `<` or `>` |
 
 ## Bot tests (`test_bot_handlers_common.py`) → [`bot/handlers/common.py`](../bot/handlers/common.py)
 Hermetic — no FSM state, no backend calls, so no fakes needed (U2.5 AC:
@@ -766,7 +770,7 @@ Hermetic — no FSM state, no backend calls, so no fakes needed (U2.5 AC:
 |---|---|
 | `test_start_renders_welcome_message` | `/start` sends `t(Language.EN, "common.welcome")` (AC) |
 | `test_help_renders_command_list` | `/help` sends `t(Language.EN, "common.help")`, which lists commands from every feature area (AC) |
-| `test_start_uses_the_injected_language` | Passing `language=Language.RU` renders the RU-catalogue string (mechanism, not translated content yet — RU aliases EN until U3.15) |
+| `test_start_uses_the_injected_language` | Passing `language=Language.RU` renders the RU-catalogue string (mechanism — the expected value is looked up via `t()`, not hardcoded, so it holds regardless of catalogue content) |
 
 ## Bot tests (`test_bot_bot.py`) → [`bot/bot.py`](../bot/bot.py)
 Hermetic — no real Telegram/network; updates fed through the full dispatcher
@@ -793,7 +797,7 @@ each builder with a caption takes a `language: Language` defaulting to EN.
 | `test_category_callback_round_trips_the_uuid` | `CategoryCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_tags_keyboard_renders_toggle_buttons_and_done` | One toggle button per tag (`tag:<uuid hex>`) plus a final "Done" button (`tags:done`) |
 | `test_tags_keyboard_marks_selected_tags` | Selected tags get the ✅ label prefix; callback_data stays stable so tapping toggles |
-| `test_tags_keyboard_renders_the_done_button_in_the_given_language` | Passing `language=Language.RU` renders the RU catalogue's "Done" text (mechanism check; RU aliases EN until U3.15) |
+| `test_tags_keyboard_renders_the_done_button_in_the_given_language` | Passing `language=Language.RU` renders the RU catalogue's real "Done" text via `t()` |
 | `test_tag_callback_round_trips_the_uuid` | `TagCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_budgets_keyboard_renders_one_button_per_plan_with_category_name` | One button per plan, text = its category's name, callback_data = `budget:<uuid hex>` (U2.2 AC) |
 | `test_budgets_keyboard_unknown_category_falls_back_to_placeholder` | A plan whose category isn't in the passed-in name map renders "Unknown" instead of a blank/crashing label |
@@ -802,12 +806,12 @@ each builder with a caption takes a `language: Language` defaulting to EN.
 | `test_expenses_keyboard_renders_one_button_per_item_labeled_by_caller` | One button per `(id, label)` pair, one per row, callback_data = `expense:<uuid hex>` (U2.1 AC) |
 | `test_expense_callback_round_trips_the_uuid` | `ExpenseCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` and the "✅ Confirm"/"❌ Cancel" captions |
-| `test_confirm_keyboard_uses_the_given_language` | `language=Language.RU` still renders the (aliased) caption via `t()` |
+| `test_confirm_keyboard_uses_the_given_language` | `language=Language.RU` renders the real RU caption via `t()` |
 | `test_edit_field_keyboard_renders_the_four_editable_fields` | Amount/Category/Comment/Tags buttons carry the four `editfield:*` callback constants, in order (U2.1b AC) |
-| `test_edit_field_keyboard_uses_the_given_language` | `language=Language.RU` still renders the (aliased) captions via `t()` |
+| `test_edit_field_keyboard_uses_the_given_language` | `language=Language.RU` renders the real RU captions via `t()` |
 | `test_statistics_keyboard_renders_presets_and_drilldown_entries` | Three period-preset buttons + "By category…"/"By tag…"/"📊 Chart" render with the locked `statperiod:*`/`statistics:by_*`/`statistics:chart` callback-data (U2.3 AC, chart button added U2.4) |
 | `test_statistics_keyboard_marks_the_active_preset_only` | Only the currently-active preset gets the ✅ label prefix |
-| `test_statistics_keyboard_uses_the_given_language` | `language=Language.RU` still renders every preset/drilldown caption via `t()` (mechanism check — this file's captions are translated even though `bot/handlers/statistics.py` itself isn't extracted until U3.14) |
+| `test_statistics_keyboard_uses_the_given_language` | `language=Language.RU` renders every preset/drilldown caption via `t()`, real RU content |
 
 ## Bot tests (`test_bot_charts.py`) → [`bot/charts.py`](../bot/charts.py)
 Pure function, no fakes needed — `render_category_breakdown` takes
@@ -844,8 +848,8 @@ category re-picks via the existing `categories_keyboard`; tags reuses
 pre-selects the expense's current tags instead of starting empty). U3.13 AC:
 every user-visible string goes through `bot/i18n.py::t()`; the handful of
 tests below the FSM/registration-order ones assert the injected `language`
-actually reaches `t()` — RU/UK alias the EN catalogue until U3.15, so they
-lock in the mechanism, not translated content.
+actually reaches `t()` by comparing against `t(Language.RU, key)` rather than
+a hardcoded literal, so they hold regardless of catalogue content.
 
 | Test | Checks |
 |---|---|
@@ -932,7 +936,7 @@ race case (D302 archives in-use categories on 204 instead).
 | `test_delete_category_conflict_shows_friendly_message` | A 409 from `delete_category` (the defensive race branch — D302 archives in-use categories instead, so 409 is now unreachable except via a genuine race) shows a human message, not a traceback (AC) |
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `CategoryManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_category_name_entered` |
-| `test_list_categories_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message (mechanism only — RU aliases EN until U3.15) |
+| `test_list_categories_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message |
 | `test_add_category_renders_in_the_injected_language` | Same mechanism check for the "Category added" confirmation |
 | `test_delete_category_renders_in_the_injected_language` | Same mechanism check for the "Category deleted" confirmation |
 | `test_error_message_maps_status_codes_in_the_injected_language` | `_error_message` maps 403/409/other status codes through the injected language |
@@ -969,7 +973,7 @@ hidden, not removed (D302 mirrored for tags).
 | `test_delete_tag_permission_denied_shows_friendly_message` | A 403 from `delete_tag` shows a permission message, not a traceback (AC) |
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_name_catchall` | Through a real `Dispatcher`: `/cancel` while in `TagManage.add_name` reaches `on_cancel_command`, not the catch-all `on_add_tag_name_entered` |
-| `test_list_tags_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message (mechanism only — RU aliases EN until U3.15) |
+| `test_list_tags_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message |
 | `test_add_tag_renders_in_the_injected_language` | Same mechanism check for the "Tag added" confirmation |
 | `test_delete_tag_renders_in_the_injected_language` | Same mechanism check for the "Tag deleted" confirmation |
 | `test_error_message_maps_status_codes_in_the_injected_language` | `_error_message` maps 403/other status codes through the injected language |
@@ -1016,7 +1020,7 @@ registration-order class of bug as `test_bot_handlers_categories.py`
 | `test_delete_budget_permission_denied_shows_friendly_message` | A 403 from `delete_budget_plan` shows a permission message, not a traceback (AC) |
 | `test_cancel_command_clears_state` | `on_cancel_command` clears FSM state |
 | `test_cancel_command_reaches_cancel_handler_not_add_amount_catchall` | Through a real `Dispatcher`: `/cancel` while in `BudgetManage.add_amount` reaches `on_cancel_command`, not the catch-all `on_add_budget_amount_entered` |
-| `test_list_budgets_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message (mechanism only — RU aliases EN until U3.15) |
+| `test_list_budgets_empty_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-list message |
 | `test_delete_budget_renders_in_the_injected_language` | Same mechanism check for the "Budget deleted" confirmation |
 | `test_error_message_maps_status_codes_in_the_injected_language` | `_error_message` maps 403/409/other status codes through the injected language |
 | `test_cancel_command_renders_in_the_injected_language` | Same mechanism check for "Cancelled." |
@@ -1076,7 +1080,7 @@ in this period." without calling the formatter at all.
 | `test_chart_command_backend_error_shows_friendly_message` | A `statistics_by_category` transport failure shows a human message instead of raising |
 | `test_chart_command_sets_view_state_with_the_active_preset` | `/chart` leaves FSM state in `Statistics.view` with the preset recorded, so the period-picker keyboard keeps working afterward |
 | `test_chart_button_clicked_renders_the_chart_via_edit_text` | The "📊 Chart" button on `/statistics` renders the same breakdown in place (`edit_text`), keeping the period-picker keyboard |
-| `test_statistics_empty_period_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-period line (mechanism only — RU aliases EN until U3.15) |
+| `test_statistics_empty_period_renders_in_the_injected_language` | U3.14 AC: `language=Language.RU` reaches `t()` for the empty-period line |
 | `test_by_category_clicked_no_categories_renders_in_the_injected_language` | Same mechanism check for the "No categories found." message |
 | `test_chart_command_zero_total_renders_in_the_injected_language` | Same mechanism check for the "Nothing to chart" message |
 
