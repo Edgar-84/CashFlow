@@ -53,6 +53,12 @@ do nothing else if any of these is true:
 10. CI: `gh pr checks <PR> --watch` (blocks until the CI workflow ends;
    Deploy is a separate workflow that only fires after a merge — do not
    wait for it).
+   - **`no checks reported` is a race, not an answer.** `gh pr checks`
+     run straight after `gh pr create` often returns before the workflow
+     registers, and `--watch` then exits instantly. Treat that string as
+     "not yet": retry every 15s, up to 5 times. If it still says it,
+     confirm with `gh run list --branch <branch> --limit 3` before
+     concluding there is genuinely no CI — and never read it as green.
    - **Red:** you get exactly ONE fix attempt. Fix the cause, re-run
      `bash scripts/verify.sh`, push to the same branch, watch again. If
      it is still red, stop: print
