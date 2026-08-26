@@ -32,6 +32,7 @@
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
+import { t } from "../lib/i18n";
 import { formatAmount } from "../lib/money";
 import { describe as describePeriod, toQuery, type PeriodQuery, type PeriodValue } from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
@@ -88,12 +89,12 @@ function buildRow(
     id: expense.id,
     spentAt: expense.spent_at,
     categoryId: expense.category_id,
-    categoryLabel: category?.name ?? "Unknown",
+    categoryLabel: category?.name ?? t("category.unknown"),
     colorVar: category ? categorySlotCssVar(slot) : OTHER_COLOR_VAR,
     minor: expense.amount,
     comment: expense.comment,
     authorInitial: expense.user_name ? expense.user_name.trim().charAt(0).toUpperCase() || null : null,
-    tags: expense.tags.map((t) => t.name),
+    tags: expense.tags.map((tag) => tag.name),
   };
 }
 
@@ -151,7 +152,7 @@ export function buildExpensesData(input: {
   hasMore: boolean;
 }): ExpensesData {
   const categoryLabel = input.categoryId
-    ? (input.categories.find((c) => c.id === input.categoryId)?.name ?? "this category")
+    ? (input.categories.find((c) => c.id === input.categoryId)?.name ?? t("expenses.unknownCategory"))
     : null;
   const colorBySlot = new Map(assignCategoryColors(input.categories).map((c) => [c.id, c.slot]));
   const categoryById = new Map(input.categories.map((c) => [c.id, c]));
@@ -271,7 +272,7 @@ export function createExpensesController(
         if (cached) {
           return { status: "offline", lastSyncedAt: cached.syncedAt, ...cached.data };
         }
-        const message = err instanceof Error ? err.message : "Something went wrong.";
+        const message = err instanceof Error ? err.message : t("error.fallback");
         return { status: "error", message };
       }
     },
@@ -298,6 +299,14 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// Non-escaping counterpart to `t()`'s own vars mechanism — the templated
+// filter banner and empty-state strings are composed here raw and escaped
+// exactly once by their caller's own `escapeHtml` wrap (home.ts's
+// `budgetAlertMessage` convention; pure modules don't share this helper).
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? vars[name] : match));
 }
 
 function renderRow(row: ExpenseRow): string {
@@ -332,7 +341,7 @@ function renderOfflineBanner(lastSyncedAt: string | undefined): string {
   if (!lastSyncedAt) {
     return "";
   }
-  return `<div class="offline-banner" data-testid="offline">Offline — showing data from ${escapeHtml(lastSyncedAt)}</div>`;
+  return `<div class="offline-banner" data-testid="offline">${t("offline.banner", { time: lastSyncedAt })}</div>`;
 }
 
 function renderSkeleton(): string {
@@ -345,13 +354,13 @@ function renderSkeleton(): string {
 function renderError(message: string): string {
   return `<div class="expenses-error" data-testid="error">
     <p>${escapeHtml(message)}</p>
-    <button type="button" data-action="retry">Try again</button>
+    <button type="button" data-action="retry">${escapeHtml(t("error.retry"))}</button>
   </div>`;
 }
 
 function renderForbidden(): string {
   return `<div class="expenses-readonly" data-testid="forbidden">
-    <p>You don't have permission to view expenses.</p>
+    <p>${escapeHtml(t("expenses.forbidden"))}</p>
   </div>`;
 }
 
@@ -360,7 +369,7 @@ function renderForbidden(): string {
  * neither is (docs/ui/screens/03-expenses.md's Copy table, `filter.*`). */
 function filterBannerText(categoryLabel: string | null, periodLabel: string | null): string | null {
   if (categoryLabel && periodLabel) {
-    return `${categoryLabel} · ${periodLabel}`;
+    return fillTemplate(t("expenses.filter.both"), { category: categoryLabel, period: periodLabel });
   }
   return categoryLabel ?? periodLabel;
 }
@@ -369,15 +378,15 @@ function filterBannerText(categoryLabel: string | null, periodLabel: string | nu
  * category second, unlike the banner's order. */
 function emptyMessage(categoryLabel: string | null, periodLabel: string | null): string {
   if (categoryLabel && periodLabel) {
-    return `Nothing in ${periodLabel} for ${categoryLabel}.`;
+    return fillTemplate(t("expenses.empty.both"), { category: categoryLabel, period: periodLabel });
   }
   if (categoryLabel) {
-    return `Nothing here yet for ${categoryLabel}.`;
+    return fillTemplate(t("expenses.empty.categoryOnly"), { category: categoryLabel });
   }
   if (periodLabel) {
-    return `Nothing in ${periodLabel}.`;
+    return fillTemplate(t("expenses.empty.periodOnly"), { period: periodLabel });
   }
-  return "No expenses yet.";
+  return t("expenses.empty.unfiltered");
 }
 
 function renderEmpty(categoryLabel: string | null, period: PeriodValue | undefined, now: Date): string {
@@ -392,8 +401,8 @@ function renderReady(data: ExpensesData, lastSyncedAt: string | undefined, now: 
   const periodLabel = data.period ? describePeriod(data.period, now) : null;
   const banner = filterBannerText(data.categoryLabel, periodLabel);
   const footer = data.hasMore
-    ? `<button type="button" class="load-more" data-action="load-more">Load more</button>`
-    : `<p class="end-of-list" data-testid="end-of-list">You've reached the end.</p>`;
+    ? `<button type="button" class="load-more" data-action="load-more">${escapeHtml(t("expenses.loadMore"))}</button>`
+    : `<p class="end-of-list" data-testid="end-of-list">${escapeHtml(t("expenses.endOfList"))}</p>`;
   return `<div class="expenses-ready" data-testid="ready">
     ${renderOfflineBanner(lastSyncedAt)}
     ${banner ? `<p class="exp-filter" data-testid="filter-banner">${escapeHtml(banner)}</p>` : ""}

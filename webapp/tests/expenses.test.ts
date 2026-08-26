@@ -10,6 +10,7 @@ import {
   renderExpenses,
   type ExpensesApi,
 } from "../src/screens/expenses";
+import { setLanguage } from "../src/lib/i18n";
 import type { PeriodValue } from "../src/lib/period";
 import type { TelegramWebApp } from "../src/lib/telegram";
 
@@ -480,6 +481,22 @@ describe("renderExpenses", () => {
     });
     const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).not.toContain('data-testid="filter-banner"');
+  });
+});
+
+describe("renders real RU content, not an EN fallback", () => {
+  afterEach(() => {
+    setLanguage("en");
+  });
+
+  it("translates the forbidden, empty and end-of-list copy", () => {
+    setLanguage("ru");
+    expect(renderExpenses({ status: "forbidden" }, NOW)).toContain("У вас нет прав на просмотр расходов.");
+    expect(renderExpenses({ status: "empty", categoryLabel: null, period: undefined }, NOW)).toContain(
+      "Расходов пока нет.",
+    );
+    const data = buildExpensesData({ expenses: pageOf(1), categories: CATEGORIES, currency: "EUR", hasMore: false });
+    expect(renderExpenses({ status: "ready", ...data }, NOW)).toContain("Вы дошли до конца списка.");
   });
 });
 

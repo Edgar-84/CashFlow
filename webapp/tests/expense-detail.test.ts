@@ -10,6 +10,7 @@ import {
   renderDetailView,
   type ExpenseDetailApi,
 } from "../src/screens/expense-detail";
+import { setLanguage } from "../src/lib/i18n";
 import type { TelegramWebApp } from "../src/lib/telegram";
 
 function category(id: string, name: string): CategoryResponse {
@@ -290,6 +291,22 @@ describe("renderDetailView — deleting disables both actions, no undo banner", 
     const html = renderDetailView({ data, deleting: false, saveError: null });
     expect(html).not.toContain("undo");
     expect(html).not.toContain("Undo");
+  });
+});
+
+describe("renders real RU content, not an EN fallback", () => {
+  afterEach(() => {
+    setLanguage("en");
+  });
+
+  it("translates the action labels and the forbidden/not-found copy", async () => {
+    setLanguage("ru");
+    const data = await readyData();
+    const html = renderDetailView({ data, deleting: false, saveError: null });
+    expect(html).toContain("Изменить");
+    expect(html).toContain("Удалить расход");
+    expect(renderDetail({ status: "forbidden" })).toContain("У вас нет прав на просмотр этого расхода.");
+    expect(renderDetail({ status: "not-found" })).toContain("Этот расход больше не существует.");
   });
 });
 
