@@ -44,9 +44,15 @@ say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 git pull --ff-only >/dev/null 2>&1 || { echo "FATAL: could not fast-forward master"; exit 1; }
 
 # --- unit list --------------------------------------------------------
-# Unchecked units, in plan order.
-mapfile -t UNITS < <(grep -oE '^- \[ \] \*\*U[0-9][0-9.]*\*\*' "$PLAN" | grep -oE 'U[0-9][0-9.]*')
-[ "${#UNITS[@]}" -gt 0 ] || { echo "Nothing to do — no unchecked units in $PLAN"; exit 0; }
+# Unchecked units, in plan order. Space-separated, not an array: macOS
+# ships bash 3.2, which has no mapfile and trips `set -u` on empty
+# arrays. Unit ids never contain spaces, so this is safe.
+UNITS=""
+while IFS= read -r u; do
+  UNITS="$UNITS $u"
+done < <(grep -oE '^- \[ \] \*\*U[0-9][0-9.]*\*\*' "$PLAN" | grep -oE 'U[0-9][0-9.]*')
+UNITS="${UNITS# }"
+[ -n "$UNITS" ] || { echo "Nothing to do — no unchecked units in $PLAN"; exit 0; }
 
 # The unit's own text block, used to detect human gates.
 unit_block() {
@@ -59,11 +65,11 @@ unit_block() {
 }
 
 say "Plan: $PLAN"
-echo "Remaining units: ${UNITS[*]}"
+echo "Remaining units: $UNITS"
 echo "Logs: $RUN_DIR"
 
 RAN=0; STARTED=0
-for UNIT in "${UNITS[@]}"; do
+for UNIT in $UNITS; do
   if [ -n "$FROM" ] && [ "$STARTED" -eq 0 ]; then
     [ "$UNIT" = "$FROM" ] || { echo "skip $UNIT (before --from $FROM)"; continue; }
   fi
