@@ -11,21 +11,26 @@
 # watches CI and merges. This script only decides WHICH unit runs next
 # and refuses to continue after anything goes wrong.
 #
-# Flags:
-#   --max N     stop after N units (default: all remaining)
-#   --from ID   skip units before ID
-#   --dry-run   list what would run, run nothing
+# Flags (all optional, all combinable):
+#   --only P    only units under prefix P — `--only U3` runs every U3.*
+#               and stops rather than crossing into U4.1
+#   --from ID   skip everything before ID, then continue
+#   --until ID  run through ID inclusive, then stop
+#   --max N     stop after N units have merged
+#   --dry-run   print what would run, run nothing
 #   --model M   model for the unit sessions (default: opus)
 set -uo pipefail
 
-PLAN=""; MAX=0; FROM=""; DRY=0; MODEL="opus"
+PLAN=""; MAX=0; FROM=""; UNTIL=""; ONLY=""; DRY=0; MODEL="opus"
 while [ $# -gt 0 ]; do
   case "$1" in
     --max)     MAX="$2"; shift 2 ;;
     --from)    FROM="$2"; shift 2 ;;
+    --until)   UNTIL="$2"; shift 2 ;;
+    --only)    ONLY="$2"; shift 2 ;;
     --model)   MODEL="$2"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) awk 'NR>1 && /^#/ {print} NR>1 && !/^#/ {exit}' "$0"; exit 0 ;;
     *)         PLAN="$1"; shift ;;
   esac
 done
@@ -74,6 +79,17 @@ for UNIT in $UNITS; do
     [ "$UNIT" = "$FROM" ] || { echo "skip $UNIT (before --from $FROM)"; continue; }
   fi
   STARTED=1
+
+  # --only: a milestone filter. `--only U3` matches U3.12 but not U4.1,
+  # so the loop runs out of work at the milestone boundary instead of
+  # crossing it. An exact id (`--only U3.12`) works too.
+  if [ -n "$ONLY" ]; then
+    case "$UNIT" in
+      "$ONLY"|"$ONLY".*) : ;;
+      *) echo "skip $UNIT (outside --only $ONLY)"; continue ;;
+    esac
+  fi
+
   if [ "$MAX" -gt 0 ] && [ "$RAN" -ge "$MAX" ]; then say "Reached --max $MAX — stopping"; break; fi
 
   BLOCK="$(unit_block "$UNIT")"
@@ -84,7 +100,12 @@ for UNIT in $UNITS; do
     exit 3
   fi
 
-  if [ "$DRY" -eq 1 ]; then echo "would run: $UNIT"; RAN=$((RAN+1)); continue; fi
+  if [ "$DRY" -eq 1 ]; then
+    echo "would run: $UNIT"
+    RAN=$((RAN+1))
+    if [ -n "$UNTIL" ] && [ "$UNIT" = "$UNTIL" ]; then say "Would stop here (--until $UNTIL)"; break; fi
+    continue
+  fi
 
   say "$UNIT — starting ($(date +%H:%M:%S))"
   LOG="$RUN_DIR/$UNIT.log"
@@ -104,6 +125,7 @@ for UNIT in $UNITS; do
   if grep -qE "^- \[x\] \*\*$UNIT\*\*" "$PLAN" && [ -z "$(git status --porcelain)" ]; then
     say "$UNIT — DONE and merged to master  (${RESULT:-no result line})"
     RAN=$((RAN+1))
+    if [ -n "$UNTIL" ] && [ "$UNIT" = "$UNTIL" ]; then say "Reached --until $UNTIL — stopping"; break; fi
   else
     say "$UNIT — STOPPED"
     echo "${RESULT:-no AUTO_UNIT_RESULT line — session died or was interrupted}"
