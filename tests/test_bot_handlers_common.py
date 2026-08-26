@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, Mock
 from aiogram.types import Message
 
 from bot.handlers import common as h
+from bot.i18n import t
+from models.enums import Language
 
 
 def make_message() -> Mock:
@@ -20,7 +22,7 @@ async def test_start_renders_welcome_message() -> None:
 
     await h.cmd_start(message)
 
-    message.answer.assert_awaited_once_with(h.WELCOME_TEXT)
+    message.answer.assert_awaited_once_with(t(Language.EN, "common.welcome"))
 
 
 async def test_help_renders_command_list() -> None:
@@ -28,7 +30,16 @@ async def test_help_renders_command_list() -> None:
 
     await h.cmd_help(message)
 
-    message.answer.assert_awaited_once_with(h.HELP_TEXT)
-    assert "/add" in h.HELP_TEXT
-    assert "/statistics" in h.HELP_TEXT
-    assert "/cancel" in h.HELP_TEXT
+    help_text = t(Language.EN, "common.help")
+    message.answer.assert_awaited_once_with(help_text)
+    assert "/add" in help_text
+    assert "/statistics" in help_text
+    assert "/cancel" in help_text
+
+
+async def test_start_uses_the_injected_language() -> None:
+    message = make_message()
+
+    await h.cmd_start(message, language=Language.RU)
+
+    message.answer.assert_awaited_once_with(t(Language.RU, "common.welcome"))

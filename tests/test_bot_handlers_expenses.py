@@ -29,6 +29,7 @@ from aiogram.types import Chat, Message, Update
 from aiogram.types import User as TelegramUser
 
 from bot.handlers import expenses as h
+from bot.i18n import t
 from bot.keyboards import (
     EDIT_FIELD_AMOUNT_CALLBACK,
     EDIT_FIELD_CATEGORY_CALLBACK,
@@ -40,6 +41,7 @@ from bot.keyboards import (
 )
 from bot.states import AddExpense, DeleteExpense, EditExpense
 from models.category import CategoryResponse
+from models.enums import Language
 from models.expense import ExpenseCreate, ExpenseResponse, ExpenseUpdate
 from models.tag import TagResponse
 
@@ -1001,6 +1003,73 @@ async def test_cancel_command_reaches_cancel_handler_from_delete_select_state() 
 
     assert await context.get_state() is None
     mocked_answer.assert_awaited_once_with("Cancelled.")
+
+
+# -- language threading (U3.13 AC: RU/UK render for an account set to them) -
+# RU/UK alias the EN catalogue until U3.15 ships real translations
+# (bot/i18n.py), so these assert the *mechanism* — the injected `language`
+# reaches every t() call along the way — not that the rendered text differs
+# from English yet.
+
+
+async def test_add_expense_choose_category_uses_the_injected_language() -> None:
+    message = make_message()
+    state = make_state()
+    client = FakeBackendClient()
+
+    await h.cmd_add_expense(message, state, client, language=Language.RU)
+
+    message.answer.assert_awaited_once()
+    args, _ = message.answer.call_args
+    assert args[0] == t(Language.RU, "expense.chooseCategory")
+
+
+async def test_confirm_saves_and_renders_in_the_injected_language() -> None:
+    category = make_category()
+    client = FakeBackendClient(categories=[category], tags=[])
+    state = make_state()
+    await h.cmd_add_expense(make_message(), state, client, language=Language.RU)
+    await h.on_category_chosen(
+        make_callback(), CategoryCallback(category_id=category.id), state, language=Language.RU
+    )
+    await h.on_amount_entered(make_message("10"), state, language=Language.RU)
+    confirm_callback = make_callback()
+    await h.on_comment_skipped(make_message("/skip"), state, client, language=Language.RU)
+
+    await h.on_confirm(confirm_callback, state, client, language=Language.RU)
+
+    assert confirm_callback.message.edit_text.await_args.args[0] == t(
+        Language.RU, "expense.saved", amount="10.00"
+    )
+
+
+async def test_delete_expense_confirmed_renders_in_the_injected_language() -> None:
+    expense = make_expense()
+    client = FakeBackendClient(expenses=[expense])
+    state = make_state()
+    await state.set_state(DeleteExpense.confirm)
+    await state.update_data(delete_target_id=str(expense.id))
+    callback = make_callback()
+
+    await h.on_delete_expense_confirmed(callback, state, client, language=Language.RU)
+
+    callback.message.edit_text.assert_awaited_once_with(t(Language.RU, "expense.deleted"))
+
+
+async def test_error_message_maps_status_codes_in_the_injected_language() -> None:
+    def make_error(status_code: int) -> httpx.HTTPStatusError:
+        request = httpx.Request("DELETE", "http://test/expenses/1")
+        return httpx.HTTPStatusError(
+            "boom", request=request, response=httpx.Response(status_code, request=request)
+        )
+
+    assert h._error_message(make_error(403), Language.RU) == t(Language.RU, "readonly")
+    assert h._error_message(make_error(404), Language.RU) == t(
+        Language.RU, "expense.error.staleExpense"
+    )
+    assert h._error_message(make_error(500), Language.RU) == t(
+        Language.RU, "expense.error.fallback"
+    )
 
 
 async def test_editexpense_command_reaches_edit_handler_not_amount_catchall() -> None:

@@ -756,15 +756,17 @@ and UK fall back to EN until U3.15's catalogues ship).
 | `test_falls_back_to_en_for_ru_and_uk` | `t(Language.RU/UK, key)` returns the same string as EN (no catalogue ships for either yet) |
 | `test_extra_var_with_no_matching_placeholder_is_ignored` | A `**variables` kwarg with no matching `{var}` in the template does not raise or alter the output |
 | `test_leave_unmatched_fills_a_known_var_and_leaves_an_unknown_one_literal` | `_LeaveUnmatched` fills a known `{var}` and leaves an unmatched one as the literal `{name}` text rather than dropping it |
+| `test_fills_a_var_in_a_key_added_by_u3_13` | A key added by U3.13's `bot/keyboards.py`/`expenses.py` extraction (`expense.saved`) fills its `{var}` correctly |
 
 ## Bot tests (`test_bot_handlers_common.py`) → [`bot/handlers/common.py`](../bot/handlers/common.py)
 Hermetic — no FSM state, no backend calls, so no fakes needed (U2.5 AC:
-/start and /help render).
+/start and /help render; U3.13 AC: both go through `bot/i18n.py::t()`).
 
 | Test | Checks |
 |---|---|
-| `test_start_renders_welcome_message` | `/start` sends `WELCOME_TEXT` (AC) |
-| `test_help_renders_command_list` | `/help` sends `HELP_TEXT`, which lists commands from every feature area (AC) |
+| `test_start_renders_welcome_message` | `/start` sends `t(Language.EN, "common.welcome")` (AC) |
+| `test_help_renders_command_list` | `/help` sends `t(Language.EN, "common.help")`, which lists commands from every feature area (AC) |
+| `test_start_uses_the_injected_language` | Passing `language=Language.RU` renders the RU-catalogue string (mechanism, not translated content yet — RU aliases EN until U3.15) |
 
 ## Bot tests (`test_bot_bot.py`) → [`bot/bot.py`](../bot/bot.py)
 Hermetic — no real Telegram/network; updates fed through the full dispatcher
@@ -782,7 +784,8 @@ bot-allowlist-db plan U2 AC: `create_dispatcher` takes no allowlist parameter).
 ## Bot tests (`test_bot_keyboards.py`) → [`bot/keyboards.py`](../bot/keyboards.py)
 Pure functions — no fakes needed (U4.2 AC: keyboards render expected
 callback_data; these tests lock the callback wire formats handler filters
-match on).
+match on). U3.13 AC: every button caption goes through `bot/i18n.py::t()`;
+each builder with a caption takes a `language: Language` defaulting to EN.
 
 | Test | Checks |
 |---|---|
@@ -790,16 +793,21 @@ match on).
 | `test_category_callback_round_trips_the_uuid` | `CategoryCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_tags_keyboard_renders_toggle_buttons_and_done` | One toggle button per tag (`tag:<uuid hex>`) plus a final "Done" button (`tags:done`) |
 | `test_tags_keyboard_marks_selected_tags` | Selected tags get the ✅ label prefix; callback_data stays stable so tapping toggles |
+| `test_tags_keyboard_renders_the_done_button_in_the_given_language` | Passing `language=Language.RU` renders the RU catalogue's "Done" text (mechanism check; RU aliases EN until U3.15) |
 | `test_tag_callback_round_trips_the_uuid` | `TagCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_budgets_keyboard_renders_one_button_per_plan_with_category_name` | One button per plan, text = its category's name, callback_data = `budget:<uuid hex>` (U2.2 AC) |
 | `test_budgets_keyboard_unknown_category_falls_back_to_placeholder` | A plan whose category isn't in the passed-in name map renders "Unknown" instead of a blank/crashing label |
+| `test_budgets_keyboard_unknown_category_placeholder_uses_the_given_language` | The "Unknown" fallback resolves through `t(language, ...)`, not a hardcoded literal |
 | `test_budget_callback_round_trips_the_uuid` | `BudgetCallback.pack()`/`unpack()` round-trips the UUID |
 | `test_expenses_keyboard_renders_one_button_per_item_labeled_by_caller` | One button per `(id, label)` pair, one per row, callback_data = `expense:<uuid hex>` (U2.1 AC) |
 | `test_expense_callback_round_trips_the_uuid` | `ExpenseCallback.pack()`/`unpack()` round-trips the UUID |
-| `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` |
+| `test_confirm_keyboard_renders_confirm_and_cancel` | Confirm/cancel buttons carry `expense:confirm`/`expense:cancel` and the "✅ Confirm"/"❌ Cancel" captions |
+| `test_confirm_keyboard_uses_the_given_language` | `language=Language.RU` still renders the (aliased) caption via `t()` |
 | `test_edit_field_keyboard_renders_the_four_editable_fields` | Amount/Category/Comment/Tags buttons carry the four `editfield:*` callback constants, in order (U2.1b AC) |
+| `test_edit_field_keyboard_uses_the_given_language` | `language=Language.RU` still renders the (aliased) captions via `t()` |
 | `test_statistics_keyboard_renders_presets_and_drilldown_entries` | Three period-preset buttons + "By category…"/"By tag…"/"📊 Chart" render with the locked `statperiod:*`/`statistics:by_*`/`statistics:chart` callback-data (U2.3 AC, chart button added U2.4) |
 | `test_statistics_keyboard_marks_the_active_preset_only` | Only the currently-active preset gets the ✅ label prefix |
+| `test_statistics_keyboard_uses_the_given_language` | `language=Language.RU` still renders every preset/drilldown caption via `t()` (mechanism check — this file's captions are translated even though `bot/handlers/statistics.py` itself isn't extracted until U3.14) |
 
 ## Bot tests (`test_bot_charts.py`) → [`bot/charts.py`](../bot/charts.py)
 Pure function, no fakes needed — `render_category_breakdown` takes
@@ -833,7 +841,11 @@ cleared must not issue a second `delete_expense`), and the U2.1b
 re-entry with an invalid-amount re-prompt like `/add`'s amount step;
 category re-picks via the existing `categories_keyboard`; tags reuses
 `on_tag_toggled` — generic across `AddExpense.tags`/`EditExpense.tags` — but
-pre-selects the expense's current tags instead of starting empty).
+pre-selects the expense's current tags instead of starting empty). U3.13 AC:
+every user-visible string goes through `bot/i18n.py::t()`; the handful of
+tests below the FSM/registration-order ones assert the injected `language`
+actually reaches `t()` — RU/UK alias the EN catalogue until U3.15, so they
+lock in the mechanism, not translated content.
 
 | Test | Checks |
 |---|---|
@@ -886,6 +898,10 @@ pre-selects the expense's current tags instead of starting empty).
 | `test_edit_expense_cancel_mid_flow_clears_state` | `/cancel` from `EditExpense.field` clears FSM state and data (U2.1b AC) |
 | `test_editexpense_command_reaches_edit_handler_not_amount_catchall` | Through a real `Dispatcher`: `/editexpense` while in `AddExpense.amount` reaches `cmd_edit_expense`, not the catch-all `on_amount_entered` (U2.1b AC: registration-order test) |
 | `test_cancel_command_reaches_cancel_handler_from_edit_field_state` | Through a real `Dispatcher`: `/cancel` while in `EditExpense.field` reaches `on_cancel_command` (proves the widened `StateFilter(AddExpense, DeleteExpense, EditExpense)` registration) |
+| `test_add_expense_choose_category_uses_the_injected_language` | `cmd_add_expense(..., language=Language.RU)` sends `t(Language.RU, "expense.chooseCategory")`, not the EN literal |
+| `test_confirm_saves_and_renders_in_the_injected_language` | A full add-expense walkthrough run with `language=Language.RU` renders the saved-expense message via `t(Language.RU, "expense.saved", ...)` |
+| `test_delete_expense_confirmed_renders_in_the_injected_language` | `on_delete_expense_confirmed(..., language=Language.RU)` renders the deleted-confirmation via `t(Language.RU, "expense.deleted")` |
+| `test_error_message_maps_status_codes_in_the_injected_language` | `_error_message(exc, Language.RU)` maps 403/404/other to the RU-catalogue `readonly`/`expense.error.staleExpense`/`expense.error.fallback` strings |
 
 ## Bot tests (`test_bot_handlers_categories.py`) → [`bot/handlers/categories.py`](../bot/handlers/categories.py)
 Hermetic — a `FakeCategoryBackendClient` stands in for `bot/client.py`'s

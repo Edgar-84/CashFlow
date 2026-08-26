@@ -14,6 +14,10 @@ def test_falls_back_to_en_for_ru_and_uk() -> None:
     assert t(Language.UK, "readonly") == t(Language.EN, "readonly")
 
 
+def test_fills_a_var_in_a_key_added_by_u3_13() -> None:
+    assert t(Language.EN, "expense.saved", amount="12.50") == "Expense saved: 12.50"
+
+
 def test_extra_var_with_no_matching_placeholder_is_ignored() -> None:
     assert t(Language.EN, "error.tryAgain", unused="x") == "Try again."
 

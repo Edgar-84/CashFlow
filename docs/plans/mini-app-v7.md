@@ -362,7 +362,7 @@ implementation unit may start before *its own* spec exists.
       (D707) — no extra round-trip per update; handlers receive it as injected
       data and never fetch it themselves; a cache miss falls back to `en` and
       logs, never raises.
-- [ ] **U3.13** Extract `bot/keyboards.py` + `bot/handlers/common.py` +
+- [x] **U3.13** Extract `bot/keyboards.py` + `bot/handlers/common.py` +
       `expenses.py`.
 - [ ] **U3.14** Extract `bot/handlers/categories.py` + `tags.py` +
       `budgets.py` + `statistics.py` + `bot/charts.py` labels.
@@ -582,8 +582,24 @@ touching auth or scoping goes through the reviewer subagent.
   `setLanguage`, or `t`'s shape. Flagged by the reviewer as a contract update
   that hadn't reached this section; fixed here rather than left silently
   stale for U3.5+ to stumble on.
-
-## Open questions
+- 2026-08-26: **D718** — `bot/keyboards.py`'s builder functions take
+  `language: Language = Language.EN`, defaulted rather than required, even
+  though this unit (U3.13) translates every literal in the file, including
+  `tags_keyboard`/`budgets_keyboard`/`statistics_keyboard`, whose captions
+  are called from `bot/handlers/tags.py`/`categories.py`/`budgets.py`/
+  `statistics.py` — files U3.14 owns, not this unit. The default lets those
+  not-yet-updated call sites keep compiling and rendering byte-identical EN
+  output without U3.13 reaching into their files ("no drive-by edits to
+  unrelated code" — the /unit-auto workflow's own instruction, not
+  CLAUDE.md); `bot/handlers/expenses.py`, this unit's own
+  caller, always passes the real resolved `language` explicitly, never
+  relies on the default. U3.14 closes the gap when it extracts those four
+  files: passing the real `language` into these same keyboard calls is then
+  a one-line addition alongside each file's own literal-string work, not a
+  new problem to discover. Rejected: touching `tags.py`/`budgets.py`/
+  `statistics.py` now just to thread a parameter through — would pull three
+  U3.14-owned files into this unit's diff for zero behavioural change (RU/UK
+  still alias EN until U3.15 regardless).
 - [?] **A "no literals" lint** in `scripts/verify.sh` after M3. Template-literal
   HTML makes a naive grep noisy. If M3's per-unit ACs prove insufficient, this
   becomes its own unit rather than a rushed regex.
@@ -1356,8 +1372,39 @@ touching auth or scoping goes through the reviewer subagent.
   pytest step, not by inspection. 8 new tests across `test_bot_i18n.py`
   (new) and `test_bot_middlewares.py`; `verify.sh` green (700 backend +
   874 webapp tests).
-- **Next:** `/clear`, then **U3.13** (extract `bot/keyboards.py` +
-  `bot/handlers/common.py` + `expenses.py` into the i18n catalogue).
+- **U3.13 is done**: every literal in `bot/keyboards.py`,
+  `bot/handlers/common.py` and `bot/handlers/expenses.py` now goes through
+  `bot/i18n.py::t()`. ~40 new EN keys (`common.*`, `kb.*`, `expense.*`); RU/UK
+  still alias EN (U3.15 ships real catalogues). Every handler/helper in the
+  three files takes `language: Language = Language.EN` — the default is a
+  call-site convenience only (aiogram injects the caller's real resolved
+  language by parameter name regardless of it, same mechanism `client:
+  ExpenseBackendClient` already relied on with no default; internal calls
+  within these three files always thread the real `language` through
+  explicitly, never fall through to the default). D718 (Decision log):
+  `bot/keyboards.py` is fully U3.13's to translate — including
+  `tags_keyboard`/`budgets_keyboard`/`statistics_keyboard`, whose literals
+  live in this file even though their *callers* (`tags.py`/`categories.py`/
+  `budgets.py`/`statistics.py`) are U3.14's — but those callers keep calling
+  them with no `language` argument (default EN) rather than U3.13 reaching
+  into four files it doesn't own; U3.14 threads the real language into those
+  same calls as a one-line addition alongside its own literal-string work.
+  `WELCOME_TEXT`/`HELP_TEXT` module constants are gone from `common.py`
+  (moved into `i18n.py` as `common.welcome`/`common.help`); tests that
+  referenced them now import `t`+`Language` instead. 15 new tests
+  (`test_bot_i18n.py`, `test_bot_handlers_common.py`, `test_bot_keyboards.py`,
+  `test_bot_handlers_expenses.py`) assert the language-threading *mechanism*
+  (an explicit `language=Language.RU` reaches `t()` and resolves correctly)
+  rather than translated content, since RU/UK are still EN aliases;
+  `verify.sh` green (711 backend + 874 webapp tests).
+- **Next:** `/clear`, then **U3.14** (extract
+  `bot/handlers/categories.py` + `tags.py` + `budgets.py` + `statistics.py` +
+  `bot/charts.py` labels into the i18n catalogue). Remember D718 above: when
+  touching `tags.py`/`categories.py`/`budgets.py`/`statistics.py`, also pass
+  the handler's real `language` into any `tags_keyboard`/`budgets_keyboard`/
+  `statistics_keyboard`/`categories_keyboard` call it makes — those calls
+  currently default to `Language.EN` and were deliberately left that way by
+  U3.13.
 - **Gotchas the next session must know:**
   - **Re-scan the whole file for literals after the first pass, not just the
     obvious render/copy sites.** U3.8's `budgetForm.err.planGone` was a
