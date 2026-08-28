@@ -12,6 +12,7 @@ CREATE TABLE accounts (
   owner_id   UUID,              -- set after first user is created
   currency   TEXT NOT NULL DEFAULT 'USD',  -- ISO 4217; see models.enums.Currency for the supported list
   language   TEXT NOT NULL DEFAULT 'en',   -- see models.enums.Language for the supported list
+  is_blocked BOOLEAN NOT NULL DEFAULT false, -- revokes every user in the account (D713/D714)
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -19,8 +20,9 @@ CREATE TABLE users (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tg_id      BIGINT UNIQUE NOT NULL,
   name       TEXT NOT NULL,
-  role       TEXT NOT NULL DEFAULT 'member',  -- admin | member | viewer
+  role       TEXT NOT NULL DEFAULT 'member',  -- system_admin | admin | member | viewer
   account_id UUID NOT NULL REFERENCES accounts(id),
+  is_blocked BOOLEAN NOT NULL DEFAULT false,  -- D713; independent of accounts.is_blocked (D714)
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

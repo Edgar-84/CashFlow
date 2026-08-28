@@ -24,6 +24,7 @@ class UserUpdate(BaseModel):
 class UserResponse(UserBase):
     id: UUID
     account_id: UUID
+    is_blocked: bool
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 

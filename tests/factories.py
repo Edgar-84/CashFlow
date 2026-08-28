@@ -67,7 +67,7 @@ async def make_user(
         """
         INSERT INTO users (tg_id, name, role, account_id)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, tg_id, name, role, account_id, created_at
+        RETURNING id, tg_id, name, role, account_id, is_blocked, created_at
         """,
         tg_id,
         name,

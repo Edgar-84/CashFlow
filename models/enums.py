@@ -2,6 +2,7 @@ from enum import StrEnum
 
 
 class Role(StrEnum):
+    SYSTEM_ADMIN = "system_admin"  # cross-account; see D711/D712
     ADMIN = "admin"
     MEMBER = "member"
     VIEWER = "viewer"

@@ -35,6 +35,7 @@ def admin(account_id: UUID) -> UserResponse:
         tg_id=1,
         name="Admin",
         role=Role.ADMIN,
+        is_blocked=False,
         account_id=account_id,
         created_at=datetime.now(UTC),
     )
@@ -47,6 +48,7 @@ def member(account_id: UUID) -> UserResponse:
         tg_id=2,
         name="Member",
         role=Role.MEMBER,
+        is_blocked=False,
         account_id=account_id,
         created_at=datetime.now(UTC),
     )
@@ -59,6 +61,7 @@ def viewer(account_id: UUID) -> UserResponse:
         tg_id=3,
         name="Viewer",
         role=Role.VIEWER,
+        is_blocked=False,
         account_id=account_id,
         created_at=datetime.now(UTC),
     )

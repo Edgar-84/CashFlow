@@ -377,7 +377,7 @@ implementation unit may start before *its own* spec exists.
 Every unit in M4 is written **catalogue-native** (D700) and every unit
 touching auth or scoping goes through the reviewer subagent.
 
-- [ ] **U4.1** Contracts + migration: `Role.SYSTEM_ADMIN`,
+- [x] **U4.1** Contracts + migration: `Role.SYSTEM_ADMIN`,
       `users.is_blocked`, `accounts.is_blocked`, `models/admin.py`,
       `docs/SCHEMA.sql`. **Ask the human before writing the migration file.**
       **AC:** upgrade/downgrade clean; every existing row reads back
@@ -1573,3 +1573,59 @@ touching auth or scoping goes through the reviewer subagent.
     purpose — translate the chrome *around* a formatted/named value, never
     the formatter or name table itself, unless a future unit's file list
     explicitly names that module.
+
+- **U4.1 is done**: `models/enums.py` gained `Role.SYSTEM_ADMIN`, appended
+  above the existing three members. `models/account.py::AccountResponse` and
+  `models/user.py::UserResponse` each gained `is_blocked: bool` (no Python
+  default, matching `language`'s precedent from U3.1 — every existing
+  fixture that constructs either model directly needed updating, not just
+  the three files U3.1 touched: `is_blocked=False` was added at every one of
+  the ~34 `UserResponse`/`UserMeResponse` and 4 `AccountResponse` call sites
+  across `tests/*.py`, found by grepping for the `role=`/`owner_id=None`
+  lines those constructors always include). New `models/admin.py`:
+  `AdminAccountRow`, `AdminUserRow` (both `from_attributes=True`, per the
+  contract), `AdminAccountCreate` and `BlockUpdate` — none consumed by a
+  route yet, that starts at U4.3–U4.5. `docs/SCHEMA.sql` gained
+  `accounts.is_blocked`/`users.is_blocked` (both `BOOLEAN NOT NULL DEFAULT
+  false`) and the `users.role` column comment now lists `system_admin`.
+  `api/deps.py::resolve_permission` gained an explicit `Role.SYSTEM_ADMIN`
+  branch at step 2, alongside `Role.ADMIN` — full access inside its own
+  account (D712), since this resource matrix has no cross-account concept
+  at all (that lives entirely in `api/admin.py`, starting at U4.3, per
+  D711). **`require_admin` is deliberately untouched here** — U4.2's job,
+  named explicitly by the plan as a separate unit, not this one's.
+  New/updated tests: `test_models.py::test_admin_models` (all four new
+  schemas) and its `test_enums_have_expected_members` now asserts the
+  four-member `Role` set; `test_deps.py` gained a 16-row `Role.SYSTEM_ADMIN`
+  block in `DEFAULT_MATRIX` (mirroring `Role.ADMIN`'s block exactly) and
+  `test_system_admin_ignores_override_row` (mirroring
+  `test_admin_ignores_override_row`); `test_account_repo.py`/
+  `test_user_repo.py` each gained a default-`is_blocked`-is-`False`
+  assertion against a real throwaway Postgres (`scripts/integration_docker.sh`),
+  satisfying the AC's "every existing row reads back `is_blocked = false`";
+  `tests/factories.py::make_user`'s `RETURNING` clause gained `is_blocked`
+  (the DB default supplies the value — no INSERT column needed, same as
+  `make_account`'s handling of `language`). **One gap found only by running
+  the full fast suite, not by the file list above**: `bot/client.py::get_me`
+  parses `GET /users/me`'s JSON straight into `UserMeResponse` — a name that
+  doesn't match the `UserResponse` substring search the unit's initial file
+  scan used, so it was missed until `pytest -m "not integration"` failed six
+  bot tests on a `is_blocked` "Field required" `ValidationError`. Fixed by
+  adding `"is_blocked": False` to the shared `_user_json` fixture helper in
+  both `tests/test_bot_middlewares.py` and `tests/test_bot_bot.py` (the two
+  files with their own copy of that helper) — no bot source change, since
+  `bot/` never constructs `UserMeResponse` itself, only parses it. New
+  migration `2026_08_28_1108-3573394f8c7a_add_is_blocked_columns.py`
+  (down_revision `be7167499d7d`, U3.1's head) mirrors that migration's shape:
+  two `ALTER TABLE ... ADD COLUMN is_blocked BOOLEAN NOT NULL DEFAULT false`
+  statements upgrading `accounts` then `users`, `DROP COLUMN` in reverse
+  order downgrading. Written only after asking the human, per the plan's own
+  gate on this unit and `migrations/versions/`'s do-not-edit-without-asking
+  rule. The AC's `alembic upgrade head` → `downgrade -1` round-trip was not
+  run locally — real `alembic upgrade` can't run on this dev machine (D18,
+  same as U3.1); CI's dedicated job covers it, per `test_schema_backfill.py`'s
+  docstring. What *was* run locally: the full `bash scripts/integration_docker.sh`
+  suite (94 passed) against `docs/SCHEMA.sql` applied directly via `psql`,
+  and `bash scripts/verify.sh` end to end, both green. No route behaviour
+  changed — `require_admin`, `api/admin.py` and every existing route are
+  untouched, matching the AC's explicit "no route behaviour changes yet."

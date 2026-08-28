@@ -12,6 +12,7 @@ class AccountResponse(BaseModel):
     currency: Currency
     language: Language
     owner_id: UUID | None
+    is_blocked: bool
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 

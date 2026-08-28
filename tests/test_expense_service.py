@@ -263,6 +263,7 @@ def make_caller(*, account_id: UUID, user_id: UUID | None = None) -> UserRespons
         tg_id=1,
         name="Member",
         role=Role.MEMBER,
+        is_blocked=False,
         account_id=account_id,
         created_at=datetime.now(UTC),
     )

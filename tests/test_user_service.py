@@ -33,6 +33,7 @@ class FakeUserRepo:
             tg_id=data["tg_id"],
             name=data["name"],
             role=Role(data["role"]),
+            is_blocked=False,
             account_id=data["account_id"],
             created_at=datetime.now(UTC),
         )
@@ -58,6 +59,7 @@ def make_user(*, account_id: UUID, tg_id: int = 1, role: Role = Role.MEMBER) -> 
         tg_id=tg_id,
         name="Test User",
         role=role,
+        is_blocked=False,
         account_id=account_id,
         created_at=datetime.now(UTC),
     )
