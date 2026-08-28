@@ -74,6 +74,7 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_get_returns_account_with_default_language` | An account created without an explicit language gets the schema default (`en`, U3.1 AC) |
 | `test_get_missing_returns_none` | `get()` on a missing id returns `None` |
 | `test_list_for_admin_returns_every_account_with_user_count` | `list_for_admin()` returns every account with its member count via the `LEFT JOIN users` (U4.3, D711) |
+| `test_transaction_rolls_back_cross_repo_writes_on_failure` | `BaseRepository.transaction()` composes `AccountRepository`/`UserRepository`/`CategoryRepository` writes on one shared connection; a duplicate `tg_id` partway through leaves no partial account row behind (U4.4 AC, backs `AdminService.create_account`) |
 
 ### `test_user_repo.py` → [`repositories/user_repo.py`](../repositories/user_repo.py)
 | Test | Checks |
@@ -612,11 +613,27 @@ No DB.
 | `test_no_path_variant_accepts_an_account_id` | `PATCH /accounts/{id}` → 404; there is no id-based route, only `/me` |
 | `test_update_currency_missing_credentials_is_401` | No auth headers → 401 |
 
+## Service tests (`test_admin_service.py`) → [`services/admin_service.py`](../services/admin_service.py)
+Mocked repositories, no DB. `list_accounts`/`list_users` are already covered
+end to end via `test_admin_api.py` (U4.3); this file covers `create_account`
+(U4.4). The fake `AccountRepository.transaction()` is a no-op context
+manager — it only needs to run the block so the service's own logic can be
+asserted hermetically; the real DB-level rollback guarantee is proven in
+`test_account_repo.py`'s `test_transaction_rolls_back_cross_repo_writes_on_failure`.
+
+| Test | Checks |
+|---|---|
+| `test_create_account_creates_account_owner_and_general_category` | `create_account` creates the account, an `admin`-role owner with the given `tg_id`, and a `"General"` category, returning `user_count == 1` |
+| `test_create_account_sets_owner_id_on_account_row` | The account row's `owner_id` is set to the new owner's id after creation (U4.4 AC) |
+| `test_create_account_defaults_currency_and_language` | Omitting `currency`/`language` in `AdminAccountCreate` yields `USD`/`en` |
+| `test_create_account_honours_explicit_currency_and_language` | An explicit `currency`/`language` is passed through |
+| `test_create_account_duplicate_owner_tg_id_is_conflict_not_500` | A duplicate `owner_tg_id` (`asyncpg.UniqueViolationError` from the fake) is translated to `ConflictError`, and the category write never runs |
+
 ## API/route tests (`test_admin_api.py`) → [`api/admin.py`](../api/admin.py)
-Hermetic — the real app with `AccountRepository`/`UserRepository` replaced by
-in-memory fakes via `app.dependency_overrides`. No DB. Fixtures deliberately
-seed users/accounts across **two** accounts to prove the cross-account read
-(D711).
+Hermetic — the real app with `AccountRepository`/`UserRepository`/
+`CategoryRepository` replaced by in-memory fakes via
+`app.dependency_overrides`. No DB. Fixtures deliberately seed users/accounts
+across **two** accounts to prove the cross-account read (D711).
 
 | Test | Checks |
 |---|---|
@@ -630,6 +647,11 @@ seed users/accounts across **two** accounts to prove the cross-account read
 | `test_list_users_as_member_is_403` | Member → 403 |
 | `test_list_users_missing_credentials_is_401` | No auth headers → 401 |
 | `test_list_users_blocked_system_admin_is_403_not_200` | `get_current_user`'s block gate (D713) applies here too — a suspended system admin gets 403, not the cross-account list |
+| `test_create_account_as_system_admin_returns_201` | `POST /admin/accounts` returns 201 with `user_count == 1`, default `USD`/`en`, and the fake `CategoryRepository` recorded a `"General"` create (U4.4 AC) |
+| `test_create_account_duplicate_owner_tg_id_is_409` | A duplicate `owner_tg_id` (`users.tg_id` UNIQUE) → 409, not 500 (U4.4 AC) |
+| `test_create_account_as_admin_is_403` | A plain `admin` → 403 |
+| `test_create_account_as_member_is_403` | Member → 403 |
+| `test_create_account_missing_credentials_is_401` | No auth headers → 401 |
 
 ## API/route tests (`test_permissions_api.py`) → [`api/permissions.py`](../api/permissions.py)
 Hermetic — the real app (`client`/`app` fixtures) with `PermissionRepository`/

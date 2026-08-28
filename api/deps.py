@@ -118,8 +118,9 @@ def get_account_service(
 def get_admin_service(
     account_repo: Annotated[AccountRepository, Depends(get_account_repo)],
     user_repo: Annotated[UserRepository, Depends(get_user_repo)],
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repo)],
 ) -> AdminService:
-    return AdminService(account_repo, user_repo)
+    return AdminService(account_repo, user_repo, category_repo)
 
 
 def get_permission_service(

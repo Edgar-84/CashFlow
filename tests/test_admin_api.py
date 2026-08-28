@@ -4,8 +4,10 @@ Hermetic: the real app, with AccountRepository/UserRepository replaced by
 in-memory fakes via app.dependency_overrides (tests/CLAUDE.md) — no DB.
 """
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -16,6 +18,7 @@ from test_users_api import TgLookupFakeUserRepo, auth_headers
 from api import deps
 from models.account import AccountResponse
 from models.admin import AdminAccountRow, AdminUserRow
+from models.category import CategoryResponse
 from models.enums import Currency, Language, Role
 from models.user import UserResponse
 
@@ -152,8 +155,50 @@ class AdminFakeAccountRepo:
             for a in self._accounts.values()
         ]
 
+    async def create(self, data: dict[str, Any]) -> AccountResponse:
+        account = AccountResponse(
+            id=uuid4(),
+            name=data["name"],
+            currency=Currency(data["currency"]),
+            language=Language(data["language"]),
+            owner_id=None,
+            is_blocked=False,
+            created_at=datetime.now(UTC),
+        )
+        self._accounts[account.id] = account
+        return account
 
-OverrideRepo = Callable[[], tuple[AdminFakeUserRepo, AdminFakeAccountRepo]]
+    async def update(self, id: UUID, data: dict[str, Any]) -> AccountResponse | None:
+        account = self._accounts.get(id)
+        if account is None:
+            return None
+        updated = account.model_copy(update=data)
+        self._accounts[id] = updated
+        return updated
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[None]:
+        yield
+
+
+class AdminFakeCategoryRepo:
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+
+    async def create(self, data: dict[str, Any]) -> CategoryResponse:
+        self.created.append(data)
+        return CategoryResponse(
+            id=uuid4(),
+            name=data["name"],
+            account_id=data["account_id"],
+            created_at=datetime.now(UTC),
+            is_active=True,
+            color_slot=data.get("color_slot"),
+            expense_count=None,
+        )
+
+
+OverrideRepo = Callable[[], tuple[AdminFakeUserRepo, AdminFakeAccountRepo, AdminFakeCategoryRepo]]
 
 
 @pytest.fixture
@@ -166,7 +211,7 @@ def override_repo(
     account: AccountResponse,
     other_account: AccountResponse,
 ) -> OverrideRepo:
-    def _apply() -> tuple[AdminFakeUserRepo, AdminFakeAccountRepo]:
+    def _apply() -> tuple[AdminFakeUserRepo, AdminFakeAccountRepo, AdminFakeCategoryRepo]:
         user_repo = AdminFakeUserRepo(
             [system_admin, admin, member, foreign_user],
             {account.id: account.name, other_account.id: other_account.name},
@@ -175,9 +220,11 @@ def override_repo(
             {account.id: account, other_account.id: other_account},
             {account.id: 3, other_account.id: 1},
         )
+        category_repo = AdminFakeCategoryRepo()
         app.dependency_overrides[deps.get_user_repo] = lambda: user_repo
         app.dependency_overrides[deps.get_account_repo] = lambda: account_repo
-        return user_repo, account_repo
+        app.dependency_overrides[deps.get_category_repo] = lambda: category_repo
+        return user_repo, account_repo, category_repo
 
     return _apply
 
@@ -299,9 +346,92 @@ async def test_list_users_blocked_system_admin_is_403_not_200(
 ) -> None:
     # get_current_user's block gate (D713) applies here too — a suspended
     # system admin must not reach the cross-account surface.
-    user_repo, _ = override_repo()
+    user_repo, _, _ = override_repo()
     user_repo._users[system_admin.id] = system_admin.model_copy(update={"is_blocked": True})
 
     response = await client.get("/admin/users", headers=auth_headers(system_admin.tg_id))
 
     assert response.status_code == 403
+
+
+def create_account_payload(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {"name": "New Family", "owner_tg_id": 555, "owner_name": "Owner"}
+    payload.update(overrides)
+    return payload
+
+
+async def test_create_account_as_system_admin_returns_201(
+    client: AsyncClient,
+    override_repo: OverrideRepo,
+    system_admin: UserResponse,
+) -> None:
+    _, _, category_repo = override_repo()
+
+    response = await client.post(
+        "/admin/accounts",
+        json=create_account_payload(),
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["name"] == "New Family"
+    assert body["user_count"] == 1
+    assert body["currency"] == "USD"
+    assert body["language"] == "en"
+    assert category_repo.created[0]["name"] == "General"
+
+
+async def test_create_account_duplicate_owner_tg_id_is_409(
+    client: AsyncClient,
+    override_repo: OverrideRepo,
+    system_admin: UserResponse,
+    admin: UserResponse,
+) -> None:
+    override_repo()
+
+    response = await client.post(
+        "/admin/accounts",
+        json=create_account_payload(owner_tg_id=admin.tg_id),
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 409
+
+
+async def test_create_account_as_admin_is_403(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.post(
+        "/admin/accounts",
+        json=create_account_payload(),
+        headers=auth_headers(admin.tg_id),
+    )
+
+    assert response.status_code == 403
+
+
+async def test_create_account_as_member_is_403(
+    client: AsyncClient, override_repo: OverrideRepo, member: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.post(
+        "/admin/accounts",
+        json=create_account_payload(),
+        headers=auth_headers(member.tg_id),
+    )
+
+    assert response.status_code == 403
+
+
+async def test_create_account_missing_credentials_is_401(
+    client: AsyncClient, override_repo: OverrideRepo
+) -> None:
+    override_repo()
+
+    response = await client.post("/admin/accounts", json=create_account_payload())
+
+    assert response.status_code == 401
