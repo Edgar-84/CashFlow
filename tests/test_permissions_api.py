@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from test_category_service import FakeCategoryRepo
+from test_deps import FakeAccountRepo, make_account
 from test_permission_service import FakePermissionRepo
 from test_users_api import TgLookupFakeUserRepo, auth_headers
 
@@ -94,12 +95,17 @@ def override_repos(
     member: UserResponse,
     viewer: UserResponse,
     foreign_user: UserResponse,
+    account_id: UUID,
+    other_account_id: UUID,
 ) -> OverrideRepos:
     def _apply(rows: list[PermissionResponse] | None = None) -> FakePermissionRepo:
         users = [admin, member, viewer, foreign_user]
         app.dependency_overrides[deps.get_user_repo] = lambda: TgLookupFakeUserRepo(users)
         repo = FakePermissionRepo(rows, users)
         app.dependency_overrides[deps.get_permission_repo] = lambda: repo
+        app.dependency_overrides[deps.get_account_repo] = lambda: FakeAccountRepo(
+            [make_account(account_id), make_account(other_account_id)]
+        )
         return repo
 
     return _apply

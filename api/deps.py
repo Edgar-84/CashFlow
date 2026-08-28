@@ -231,13 +231,20 @@ def validate_init_data(init_data: str, bot_token: str, max_age_sec: int) -> int:
     return int(tg_id)
 
 
+def _blocked(detail: str) -> HTTPException:
+    """A blocked caller gets 403, never 401 (D713) — a suspended family
+    member should not be told they are unregistered."""
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 async def get_current_user(
     user_repo: Annotated[UserRepository, Depends(get_user_repo)],
+    account_repo: Annotated[AccountRepository, Depends(get_account_repo)],
     x_telegram_init_data: Annotated[str | None, Header(alias="X-Telegram-Init-Data")] = None,
     x_internal_token: Annotated[str | None, Header(alias="X-Internal-Token")] = None,
     x_telegram_user_id: Annotated[str | None, Header(alias="X-Telegram-User-Id")] = None,
 ) -> UserResponse:
-    """Step 1: resolve the caller, else 401.
+    """Step 1: resolve the caller, else 401 — then the block gate (D713).
 
     Two accepted credentials, resolved in order:
     1. ``X-Telegram-Init-Data`` (Mini App) — validated via
@@ -246,6 +253,13 @@ async def get_current_user(
        before this was added. The header is declared ``str`` and parsed by
        hand: letting FastAPI coerce to ``int`` would turn a malformed header
        into a 422 instead of a 401.
+
+    Both paths converge here, so the block gate below applies identically to
+    both: a blocked user, or a user whose account is blocked, gets a 403
+    with a distinguishable detail — not the 401 an unknown/malformed
+    credential gets. ``users.is_blocked`` is checked first (no extra query);
+    ``accounts.is_blocked`` needs one (``account_id`` is FK-enforced NOT
+    NULL, so the account always resolves).
     """
     if x_telegram_init_data is not None:
         settings = get_settings()
@@ -266,7 +280,14 @@ async def get_current_user(
     users = await user_repo.list(tg_id=tg_id)
     if not users:
         raise _unauthorized("Unknown user")
-    return users[0]
+    user = users[0]
+    if user.is_blocked:
+        raise _blocked("User is suspended")
+    account = await account_repo.get(user.account_id)
+    assert account is not None
+    if account.is_blocked:
+        raise _blocked("Account is suspended")
+    return user
 
 
 def _family_today(tz: str, now: datetime | None = None) -> date:
@@ -309,9 +330,11 @@ async def require_admin(
     Those two resources have no override-row semantics in the matrix (admin:
     CRUD, everyone else: none) and aren't in the ``Resource`` enum, so
     :class:`PermissionChecker` doesn't apply here — this is a plain role
-    check instead of extending that contract.
+    check instead of extending that contract. A system admin is admitted
+    too: it behaves as ``admin`` inside its own account (D712), same as it
+    already does in :func:`resolve_permission`.
     """
-    if user.role is not Role.ADMIN:
+    if user.role not in (Role.ADMIN, Role.SYSTEM_ADMIN):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
     return user
 

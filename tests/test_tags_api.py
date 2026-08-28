@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
-from test_deps import FakePermissionRepo
+from test_deps import FakeAccountRepo, FakePermissionRepo, make_account
 from test_tag_service import FakeTagRepo
 from test_users_api import TgLookupFakeUserRepo, auth_headers
 
@@ -88,7 +88,11 @@ OverrideRepos = Callable[..., FakeTagRepo]
 
 @pytest.fixture
 def override_repos(
-    app: FastAPI, admin: UserResponse, member: UserResponse, viewer: UserResponse
+    app: FastAPI,
+    admin: UserResponse,
+    member: UserResponse,
+    viewer: UserResponse,
+    account_id: UUID,
 ) -> OverrideRepos:
     def _apply(
         tags: list[TagResponse] | None = None,
@@ -99,6 +103,9 @@ def override_repos(
             [admin, member, viewer]
         )
         app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo([])
+        app.dependency_overrides[deps.get_account_repo] = lambda: FakeAccountRepo(
+            [make_account(account_id)]
+        )
         repo = FakeTagRepo(tags, expense_counts=expense_counts)
         app.dependency_overrides[deps.get_tag_repo] = lambda: repo
         return repo

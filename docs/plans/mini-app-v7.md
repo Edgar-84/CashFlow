@@ -384,7 +384,7 @@ touching auth or scoping goes through the reviewer subagent.
       `is_blocked = false`; `resolve_permission`'s matrix has an explicit,
       tested entry for the new role (it behaves as `admin` inside its own
       account); `verify.sh` green; no route behaviour changes yet.
-- [ ] **U4.2** The block gate in `get_current_user`, and `require_admin`
+- [x] **U4.2** The block gate in `get_current_user`, and `require_admin`
       accepting a system admin.
       **AC:** a blocked user gets **403 with a distinguishable detail**, not
       401 (D713); a user in a blocked account gets the same 403 even though
@@ -1629,3 +1629,45 @@ touching auth or scoping goes through the reviewer subagent.
   and `bash scripts/verify.sh` end to end, both green. No route behaviour
   changed — `require_admin`, `api/admin.py` and every existing route are
   untouched, matching the AC's explicit "no route behaviour changes yet."
+
+- **U4.2 is done**: `api/deps.py::get_current_user` gained an `account_repo`
+  parameter and the block gate — `users.is_blocked` is checked first (no
+  extra query), then the caller's account is fetched and `accounts.is_blocked`
+  checked; either gets a `403` (`_blocked()` helper) with a distinguishable
+  detail (`"User is suspended"` / `"Account is suspended"`), never the `401`
+  an unknown/malformed credential gets (D713). Both credential paths
+  (`X-Telegram-Init-Data` and the bot's header pair) converge on this one
+  function, so both are gated identically — tested for both. `require_admin`
+  now admits `Role.SYSTEM_ADMIN` alongside `Role.ADMIN` (mirrors
+  `resolve_permission`'s step-2 D712 shape). New tests in `test_deps.py`:
+  blocked-user and blocked-account cases via both credential paths (4 tests),
+  an unblocked-user/unblocked-account control case, and three direct
+  `require_admin` tests (admin/system_admin allowed, member denied).
+  **Cross-cutting test fallout, not scope creep**: `get_current_user` is a
+  dependency of every authenticated route, so the six other API test files
+  whose hermetic `app.dependency_overrides` fixtures didn't already stub
+  `get_account_repo` (`test_budgets_api.py`, `test_categories_api.py`,
+  `test_expenses_api.py`, `test_permissions_api.py`, `test_statistics_api.py`,
+  `test_tags_api.py`) started failing with `RuntimeError: Database pool is
+  not initialized` the moment `get_current_user` needed an account lookup —
+  fixed by adding a `FakeAccountRepo` override (via `test_deps.py`'s new
+  `FakeAccountRepo`/`make_account` helpers, imported the same way those
+  files already import `FakePermissionRepo`) to each file's `override_repos`
+  fixture, seeded from their existing `account_id` fixture (and
+  `other_account_id` too, for `test_permissions_api.py`'s `foreign_user`).
+  `test_accounts_api.py`/`test_users_api.py` already had their own
+  `get_account_repo` override (needed since U0.5/`get_current_user_with_currency`)
+  and needed no change. **Known, accepted duplicate query**: `GET /users/me`
+  (`get_current_user_with_currency`) now fetches the caller's account twice
+  per request — once inside `get_current_user`'s block gate, once again for
+  currency/language/account_name — since `get_current_user` returns
+  `UserResponse`, not the account row. Left as-is: it's one extra query on
+  one route, not worth widening `get_current_user`'s return type or adding
+  a request-scoped cache for. `bash scripts/verify.sh` green end to end
+  (757 backend unit tests, up from 750; 874 webapp tests unchanged — no
+  webapp files touched) and `bash scripts/integration_docker.sh` green
+  (94 passed, unchanged — no repository/schema change this unit).
+- **Next:** `/clear`, then **U4.3** (`require_system_admin` + `api/admin.py`:
+  `GET /admin/accounts`, `GET /admin/users`). Reviewer pass required, same
+  as U4.2 (plan's own M4 rule: every unit touching auth or scoping goes
+  through the reviewer subagent).

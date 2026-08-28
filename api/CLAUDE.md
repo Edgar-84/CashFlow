@@ -44,41 +44,47 @@ Three tiers, pick the narrowest that fits the route:
 
 | Dependency | Who gets through | Use for |
 |---|---|---|
-| `Depends(get_current_user)` | Any authenticated user (any row in `users`, any role) | Endpoints with no role/resource restriction — auth only |
+| `Depends(get_current_user)` | Any authenticated, unblocked user (any row in `users`, any role) | Endpoints with no role/resource restriction — auth only |
 | `Depends(PermissionChecker(resource, action))` | Role defaults + per-user `permissions` override, per the matrix below | The 4 data resources: `expenses`, `categories`, `tags`, `budget_plans` |
-| `Depends(require_admin)` | `role == admin` only, 403 otherwise | `users`, `permissions` — no override-row/own_only concept, not in the `Resource` enum, so `PermissionChecker` doesn't apply to them |
+| `Depends(require_admin)` | `role in (admin, system_admin)`, 403 otherwise | `users`, `permissions` — no override-row/own_only concept, not in the `Resource` enum, so `PermissionChecker` doesn't apply to them |
 
 "Authenticated" always means: valid `X-Internal-Token` **and** an `X-Telegram-User-Id`
 that resolves to a row in `users`, **or** a validly signed `X-Telegram-Init-Data`
 that resolves the same way — there is no public/unauthenticated route.
+
+`get_current_user` also gates on **block status** (D713), so every dependency
+above inherits it: a blocked user, or a user whose account is blocked, gets a
+**403** with a distinguishable detail — never the 401 an unknown/malformed
+credential gets. Checked once, in one place, for both credential paths.
 
 ## Permissions — two-level model
 Level 1 (**role**): coarse-grained system access.
 Level 2 (**permission row**): per-resource CRUD flags that override role defaults.
 
 ### Roles
-| Role     | Meaning |
-|----------|---------|
-| `admin`  | Full access. Can manage users and permissions. |
-| `member` | Default. CRUD on own expenses; read-only on categories/tags/plans. Overridable via `permissions`. |
-| `viewer` | Read-only across all resources. Cannot be overridden to write. |
+| Role           | Meaning |
+|----------------|---------|
+| `system_admin` | Cross-account. Behaves as `admin` inside its own account (D712) — this matrix has no cross-account concept; that lives entirely in `api/admin.py` (D711, starting at U4.3). |
+| `admin`        | Full access. Can manage users and permissions. |
+| `member`       | Default. CRUD on own expenses; read-only on categories/tags/plans. Overridable via `permissions`. |
+| `viewer`       | Read-only across all resources. Cannot be overridden to write. |
 
 ### Default matrix
-| Resource      | admin | member (default)                | viewer |
-|---------------|-------|---------------------------------|--------|
-| expenses      | CRUD  | C · R · U(own) · D(own)         | R      |
-| categories    | CRUD  | R                               | R      |
-| tags          | CRUD  | R                               | R      |
-| budget_plans  | CRUD  | R                               | R      |
-| users         | CRUD  | —                               | —      |
-| permissions   | CRUD  | —                               | —      |
+| Resource      | system_admin | admin | member (default)                | viewer |
+|---------------|--------------|-------|---------------------------------|--------|
+| expenses      | CRUD         | CRUD  | C · R · U(own) · D(own)         | R      |
+| categories    | CRUD         | CRUD  | R                               | R      |
+| tags          | CRUD         | CRUD  | R                               | R      |
+| budget_plans  | CRUD         | CRUD  | R                               | R      |
+| users         | CRUD         | CRUD  | —                               | —      |
+| permissions   | CRUD         | CRUD  | —                               | —      |
 
 `users`/`permissions` rows are enforced by `require_admin`, not `PermissionChecker`
 — see "Choosing an auth dependency" above.
 
 ### PermissionChecker enforcement order
-1. User authenticated and linked to an account? No → **401**.
-2. Role = `admin` → allow.
+1. User authenticated, linked to an account, and neither blocked (D713)? No → **401** (not authenticated) or **403** (blocked — see "Choosing an auth dependency" above).
+2. Role = `admin` or `system_admin` → allow.
 3. Role = `viewer` and action ≠ `read` → **403**.
 4. Row exists in `permissions` for (user, resource) → use its flags.
 5. No row → apply role defaults from the matrix above.

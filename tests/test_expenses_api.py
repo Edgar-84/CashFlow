@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
-from test_deps import FakePermissionRepo
+from test_deps import FakeAccountRepo, FakePermissionRepo, make_account
 from test_expense_service import (
     FakeBudgetPlanRepo,
     FakeCategoryRepo,
@@ -105,12 +105,16 @@ def override_repos(
     other_member: UserResponse,
     viewer: UserResponse,
     category: CategoryResponse,
+    account_id: UUID,
 ) -> OverrideRepos:
     def _apply(expenses: list[ExpenseResponse] | None = None) -> FakeExpenseRepo:
         app.dependency_overrides[deps.get_user_repo] = lambda: TgLookupFakeUserRepo(
             [admin, member, other_member, viewer]
         )
         app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo([])
+        app.dependency_overrides[deps.get_account_repo] = lambda: FakeAccountRepo(
+            [make_account(account_id)]
+        )
         repo = FakeExpenseRepo(expenses)
         app.dependency_overrides[deps.get_expense_repo] = lambda: repo
         # get_expense_service also wires budget_plan_repo/category_repo (for
