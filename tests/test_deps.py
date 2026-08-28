@@ -25,11 +25,13 @@ from api.deps import (
     PermissionDecision,
     _family_today,
     enforce_ownership,
+    require_admin,
     resolve_permission,
     validate_init_data,
 )
 from config import get_settings
-from models.enums import Action, Resource, Role
+from models.account import AccountResponse
+from models.enums import Action, Currency, Language, Resource, Role
 from models.permission import PermissionResponse
 from models.user import UserResponse
 
@@ -48,14 +50,26 @@ def test_family_today_resolves_in_the_given_timezone_not_utc() -> None:
 # --- helpers -----------------------------------------------------------------
 
 
-def make_user(role: Role, tg_id: int = 100) -> UserResponse:
+def make_user(role: Role, tg_id: int = 100, *, is_blocked: bool = False) -> UserResponse:
     return UserResponse(
         id=uuid4(),
         tg_id=tg_id,
         name=f"{role.value}-user",
         role=role,
-        is_blocked=False,
+        is_blocked=is_blocked,
         account_id=uuid4(),
+        created_at=datetime.now(UTC),
+    )
+
+
+def make_account(account_id: UUID, *, is_blocked: bool = False) -> AccountResponse:
+    return AccountResponse(
+        id=account_id,
+        name="Test Account",
+        currency=Currency.USD,
+        language=Language.EN,
+        owner_id=None,
+        is_blocked=is_blocked,
         created_at=datetime.now(UTC),
     )
 
@@ -111,6 +125,14 @@ class FakePermissionRepo:
         self, user_id: UUID, resource: Resource
     ) -> PermissionResponse | None:
         return self._rows.get((user_id, resource))
+
+
+class FakeAccountRepo:
+    def __init__(self, accounts: list[AccountResponse]) -> None:
+        self._accounts = {a.id: a for a in accounts}
+
+    async def get(self, account_id: UUID) -> AccountResponse | None:
+        return self._accounts.get(account_id)
 
 
 # --- steps 2–5: full default matrix (3 roles × 4 resources × 4 actions) ------
@@ -381,7 +403,11 @@ def test_validate_init_data_rejects_wrong_bot_token() -> None:
 # --- HTTP surface: token + header 401s, checker wiring ------------------------
 
 
-def build_app(users: list[UserResponse], rows: list[PermissionResponse]) -> FastAPI:
+def build_app(
+    users: list[UserResponse],
+    rows: list[PermissionResponse],
+    accounts: list[AccountResponse],
+) -> FastAPI:
     app = FastAPI()
 
     read_checker = PermissionChecker(Resource.EXPENSES, Action.READ)
@@ -411,6 +437,7 @@ def build_app(users: list[UserResponse], rows: list[PermissionResponse]) -> Fast
 
     app.dependency_overrides[deps.get_user_repo] = lambda: FakeUserRepo(users)
     app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo(rows)
+    app.dependency_overrides[deps.get_account_repo] = lambda: FakeAccountRepo(accounts)
     return app
 
 
@@ -429,6 +456,7 @@ async def http_client(member: UserResponse, viewer: UserResponse) -> AsyncIterat
     app = build_app(
         users=[member, viewer],
         rows=[make_permission_row(viewer.id, Resource.CATEGORIES)],
+        accounts=[make_account(member.account_id), make_account(viewer.account_id)],
     )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -480,6 +508,89 @@ async def test_unknown_tg_id_is_401(http_client: AsyncClient) -> None:
     assert response.status_code == 401
 
 
+# --- block gate (D713): blocked user / blocked account ------------------------
+
+
+async def test_blocked_user_is_403_not_401_via_header_pair() -> None:
+    blocked = make_user(Role.MEMBER, tg_id=300, is_blocked=True)
+    app = build_app(users=[blocked], rows=[], accounts=[make_account(blocked.account_id)])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/expenses", headers=auth_headers(300))
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "User is suspended"
+
+
+async def test_blocked_user_is_403_via_init_data() -> None:
+    blocked = make_user(Role.MEMBER, tg_id=300, is_blocked=True)
+    app = build_app(users=[blocked], rows=[], accounts=[make_account(blocked.account_id)])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/expenses", headers=init_data_headers(300))
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "User is suspended"
+
+
+async def test_user_in_blocked_account_is_403_even_though_user_is_not() -> None:
+    user = make_user(Role.MEMBER, tg_id=400, is_blocked=False)
+    app = build_app(
+        users=[user], rows=[], accounts=[make_account(user.account_id, is_blocked=True)]
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/expenses", headers=auth_headers(400))
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Account is suspended"
+
+
+async def test_user_in_blocked_account_is_403_via_init_data() -> None:
+    user = make_user(Role.MEMBER, tg_id=400, is_blocked=False)
+    app = build_app(
+        users=[user], rows=[], accounts=[make_account(user.account_id, is_blocked=True)]
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/expenses", headers=init_data_headers(400))
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Account is suspended"
+
+
+async def test_unblocked_user_in_unblocked_account_is_unaffected(
+    http_client: AsyncClient, member: UserResponse
+) -> None:
+    # member/viewer fixtures and their accounts are both unblocked by default.
+    response = await http_client.get("/expenses", headers=auth_headers(100))
+
+    assert response.status_code == 200
+
+
+# --- require_admin: system_admin admitted (U4.2) ------------------------------
+
+
+async def test_require_admin_allows_admin() -> None:
+    user = make_user(Role.ADMIN)
+
+    assert await require_admin(user) is user
+
+
+async def test_require_admin_allows_system_admin() -> None:
+    user = make_user(Role.SYSTEM_ADMIN)
+
+    assert await require_admin(user) is user
+
+
+async def test_require_admin_denies_member() -> None:
+    user = make_user(Role.MEMBER)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await require_admin(user)
+    assert exc_info.value.status_code == 403
+
+
 async def test_member_can_read_expenses(http_client: AsyncClient, member: UserResponse) -> None:
     response = await http_client.get("/expenses", headers=auth_headers(100))
 
@@ -509,6 +620,7 @@ async def test_checker_consults_permission_row(member: UserResponse, viewer: Use
     app = build_app(
         users=[member, viewer],
         rows=[make_permission_row(member.id, Resource.EXPENSES, can_read=False)],
+        accounts=[make_account(member.account_id), make_account(viewer.account_id)],
     )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

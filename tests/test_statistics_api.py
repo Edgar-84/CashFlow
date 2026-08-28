@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
-from test_deps import FakePermissionRepo
+from test_deps import FakeAccountRepo, FakePermissionRepo, make_account
 from test_statistics_service import FakeExpensePeriodRepo, make_expense
 from test_users_api import TgLookupFakeUserRepo, auth_headers
 
@@ -75,13 +75,20 @@ OverrideRepos = Callable[..., FakeExpensePeriodRepo]
 
 @pytest.fixture
 def override_repos(
-    app: FastAPI, member: UserResponse, other_member: UserResponse, viewer: UserResponse
+    app: FastAPI,
+    member: UserResponse,
+    other_member: UserResponse,
+    viewer: UserResponse,
+    account_id: UUID,
 ) -> OverrideRepos:
     def _apply(expenses: list[ExpenseResponse] | None = None) -> FakeExpensePeriodRepo:
         app.dependency_overrides[deps.get_user_repo] = lambda: TgLookupFakeUserRepo(
             [member, other_member, viewer]
         )
         app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo([])
+        app.dependency_overrides[deps.get_account_repo] = lambda: FakeAccountRepo(
+            [make_account(account_id)]
+        )
         repo = FakeExpensePeriodRepo(expenses)
         app.dependency_overrides[deps.get_expense_repo] = lambda: repo
         return repo

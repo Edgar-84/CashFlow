@@ -13,7 +13,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from test_budget_service import FakeBudgetPlanRepo, FakeCategoryRepo, FakeExpenseSumRepo
-from test_deps import FakePermissionRepo
+from test_deps import FakeAccountRepo, FakePermissionRepo, make_account
 from test_users_api import TgLookupFakeUserRepo, auth_headers
 
 from api import deps
@@ -103,6 +103,7 @@ def override_repos(
     member: UserResponse,
     viewer: UserResponse,
     category: CategoryResponse,
+    account_id: UUID,
 ) -> OverrideRepos:
     def _apply(
         plans: list[BudgetPlanResponse] | None = None,
@@ -114,6 +115,9 @@ def override_repos(
             [admin, member, viewer]
         )
         app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo([])
+        app.dependency_overrides[deps.get_account_repo] = lambda: FakeAccountRepo(
+            [make_account(account_id)]
+        )
         repo = FakeBudgetPlanRepo(plans, duplicate_ids=duplicate_ids)
         app.dependency_overrides[deps.get_budget_plan_repo] = lambda: repo
         app.dependency_overrides[deps.get_expense_repo] = lambda: FakeExpenseSumRepo(sums)
