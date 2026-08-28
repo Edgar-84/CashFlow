@@ -411,7 +411,7 @@ touching auth or scoping goes through the reviewer subagent.
       `users.is_blocked` (one flag, one place — D714); unblocking restores
       exactly the users who were not individually blocked; a system admin
       cannot block themselves or their own account (422, tested).
-- [ ] **U4.6** The bot's suspended path.
+- [x] **U4.6** The bot's suspended path.
       **AC:** a blocked caller gets the suspended message in the account's
       language, not silence and not a stack trace; the allow-cache's TTL can
       delay that *message* by up to `ttl_ok`, but no backend call ever succeeds
@@ -1816,4 +1816,53 @@ touching auth or scoping goes through the reviewer subagent.
   delete route exists on `users`/`accounts` today); the coverage-gap NIT
   (no test proved a system admin can unblock themselves) was closed by
   `test_system_admin_can_unblock_themselves`.
-- **Next:** `/clear`, then **U4.6** (the bot's suspended path).
+- **U4.6 is done**: `AllowlistMiddleware`'s probe (`bot/middlewares.py`)
+  distinguishes a 403 (blocked, D713) from every other probe failure —
+  `client.get_me()` already only swallows a clean 401 into `None`, so a 403
+  reached the pre-existing broad `except Exception` and was silently dropped
+  exactly like a transport error or a 5xx, which is precisely the "silence"
+  U4.6's AC rules out. A new `except httpx.HTTPStatusError` branch, checked
+  before that broad except, catches the 403 specifically, caches a third
+  verdict state (`blocked`, alongside the existing `allowed`) in the same
+  per-tg_id cache entry with `ttl_deny`, and sends the caller
+  `bot/i18n.py`'s new `common.suspended` key — a single message covering
+  both an individually-blocked user and a blocked account (the 403's own
+  detail string distinguishes the two but the AC never asked the copy to),
+  reusing `docs/ui/screens/10-admin.md`'s `suspended.title`/`suspended.body`
+  wording (that spec explicitly left "which screen renders it" open for
+  whichever M4 unit wires the 403 through — this is that unit, for the bot
+  surface). The message needs the caller's real language, but a 403 body
+  carries none, so the middleware also keeps a small, independently-evicted
+  `_last_language: dict[int, Language]` populated on every successful probe
+  (not gated by TTL) — a caller blocked after being previously allowed is
+  messaged in the language their last good probe resolved; a caller blocked
+  before ever succeeding once falls back to `Language.EN`, the same fallback
+  `_resolve_language` already gives a denied (401) caller. A cached `blocked`
+  verdict re-sends the message on every subsequent update while it stands
+  (a suspension, not a one-time notice), with no second probe inside
+  `ttl_deny` — mirroring how a cached `allowed`/`denied` verdict already
+  avoids re-probing. Message delivery is duck-typed off the update
+  (`event.message` or `event.callback_query.message`), not
+  `isinstance`-checked against `aiogram.types.Update`, so it degrades to a
+  silent drop (not a crash) for an update shape with nothing to answer, and
+  a failure to *send* the notice is caught and logged rather than raised
+  (bot/CLAUDE.md: never a raw traceback). D715's own risk note already
+  covers the one thing this unit deliberately leaves alone: an
+  already-cached *allowed* caller who gets blocked keeps reaching handlers
+  for up to `ttl_ok` (five minutes), and every backend call they make in
+  that window still gets a live, immediate 403 from `get_current_user`
+  (D713) — surfaced through each handler's own generic error mapping
+  (`readonly`, not `common.suspended`), a confusing message, never access.
+  Fixing that message's wording for the mid-`ttl_ok` case would mean every
+  handler's error mapping learning about blocking, which is out of this
+  unit's scope per D715's own accepted-not-engineered-around framing; the
+  AC itself says to test the 403, not the message timing. New tests: 8
+  hermetic cases in `tests/test_bot_middlewares.py` — dropped-with-message,
+  no backend call beyond the probe, real-language-via-`_last_language`,
+  repeated notice with no second probe within `ttl_deny`, callback-query
+  delivery, no-respondable-message-is-a-silent-drop, and the `WARNING` log.
+  `bash scripts/verify.sh` green end to end (809 backend unit tests, up
+  from 802; 874 webapp tests unchanged — no webapp files touched, matching
+  the AC's bot-only scope).
+- **Next:** `/clear`, then **U4.7** (Mini App admin screen: the accounts and
+  users lists).
