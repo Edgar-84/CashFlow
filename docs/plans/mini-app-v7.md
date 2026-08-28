@@ -416,7 +416,7 @@ touching auth or scoping goes through the reviewer subagent.
       language, not silence and not a stack trace; the allow-cache's TTL can
       delay that *message* by up to `ttl_ok`, but no backend call ever succeeds
       in that window (D715) — a test asserts the 403, not the message timing.
-- [ ] **U4.7** Mini App admin screen: the accounts and users lists.
+- [x] **U4.7** Mini App admin screen: the accounts and users lists.
       **AC:** matches U0.5's spec; loading, empty, error and offline states all
       render; a non-system-admin reaching the route directly sees the 403
       state, not a blank screen.
@@ -1864,5 +1864,93 @@ touching auth or scoping goes through the reviewer subagent.
   `bash scripts/verify.sh` green end to end (809 backend unit tests, up
   from 802; 874 webapp tests unchanged — no webapp files touched, matching
   the AC's bot-only scope).
-- **Next:** `/clear`, then **U4.7** (Mini App admin screen: the accounts and
-  users lists).
+- **U4.7 is done**: new `webapp/src/screens/admin.ts` (List mode only, per
+  this unit's own narrower AC — the block/unblock flow is U4.8, the
+  create-account form and its MainButton are U4.9, the side-menu entry point
+  is U4.10; none of those exist yet, so this screen isn't reachable from
+  `main.ts` in this unit, matching task-methodology's "pure rendering before
+  wiring" decomposition order). Same three-layer split as every other
+  screen: `loadAdmin` (`GET /users/me` for the caller's own ids, plus
+  `GET /admin/accounts`/`GET /admin/users` in parallel, U4.3) resolves to
+  `loading`/`forbidden`/`error`/`ready` — `forbidden` is a *real* top-level
+  state here, unlike `settings.ts`/`language.ts`'s inline admin-gate
+  sub-case, because this screen's own data calls are server-gated by
+  `require_system_admin` and a `ForbiddenError` from either is caught the
+  same way `budgets.ts::loadBudgets` already catches its own role gate; this
+  screen has no cache (screen doc's States table: "this screen never caches
+  its data locally"), so a network/offline failure resolves to the same
+  `error` state as any other failure, with no separate `offline` status.
+  `buildAccountRowView`/`buildUserRowView` are pure row-model builders (own
+  unit tests, no DOM) computing the Suspended badge, the meta line and the
+  disabled-trigger reason exactly per the screen doc's Anatomy — a user is
+  suspended when either their own `is_blocked` or their account's row
+  (already loaded, `blockedAccountIds`) is blocked (D714), but the trigger's
+  own **label and colour follow the user's own `is_blocked` only**
+  (`ownBlocked`, kept as its own field distinct from `isSuspended` after a
+  self-review caught the two being conflated — an account-blocked-but-not-
+  individually-blocked user's row was briefly rendering an "Unblock" trigger
+  it shouldn't have). One implementation choice beyond the spec's own
+  `[inferred]`: the suspended-via-account join uses `AdminUserRow.account_id`
+  against `blockedAccountIds`' id set, not the `account_name` string match
+  the screen doc's prose suggests — both `AdminUserRow` and `AdminAccountRow`
+  already carry `account_id` (Contracts section), and matching by id is
+  strictly more correct than by name (two accounts could share a display
+  name) with no extra cost, so this isn't flagged as a fresh `[?]`. The
+  trigger `<button>`s render with the correct label/colour/disabled state
+  per row but carry **no click handler** in this unit's `mount()` — U4.8
+  wires the confirm popup and the `PATCH`, per the plan's own unit split.
+  `webapp/src/api/types.ts::Role` widened from three members to four
+  (`"system_admin"` added, D710) — the one contract touch this unit needed,
+  since `AdminUserRow.role` can hold it; new `AdminAccountRow`/`AdminUserRow`
+  interfaces mirror `models/admin.py` verbatim (U4.1's contract).
+  `client.ts` gained `listAdminAccounts()`/`listAdminUsers()` only — the
+  three other admin endpoints (`POST /admin/accounts`,
+  `PATCH /admin/accounts/{id}/block`, `PATCH /admin/users/{id}/block`) are
+  added by the units that actually call them (U4.8/U4.9), not pre-added
+  here as dead client methods. Written catalogue-native (D700): 19 new keys
+  (`admin.*`) added to all three catalogues in the same change, including a
+  `admin.role.*` set translating `AdminUserRow.role` for the meta line — a
+  role name is as user-visible as any other string on this screen. A new
+  `.sr-only` utility class was added to `app.css` (this app's first use of a
+  visually-hidden-but-screen-reader-reachable node) for the disabled
+  trigger's `aria-describedby` target, per the screen doc's Accessibility
+  section; every other visual value reuses `.card`'s 14px radius and
+  `.row`'s `10px 13px` padding verbatim from `07-tags.md`, and the blocked-row
+  60% opacity from `06-categories.md`'s archived rows — no new
+  design-system token. New `webapp/tests/admin.test.ts` (32 cases):
+  `loadAdmin`'s four states including both admin endpoints' 403 mapping
+  independently; `buildAccountRowView`/`buildUserRowView` covering the
+  singular/plural meta split, the self-disable and account-blocked-disable
+  reasons (including the self-takes-precedence case when a caller's own
+  account is somehow blocked), and the ownBlocked-vs-isSuspended trigger
+  divergence; `renderAdmin` for all four states plus the empty-lists
+  no-crash case; RU/UK translation spot checks. `bash scripts/verify.sh`
+  green end to end (809 backend unit tests, unchanged — no backend file
+  touched; 906 webapp tests, up from 874). **Reviewer pass (round 1)
+  returned changes-requested**, one blocking WARN plus two non-blocking
+  ones, all addressed: the blocking one — `.admin-eyebrow--users`'s
+  `margin-top: 24px` double-counted `.admin-view`'s own `12px` flex `gap`,
+  landing 36px between sections instead of the screen doc's documented 24px
+  — fixed to `margin-top: 12px`, the same arithmetic
+  `.settings-language-section` already uses for its own 24px gap (comment
+  added alongside it). The two non-blocking WARNs: `docs/ui/screens/
+  10-admin.md`'s `user.meta` Copy row now states `{role}` is a localized
+  label, not the raw enum value; and `api/types.ts::Role`'s own comment,
+  which had wrongly implied `UserResponse.role`/`UserMeResponse.role` read
+  back as `"admin"` for a system admin, was corrected to state that they
+  pass the DB column through verbatim (`"system_admin"`, confirmed against
+  `api/deps.py::get_current_user_with_currency`) — only the permission
+  matrix treats the two as equivalent (D712), not the field's value. That
+  correction surfaced a real pre-existing gap (`settings.ts`/`language.ts`/
+  `expense-detail.ts` all gate on strict `role === "admin"`, so a system
+  admin is today treated as a non-admin/non-owner on their own account's
+  Settings/Language screen and on expense edit permission) — out of this
+  unit's file list to fix, recorded as a new `[?]` in `10-admin.md`'s Open
+  questions for whichever unit next touches one of those three files. The
+  NIT (disabled-trigger tests asserting the reason text and the `disabled`
+  attribute separately, never that `aria-describedby` actually resolves to
+  the reason span's own `id`) was closed by rewriting both self-disable
+  tests to assert the exact `id`/`aria-describedby` pairing. Re-verified
+  green after all fixes (906 webapp tests, typecheck/lint/build clean).
+- **Next:** `/clear`, then **U4.8** (Mini App admin screen: the block
+  toggles).

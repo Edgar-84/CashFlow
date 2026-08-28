@@ -14,6 +14,8 @@ import type { PeriodQuery } from "../lib/period";
 import type {
   AccountResponse,
   AccountUpdate,
+  AdminAccountRow,
+  AdminUserRow,
   BudgetPlanCreate,
   BudgetPlanResponse,
   BudgetPlanUpdate,
@@ -322,5 +324,18 @@ export class ApiClient {
 
   statisticsByTag(query: StatisticsQuery = {}): Promise<TagTotal[]> {
     return this.request<TagTotal[]>("GET", "/statistics/by-tag", { params: query as QueryParams });
+  }
+
+  // -- admin (`screens/admin.ts`, U4.7) -----------------------------------
+  // Cross-account (D711); both 403 for every caller but `system_admin`
+  // (`require_system_admin`, U4.3) — `screens/admin.ts::loadAdmin` maps that
+  // into the screen's own `forbidden` state via `ForbiddenError`.
+
+  listAdminAccounts(): Promise<AdminAccountRow[]> {
+    return this.request<AdminAccountRow[]>("GET", "/admin/accounts");
+  }
+
+  listAdminUsers(): Promise<AdminUserRow[]> {
+    return this.request<AdminUserRow[]>("GET", "/admin/users");
   }
 }

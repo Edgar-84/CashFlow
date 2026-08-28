@@ -276,6 +276,29 @@ const en = {
   "colorPicker.colour": "Colour",
   "colorPicker.more": "More colours",
   "colorPicker.selected": "{name}, selected",
+  // U4.7 (screens/admin.ts, docs/ui/screens/10-admin.md). List mode only —
+  // the create-account form (U4.9), its confirm popups and the block/unblock
+  // confirm popups (U4.8) add their own keys in those units. Written
+  // catalogue-native (D700): all three languages ship in this same unit.
+  "admin.title": "Admin",
+  "admin.section.accounts": "Accounts",
+  "admin.section.users": "Users",
+  "admin.account.meta.one": "{currency} · {language} · 1 user",
+  "admin.account.meta.many": "{currency} · {language} · {n} users",
+  "admin.account.suspended": "Suspended",
+  "admin.user.meta": "{accountName} · {role} · tg_id {tgId}",
+  "admin.user.suspended": "Suspended",
+  "admin.trigger.block": "Block",
+  "admin.trigger.unblock": "Unblock",
+  "admin.disabled.selfAccount": "You can't block your own account.",
+  "admin.disabled.selfUser": "You can't block yourself.",
+  "admin.disabled.accountBlocked": "This account is suspended — unblock the account to change this user.",
+  "admin.errLoad": "Couldn't load the admin panel.",
+  "admin.forbidden": "This page is for system admins only.",
+  "admin.role.system_admin": "System Admin",
+  "admin.role.admin": "Admin",
+  "admin.role.member": "Member",
+  "admin.role.viewer": "Viewer",
 } as const;
 
 export type Catalogue = Record<keyof typeof en, string>;
@@ -491,6 +514,25 @@ const ru: Catalogue = {
   "colorPicker.colour": "Цвет",
   "colorPicker.more": "Больше цветов",
   "colorPicker.selected": "{name}, выбрано",
+  "admin.title": "Администрирование",
+  "admin.section.accounts": "Аккаунты",
+  "admin.section.users": "Пользователи",
+  "admin.account.meta.one": "{currency} · {language} · 1 пользователь",
+  "admin.account.meta.many": "{currency} · {language} · {n} пользователей",
+  "admin.account.suspended": "Заблокирован",
+  "admin.user.meta": "{accountName} · {role} · tg_id {tgId}",
+  "admin.user.suspended": "Заблокирован",
+  "admin.trigger.block": "Заблокировать",
+  "admin.trigger.unblock": "Разблокировать",
+  "admin.disabled.selfAccount": "Вы не можете заблокировать свой аккаунт.",
+  "admin.disabled.selfUser": "Вы не можете заблокировать себя.",
+  "admin.disabled.accountBlocked": "Этот аккаунт заблокирован — сначала разблокируйте аккаунт, чтобы изменить этого пользователя.",
+  "admin.errLoad": "Не удалось загрузить панель администратора.",
+  "admin.forbidden": "Эта страница только для системных администраторов.",
+  "admin.role.system_admin": "Системный администратор",
+  "admin.role.admin": "Администратор",
+  "admin.role.member": "Участник",
+  "admin.role.viewer": "Наблюдатель",
 };
 
 const uk: Catalogue = {
@@ -704,6 +746,25 @@ const uk: Catalogue = {
   "colorPicker.colour": "Колір",
   "colorPicker.more": "Більше кольорів",
   "colorPicker.selected": "{name}, вибрано",
+  "admin.title": "Адміністрування",
+  "admin.section.accounts": "Акаунти",
+  "admin.section.users": "Користувачі",
+  "admin.account.meta.one": "{currency} · {language} · 1 користувач",
+  "admin.account.meta.many": "{currency} · {language} · {n} користувачів",
+  "admin.account.suspended": "Заблоковано",
+  "admin.user.meta": "{accountName} · {role} · tg_id {tgId}",
+  "admin.user.suspended": "Заблоковано",
+  "admin.trigger.block": "Заблокувати",
+  "admin.trigger.unblock": "Розблокувати",
+  "admin.disabled.selfAccount": "Ви не можете заблокувати свій акаунт.",
+  "admin.disabled.selfUser": "Ви не можете заблокувати себе.",
+  "admin.disabled.accountBlocked": "Цей акаунт заблоковано — спершу розблокуйте акаунт, щоб змінити цього користувача.",
+  "admin.errLoad": "Не вдалося завантажити панель адміністратора.",
+  "admin.forbidden": "Ця сторінка лише для системних адміністраторів.",
+  "admin.role.system_admin": "Системний адміністратор",
+  "admin.role.admin": "Адміністратор",
+  "admin.role.member": "Учасник",
+  "admin.role.viewer": "Спостерігач",
 };
 
 // Exported (not just module-private) so `tests/i18n.test.ts` can assert the
