@@ -21,14 +21,17 @@ from models.account import AccountResponse
 from models.admin import AdminAccountCreate, AdminAccountRow, AdminUserRow
 from models.category import CategoryResponse
 from models.enums import Currency, Language, Role
-from models.errors import ConflictError
+from models.errors import ConflictError, NotFoundError
 from models.user import UserResponse
 from services.admin_service import AdminService
 
 
 class FakeAccountRepo:
-    def __init__(self) -> None:
-        self._accounts: dict[UUID, AccountResponse] = {}
+    def __init__(self, accounts: list[AccountResponse] | None = None) -> None:
+        self._accounts: dict[UUID, AccountResponse] = {a.id: a for a in (accounts or [])}
+
+    async def get(self, id: UUID) -> AccountResponse | None:
+        return self._accounts.get(id)
 
     async def list_for_admin(self) -> list[AdminAccountRow]:
         raise NotImplementedError("not exercised by these tests")
@@ -60,9 +63,15 @@ class FakeAccountRepo:
 
 
 class FakeUserRepo:
-    def __init__(self, existing_tg_ids: set[int] | None = None) -> None:
+    def __init__(
+        self, existing_tg_ids: set[int] | None = None, users: list[UserResponse] | None = None
+    ) -> None:
         self._existing_tg_ids: set[int] = set(existing_tg_ids or set())
+        self._users: dict[UUID, UserResponse] = {u.id: u for u in (users or [])}
         self.created: list[dict[str, Any]] = []
+
+    async def get(self, id: UUID) -> UserResponse | None:
+        return self._users.get(id)
 
     async def list_for_admin(self) -> list[AdminUserRow]:
         raise NotImplementedError("not exercised by these tests")
@@ -81,6 +90,14 @@ class FakeUserRepo:
             account_id=data["account_id"],
             created_at=datetime.now(UTC),
         )
+
+    async def update(self, id: UUID, data: dict[str, Any]) -> UserResponse | None:
+        user = self._users.get(id)
+        if user is None:
+            return None
+        updated = user.model_copy(update=data)
+        self._users[id] = updated
+        return updated
 
 
 class FakeCategoryRepo:
@@ -159,3 +176,129 @@ async def test_create_account_duplicate_owner_tg_id_is_conflict_not_500() -> Non
 
     # Stops before the category write once the owner insert fails.
     assert category_repo.created == []
+
+
+def make_account(**overrides: Any) -> AccountResponse:
+    payload: dict[str, Any] = {
+        "id": uuid4(),
+        "name": "Family",
+        "currency": Currency.USD,
+        "language": Language.EN,
+        "owner_id": None,
+        "is_blocked": False,
+        "created_at": datetime.now(UTC),
+    }
+    payload.update(overrides)
+    return AccountResponse(**payload)
+
+
+def make_user(**overrides: Any) -> UserResponse:
+    payload: dict[str, Any] = {
+        "id": uuid4(),
+        "tg_id": 1,
+        "name": "User",
+        "role": Role.MEMBER,
+        "is_blocked": False,
+        "account_id": uuid4(),
+        "created_at": datetime.now(UTC),
+    }
+    payload.update(overrides)
+    return UserResponse(**payload)
+
+
+async def test_block_user_sets_is_blocked() -> None:
+    target = make_user()
+    caller = make_user()
+    user_repo = FakeUserRepo(users=[target, caller])
+    service = AdminService(FakeAccountRepo(), user_repo, FakeCategoryRepo())
+
+    updated = await service.block_user(target.id, True, caller)
+
+    assert updated.is_blocked is True
+
+
+async def test_unblock_user_clears_is_blocked() -> None:
+    target = make_user(is_blocked=True)
+    caller = make_user()
+    user_repo = FakeUserRepo(users=[target, caller])
+    service = AdminService(FakeAccountRepo(), user_repo, FakeCategoryRepo())
+
+    updated = await service.block_user(target.id, False, caller)
+
+    assert updated.is_blocked is False
+
+
+async def test_block_user_missing_is_not_found() -> None:
+    caller = make_user()
+    service = AdminService(FakeAccountRepo(), FakeUserRepo(users=[caller]), FakeCategoryRepo())
+
+    with pytest.raises(NotFoundError):
+        await service.block_user(uuid4(), True, caller)
+
+
+async def test_system_admin_cannot_block_themselves() -> None:
+    caller = make_user()
+    service = AdminService(FakeAccountRepo(), FakeUserRepo(users=[caller]), FakeCategoryRepo())
+
+    with pytest.raises(ValueError):
+        await service.block_user(caller.id, True, caller)
+
+
+async def test_system_admin_can_unblock_themselves() -> None:
+    # The guard is direction-only (blocking, not unblocking) — a caller who
+    # somehow ended up blocked (e.g. individually, before becoming a system
+    # admin) is not permanently stuck.
+    caller = make_user(is_blocked=True)
+    service = AdminService(FakeAccountRepo(), FakeUserRepo(users=[caller]), FakeCategoryRepo())
+
+    updated = await service.block_user(caller.id, False, caller)
+
+    assert updated.is_blocked is False
+
+
+async def test_block_account_sets_is_blocked_only_not_users() -> None:
+    account = make_account()
+    caller = make_user(account_id=uuid4())  # a different account than the target
+    member = make_user(account_id=account.id)  # a member of the account being blocked
+    account_repo = FakeAccountRepo([account])
+    user_repo = FakeUserRepo(users=[caller, member])
+    service = AdminService(account_repo, user_repo, FakeCategoryRepo())
+
+    updated = await service.block_account(account.id, True, caller)
+
+    assert updated.is_blocked is True
+    # D714: blocking an account never writes users.is_blocked, even for a
+    # user who belongs to the account just blocked.
+    member_row = await user_repo.get(member.id)
+    assert member_row is not None
+    assert member_row.is_blocked is False
+
+
+async def test_unblock_account_clears_is_blocked() -> None:
+    account = make_account(is_blocked=True)
+    caller = make_user(account_id=uuid4())
+    account_repo = FakeAccountRepo([account])
+    service = AdminService(account_repo, FakeUserRepo(users=[caller]), FakeCategoryRepo())
+
+    updated = await service.block_account(account.id, False, caller)
+
+    assert updated.is_blocked is False
+
+
+async def test_block_account_missing_is_not_found() -> None:
+    caller = make_user()
+    service = AdminService(FakeAccountRepo(), FakeUserRepo(users=[caller]), FakeCategoryRepo())
+
+    with pytest.raises(NotFoundError):
+        await service.block_account(uuid4(), True, caller)
+
+
+async def test_system_admin_cannot_block_their_own_account() -> None:
+    caller = make_user()
+    account = make_account(id=caller.account_id)
+    service = AdminService(
+        FakeAccountRepo([account]), FakeUserRepo(users=[caller]), FakeCategoryRepo()
+    )
+
+    with pytest.raises(ValueError):
+        await service.block_account(account.id, True, caller)

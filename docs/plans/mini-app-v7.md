@@ -405,7 +405,7 @@ touching auth or scoping goes through the reviewer subagent.
       UNIQUE); a failure anywhere leaves no partial account behind (tested);
       the created account is immediately usable by the new user with no bot
       restart; `owner_id` is set on the account row.
-- [ ] **U4.5** `PATCH /admin/users/{id}/block` and
+- [x] **U4.5** `PATCH /admin/users/{id}/block` and
       `PATCH /admin/accounts/{id}/block`.
       **AC:** blocking an account revokes every user in it without writing
       `users.is_blocked` (one flag, one place — D714); unblocking restores
@@ -1763,5 +1763,57 @@ touching auth or scoping goes through the reviewer subagent.
   sections). `bash scripts/verify.sh` green end to end (781 backend unit
   tests, up from 771; 874 webapp tests unchanged — no webapp files touched);
   `bash scripts/integration_docker.sh` green (97 passed, up from 96).
-- **Next:** `/clear`, then **U4.5** (`PATCH /admin/users/{id}/block` and
-  `PATCH /admin/accounts/{id}/block`).
+- **U4.5 is done**: `AdminService` gained `block_user`/`block_account`, both
+  taking the calling system admin (`caller: UserResponse`) alongside the
+  target id and the new flag. Each is a single `BaseRepository.update` on
+  the one flag — `users.is_blocked` for `block_user`,
+  `accounts.is_blocked` for `block_account` — so D714's "one flag, one
+  place" holds structurally, not just by convention: `block_account` never
+  touches `users` at all, so unblocking an account automatically restores
+  exactly the members who were never individually blocked, with nothing to
+  bookkeep. The self-block guard (`is_blocked and target_id == caller.id`
+  / `caller.account_id`) only fires on the blocking direction — unblocking
+  is never restricted, and is moot for self anyway since a self-block is
+  now unreachable. Missing target → `NotFoundError` (404, existing global
+  handler), self-block → a bare `ValueError`, mapped to **422** in
+  `api/admin.py`'s two new routes via a small `_unprocessable()` helper —
+  no new domain-error type, since this project already has this exact
+  precedent (`api/expenses.py`/`api/statistics.py` catch `ValueError` from
+  `resolve_period_params` the same way) and a one-off `SelfActionError`
+  class for a single call site would be the kind of premature abstraction
+  root CLAUDE.md rules out. Both new routes return the plain
+  `UserResponse`/`AccountResponse` (not `AdminUserRow`/`AdminAccountRow`),
+  matching every other PATCH in the project (`api/users.py::update_user`,
+  `api/accounts.py::update_my_account`) rather than inventing a richer
+  cross-account response shape the AC never asked for; the Mini App's
+  U4.8 already computes suspended-via-account state client-side from its
+  own two cached lists (per U0.5's spec), so it needs no extra join data
+  back from this PATCH. `AdminAccountRepositoryProtocol`/
+  `AdminUserRepositoryProtocol` (`services/admin_service.py`) each gained
+  `get` (account already had `update`; user gained both `get` and
+  `update`) — both were already implemented on the real repositories via
+  `BaseRepository`, so this is a protocol-only change, no repo edit.
+  New tests: 10 hermetic cases in `tests/test_admin_service.py` (block/
+  unblock each of user and account, missing-id 404 each, self-block 422
+  each, a self-*unblock* case proving the guard is direction-only, plus the
+  D714 assertion — fixed after the reviewer's first pass flagged it, see
+  below — that blocking an account leaves a *member of that account*'s
+  `is_blocked` untouched, not an unrelated user in a different account);
+  14 HTTP cases in `tests/test_admin_api.py` covering both routes'
+  200/404/422/403/401 paths and an end-to-end D714 check (block then
+  unblock an account with one of its users already individually blocked;
+  the unblock response is 200 and that user's row is still blocked after).
+  `bash scripts/verify.sh` green end to end (802 backend unit tests, up
+  from 781; 874 webapp tests unchanged — no webapp files touched, matching
+  the AC's backend-only scope). **Reviewer pass (round 1) returned APPROVE**
+  with one WARN and three NITs, all fixed before finishing: the WARN
+  (`test_block_account_sets_is_blocked_only_not_users` asserted against an
+  unrelated user in a *different* account, so a broken mass-write
+  implementation would still have passed it) was fixed by adding a `member`
+  fixture actually inside the blocked account as the assertion target; two
+  NITs got one-line comments explaining the deliberate self-block-before-
+  existence-check ordering and the accepted get-then-update TOCTOU (no
+  delete route exists on `users`/`accounts` today); the coverage-gap NIT
+  (no test proved a system admin can unblock themselves) was closed by
+  `test_system_admin_can_unblock_themselves`.
+- **Next:** `/clear`, then **U4.6** (the bot's suspended path).
