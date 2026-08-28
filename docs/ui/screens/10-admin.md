@@ -206,7 +206,7 @@ The five-state framework applies per mode.
 | `account.meta.one` | "{currency} · {language} · 1 user" | account row meta, singular |
 | `account.meta.many` | "{currency} · {language} · {n} users" | account row meta, `n ≥ 2` (or `0`, grammatically fine as "0 users") |
 | `account.suspended` | "Suspended" | badge, account row |
-| `user.meta` | "{accountName} · {role} · tg_id {tgId}" | user row meta |
+| `user.meta` | "{accountName} · {role} · tg_id {tgId}" | user row meta — `{role}` is a localized label (`admin.role.system_admin`/`admin.role.admin`/`admin.role.member`/`admin.role.viewer`, U4.7), not the raw enum value; a role name is as user-visible as any other string on a catalogue-native (D700) screen |
 | `user.suspended` | "Suspended" | badge, user row — shown for both an individually-blocked user and one whose account is blocked |
 | `trigger.block` | "Block" | both rows, `--status-red` |
 | `trigger.unblock` | "Unblock" | both rows, `--ink` |
@@ -388,3 +388,15 @@ here introduces a new field or a new shape.
       non-trivial.
 - [?] **`account.meta`/`user.meta` exact separators and field order** are
       `[inferred]` — easy to adjust in the Copy table.
+- [?] **Pre-existing gap, found during U4.7's review, not fixed there:**
+      `UserResponse.role`/`UserMeResponse.role` pass the DB column through
+      verbatim (`api/deps.py::get_current_user_with_currency`) — a real
+      system admin's own `GET /users/me` reads `role: "system_admin"`, not
+      `"admin"`. D712 only makes `system_admin` behave as `admin` inside the
+      *permission matrix* (`resolve_permission`/`require_admin`), not in the
+      field's value. `settings.ts`/`language.ts`/`expense-detail.ts` all gate
+      on strict `role === "admin"`, so a system admin viewing their own
+      account's Settings/Language screen, or editing another user's expense,
+      is today treated as a non-admin/non-owner — contradicting D712. Not
+      this screen's file list to fix; needs its own unit or a fix folded
+      into whichever unit next touches one of those three files.

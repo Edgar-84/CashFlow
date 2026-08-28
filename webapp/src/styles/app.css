@@ -1765,7 +1765,9 @@ body {
 .categories-readonly p,
 .tags-error p,
 .tags-readonly p,
-.settings-error p {
+.settings-error p,
+.admin-error p,
+.admin-forbidden p {
   margin: 4px 4px 0;
   color: var(--ink-secondary);
   font-size: 14px;
@@ -1773,7 +1775,8 @@ body {
 
 .categories-error button[data-action="retry"],
 .tags-error button[data-action="retry"],
-.settings-error button[data-action="retry"] {
+.settings-error button[data-action="retry"],
+.admin-error button[data-action="retry"] {
   font: inherit;
   font-weight: 600;
   background: var(--ink);
@@ -2548,6 +2551,147 @@ body {
   color: var(--ink-secondary);
 }
 
+/* -- screen 10 — Admin, list mode (U4.7, docs/ui/screens/10-admin.md) ------
+   Create-account mode (U4.9) and its confirm-popup copy add their own rules
+   in that unit. Reuses `.card`'s 14px radius and `.row`'s `10px 13px`
+   padding verbatim from `07-tags.md` (screen doc's own Constraint: no third
+   row rhythm) rather than `.settings-row`'s fixed 48px height, since each
+   row here carries two text lines plus an optional badge. No new
+   design-system token: `--status-red` on the "Block" trigger and the
+   "Suspended" badge is already documented for destructive text actions, and
+   the 60% row opacity is `06-categories.md`'s archived-row treatment,
+   reused verbatim for a blocked account/user. */
+.admin-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-eyebrow {
+  margin: 4px 4px 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+}
+
+/* `.admin-view`'s own `gap: 12px` already inserts 12px between the accounts
+   `.admin-list` and this eyebrow; flex `gap` and an item's own margin are
+   additive, not merged, so this only needs the remaining 12px to reach the
+   screen doc's documented 24px between-sections value — same arithmetic
+   `.settings-language-section` (above) already works through for its own
+   24px gap. */
+.admin-eyebrow--users {
+  margin-top: 12px;
+}
+
+.admin-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.admin-list .admin-row:last-child {
+  border-bottom: 0;
+}
+
+.admin-row--suspended {
+  opacity: 0.6;
+}
+
+.admin-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-row-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-row-meta {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-badge {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--status-red);
+}
+
+.admin-trigger {
+  flex: none;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.admin-trigger--block {
+  color: var(--status-red);
+}
+
+.admin-trigger--unblock {
+  color: var(--ink);
+}
+
+.admin-trigger[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.admin-trigger:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.admin-row-skeleton {
+  height: 44px;
+  background: var(--card);
+  border-radius: 14px;
+}
+
+/* Visually hidden but screen-reader reachable — the one place this app
+   needs text with no on-screen line to sit above (a disabled trigger's
+   `aria-describedby` target, screen doc's Accessibility section: "hears
+   *why*, not just that it does nothing"). Every other screen's inline
+   errors/explain lines are sighted text already, so this utility has no
+   earlier caller. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* -- accessibility ---------------------------------------------------------
    prefers-reduced-motion respected (webapp/CLAUDE.md) — the skeleton pulse
    only runs when the user hasn't asked to avoid motion. */
@@ -2562,7 +2706,8 @@ body {
   .cat-cell-skeleton,
   .tag-row-skeleton,
   .currency-suffix-skeleton,
-  .account-name-skeleton {
+  .account-name-skeleton,
+  .admin-row-skeleton {
     animation: skeleton-pulse 1.4s ease-in-out infinite;
   }
 }

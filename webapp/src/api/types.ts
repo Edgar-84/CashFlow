@@ -12,7 +12,17 @@
 export type Uuid = string;
 export type IsoTimestamp = string;
 
-export type Role = "admin" | "member" | "viewer";
+/** `models.enums.Role` (D710) — `system_admin` is cross-account (D711/D712).
+ * `UserResponse.role`/`UserMeResponse.role` pass the DB column through
+ * verbatim (`api/deps.py::get_current_user_with_currency`), so a real system
+ * admin's own `GET /users/me` genuinely reads `role: "system_admin"`, not
+ * `"admin"` — only the *permission matrix* (`resolve_permission`,
+ * `require_admin`) treats it as admin-equivalent inside its own account
+ * (D712), not the field's value. `settings.ts`/`language.ts`/
+ * `expense-detail.ts` still gate on strict `role === "admin"`, a pre-existing
+ * gap this widening makes representable in TS but doesn't fix — out of this
+ * unit's file list; see the plan's Open questions. */
+export type Role = "system_admin" | "admin" | "member" | "viewer";
 
 /** `models.enums.Currency` (D211) — 15 ISO 4217 codes offered at account
  * creation. Kept in lockstep with `models/enums.py::Currency`. */
@@ -227,4 +237,30 @@ export interface AccountResponse {
 export interface AccountUpdate {
   currency?: Currency;
   language?: Language;
+}
+
+/** `models.admin.AdminAccountRow` — `GET /admin/accounts` only (U4.3,
+ * `screens/admin.ts`, U4.7). Cross-account: the one response shape in this
+ * app that isn't scoped to the caller's own account (D711). */
+export interface AdminAccountRow {
+  id: Uuid;
+  name: string;
+  currency: Currency;
+  language: Language;
+  is_blocked: boolean;
+  user_count: number;
+  created_at: IsoTimestamp;
+}
+
+/** `models.admin.AdminUserRow` — `GET /admin/users` only (U4.3,
+ * `screens/admin.ts`, U4.7). Same cross-account carve-out as
+ * `AdminAccountRow`. */
+export interface AdminUserRow {
+  id: Uuid;
+  tg_id: number;
+  name: string;
+  role: Role;
+  account_id: Uuid;
+  account_name: string;
+  is_blocked: boolean;
 }
