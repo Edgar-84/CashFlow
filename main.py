@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 import database
 from api.accounts import router as accounts_router
+from api.admin import router as admin_router
 from api.budgets import router as budgets_router
 from api.categories import router as categories_router
 from api.deps import close_http_client
@@ -65,6 +66,7 @@ def create_app(webapp_dist: Path | None = None) -> FastAPI:
     app.include_router(expenses_router)
     app.include_router(budgets_router)
     app.include_router(statistics_router)
+    app.include_router(admin_router)
 
     # Mount the Mini App last so every API router wins path resolution.
     # `html=True` makes StaticFiles serve `index.html` at "/" and on 404 —
