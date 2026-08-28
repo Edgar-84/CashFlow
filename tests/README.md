@@ -73,6 +73,7 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_get_returns_account_with_explicit_currency` | `currency` set at creation round-trips through `get()` |
 | `test_get_returns_account_with_default_language` | An account created without an explicit language gets the schema default (`en`, U3.1 AC) |
 | `test_get_missing_returns_none` | `get()` on a missing id returns `None` |
+| `test_list_for_admin_returns_every_account_with_user_count` | `list_for_admin()` returns every account with its member count via the `LEFT JOIN users` (U4.3, D711) |
 
 ### `test_user_repo.py` → [`repositories/user_repo.py`](../repositories/user_repo.py)
 | Test | Checks |
@@ -81,6 +82,7 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_get_missing_returns_none` | `get()` on a missing id returns `None`, not an error |
 | `test_delete_missing_returns_false` | `delete()` on a missing id returns `False` |
 | `test_list_filters_by_account` | `list(account_id=...)` scopes results to one account |
+| `test_list_for_admin_returns_users_across_accounts_with_account_name` | `list_for_admin()` returns users across every account, each with its `accounts.name` via the `JOIN accounts` (U4.3, D711) |
 
 ### `test_category_repo.py` → [`repositories/category_repo.py`](../repositories/category_repo.py)
 | Test | Checks |
@@ -222,6 +224,10 @@ Hermetic — repositories replaced with in-memory fakes via
 | `test_init_data_expired_is_401` | Expired `initData` payload → 401 |
 | `test_init_data_well_formed_but_unknown_tg_id_is_401` | Validly signed `initData` for a tg_id with no `users` row → 401 |
 | `test_init_data_produces_same_permission_decision_as_header_pair` | `initData` and the header pair resolve to the identical `PermissionDecision` for the same user |
+| `test_require_system_admin_allows_system_admin` | `require_system_admin` admits `Role.SYSTEM_ADMIN` (U4.3) |
+| `test_require_system_admin_denies_admin` | Unlike `require_admin`, a plain `admin` is denied — 403 (U4.3, D711) |
+| `test_require_system_admin_denies_member` | `require_system_admin` denies `Role.MEMBER` — 403 |
+| `test_require_system_admin_denies_viewer` | `require_system_admin` denies `Role.VIEWER` — 403 |
 
 ## Service tests (`test_user_service.py`) → [`services/user_service.py`](../services/user_service.py)
 Hermetic — `UserRepositoryProtocol` replaced with an in-memory `FakeUserRepo`. No DB.
@@ -605,6 +611,25 @@ No DB.
 | `test_update_language_is_not_yet_accepted` | `PATCH /accounts/me` with `{"language": ...}` leaves the stored/returned language unchanged (U3.1 AC "no route behaviour changes yet" — `AccountUpdate.language` exists on the contract but isn't wired into `AccountService.update`'s payload until U3.2) |
 | `test_no_path_variant_accepts_an_account_id` | `PATCH /accounts/{id}` → 404; there is no id-based route, only `/me` |
 | `test_update_currency_missing_credentials_is_401` | No auth headers → 401 |
+
+## API/route tests (`test_admin_api.py`) → [`api/admin.py`](../api/admin.py)
+Hermetic — the real app with `AccountRepository`/`UserRepository` replaced by
+in-memory fakes via `app.dependency_overrides`. No DB. Fixtures deliberately
+seed users/accounts across **two** accounts to prove the cross-account read
+(D711).
+
+| Test | Checks |
+|---|---|
+| `test_list_accounts_as_system_admin_returns_every_account` | `GET /admin/accounts` returns rows from every account, not just the caller's own (U4.3 AC) |
+| `test_list_accounts_includes_user_count` | Each row's `user_count` matches the fake's per-account member count |
+| `test_list_accounts_as_admin_is_403` | A plain `admin` → 403 (`require_system_admin` gate — unlike `require_admin`'s routes, D711) |
+| `test_list_accounts_as_member_is_403` | Member → 403 |
+| `test_list_accounts_missing_credentials_is_401` | No auth headers → 401 |
+| `test_list_users_as_system_admin_returns_every_user_across_accounts` | `GET /admin/users` includes a user from a foreign account, with that account's `account_name` (U4.3 AC) |
+| `test_list_users_as_admin_is_403` | A plain `admin` → 403 |
+| `test_list_users_as_member_is_403` | Member → 403 |
+| `test_list_users_missing_credentials_is_401` | No auth headers → 401 |
+| `test_list_users_blocked_system_admin_is_403_not_200` | `get_current_user`'s block gate (D713) applies here too — a suspended system admin gets 403, not the cross-account list |
 
 ## API/route tests (`test_permissions_api.py`) → [`api/permissions.py`](../api/permissions.py)
 Hermetic — the real app (`client`/`app` fixtures) with `PermissionRepository`/

@@ -44,6 +44,7 @@ from repositories.permission_repo import PermissionRepository
 from repositories.tag_repo import TagRepository
 from repositories.user_repo import UserRepository
 from services.account_service import AccountService
+from services.admin_service import AdminService
 from services.budget_service import BudgetService
 from services.category_service import CategoryService
 from services.expense_service import ExpenseService
@@ -112,6 +113,13 @@ def get_account_service(
     account_repo: Annotated[AccountRepository, Depends(get_account_repo)],
 ) -> AccountService:
     return AccountService(account_repo)
+
+
+def get_admin_service(
+    account_repo: Annotated[AccountRepository, Depends(get_account_repo)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repo)],
+) -> AdminService:
+    return AdminService(account_repo, user_repo)
 
 
 def get_permission_service(
@@ -336,6 +344,23 @@ async def require_admin(
     """
     if user.role not in (Role.ADMIN, Role.SYSTEM_ADMIN):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return user
+
+
+async def require_system_admin(
+    user: Annotated[UserResponse, Depends(get_current_user)],
+) -> UserResponse:
+    """Gate for `api/admin.py`'s cross-account surface (D711).
+
+    Unlike :func:`require_admin`, a plain ``admin`` is **not** admitted — that
+    role's "full access" (D712) is scoped to its own account; the
+    cross-account reads/writes behind this dependency are reserved for
+    ``system_admin`` alone.
+    """
+    if user.role is not Role.SYSTEM_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="System admin role required"
+        )
     return user
 
 

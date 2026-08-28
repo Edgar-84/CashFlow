@@ -26,6 +26,7 @@ from api.deps import (
     _family_today,
     enforce_ownership,
     require_admin,
+    require_system_admin,
     resolve_permission,
     validate_init_data,
 )
@@ -588,6 +589,39 @@ async def test_require_admin_denies_member() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         await require_admin(user)
+    assert exc_info.value.status_code == 403
+
+
+# --- require_system_admin: system_admin only, not even a plain admin (U4.3) ---
+
+
+async def test_require_system_admin_allows_system_admin() -> None:
+    user = make_user(Role.SYSTEM_ADMIN)
+
+    assert await require_system_admin(user) is user
+
+
+async def test_require_system_admin_denies_admin() -> None:
+    user = make_user(Role.ADMIN)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await require_system_admin(user)
+    assert exc_info.value.status_code == 403
+
+
+async def test_require_system_admin_denies_member() -> None:
+    user = make_user(Role.MEMBER)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await require_system_admin(user)
+    assert exc_info.value.status_code == 403
+
+
+async def test_require_system_admin_denies_viewer() -> None:
+    user = make_user(Role.VIEWER)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await require_system_admin(user)
     assert exc_info.value.status_code == 403
 
 

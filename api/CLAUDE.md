@@ -7,10 +7,12 @@ HTTP surface. Routes are thin: parse input → call service → return response
 model. Business logic and DB access are forbidden here.
 
 ## Structure
-- `deps.py` — `get_current_user`, `PermissionChecker`, `require_admin`, DB pool /
-  service factories.
+- `deps.py` — `get_current_user`, `PermissionChecker`, `require_admin`,
+  `require_system_admin`, DB pool / service factories.
 - One router module per resource: `expenses.py`, `categories.py`, `tags.py`,
   `budgets.py`, `statistics.py`, `users.py`.
+- `admin.py` — the system-admin panel's cross-account surface (D711),
+  gated by `require_system_admin`. See "Choosing an auth dependency" below.
 
 ## Auth (bot → backend contract)
 - Bot sends `X-Telegram-User-Id: <tg_id>` + `X-Internal-Token` on every request.
@@ -47,6 +49,7 @@ Three tiers, pick the narrowest that fits the route:
 | `Depends(get_current_user)` | Any authenticated, unblocked user (any row in `users`, any role) | Endpoints with no role/resource restriction — auth only |
 | `Depends(PermissionChecker(resource, action))` | Role defaults + per-user `permissions` override, per the matrix below | The 4 data resources: `expenses`, `categories`, `tags`, `budget_plans` |
 | `Depends(require_admin)` | `role in (admin, system_admin)`, 403 otherwise | `users`, `permissions` — no override-row/own_only concept, not in the `Resource` enum, so `PermissionChecker` doesn't apply to them |
+| `Depends(require_system_admin)` | `role == system_admin` only, 403 otherwise (even for a plain `admin`) | `admin.py`'s cross-account routes — the one surface not scoped to the caller's own `account_id` (D711) |
 
 "Authenticated" always means: valid `X-Internal-Token` **and** an `X-Telegram-User-Id`
 that resolves to a row in `users`, **or** a validly signed `X-Telegram-Init-Data`

@@ -392,7 +392,7 @@ touching auth or scoping goes through the reviewer subagent.
       account is unaffected; **both** credential paths (bot headers and
       Mini App `initData`) are gated by the same code and both are tested;
       `require_admin` admits `system_admin`. **Reviewer pass required.**
-- [ ] **U4.3** `require_system_admin` + `api/admin.py`: `GET /admin/accounts`,
+- [x] **U4.3** `require_system_admin` + `api/admin.py`: `GET /admin/accounts`,
       `GET /admin/users`.
       **AC:** the router is the **only** module reading users or accounts
       outside the caller's `account_id`, and says so in its docstring; every
@@ -613,6 +613,17 @@ touching auth or scoping goes through the reviewer subagent.
 - [?] **The Mini App's `Language` union vs. the Python enum.** `api/types.ts` is
   hand-written by rule; a third place to add a language code. Accepted for
   V7 (three codes), worth revisiting if the list grows.
+- 2026-08-28: **D719** — U4.3's cross-account reads go through a thin
+  `AdminService` and `list_for_admin()` repo methods, not raw SQL inlined in
+  `api/admin.py`. D711 names "its own router, its own dependency" as the
+  carve-out from account-scoping, but root CLAUDE.md's routes→services→
+  repositories layering is non-negotiable and isn't suspended by D711 — only
+  the *scoping rule* is. `api/admin.py`'s module docstring states it is the
+  only router reading across account boundaries; `AdminService` and
+  `AccountRepository.list_for_admin`/`UserRepository.list_for_admin` are its
+  sole callers, so the unscoped read is still contained to one surface, just
+  spread across the normal three layers instead of collapsed into the route
+  function.
 
 ## STATE (handoff)
 - **Done:** Planning only. The five items were read against the code on
@@ -1667,7 +1678,29 @@ touching auth or scoping goes through the reviewer subagent.
   (757 backend unit tests, up from 750; 874 webapp tests unchanged — no
   webapp files touched) and `bash scripts/integration_docker.sh` green
   (94 passed, unchanged — no repository/schema change this unit).
-- **Next:** `/clear`, then **U4.3** (`require_system_admin` + `api/admin.py`:
-  `GET /admin/accounts`, `GET /admin/users`). Reviewer pass required, same
-  as U4.2 (plan's own M4 rule: every unit touching auth or scoping goes
-  through the reviewer subagent).
+- **U4.3 is done**: `api/deps.py` gained `require_system_admin` — admits
+  `Role.SYSTEM_ADMIN` alone, unlike `require_admin`'s `(admin, system_admin)`
+  pair; a plain `admin` gets 403 here. New `AccountRepository.list_for_admin()`
+  (`LEFT JOIN users`, `GROUP BY accounts.id`, returns `AdminAccountRow` with
+  `user_count`) and `UserRepository.list_for_admin()` (`JOIN accounts`,
+  returns `AdminUserRow` with `account_name`) — both unscoped by `account_id`
+  on purpose, the only such repo methods in the project (D711). New
+  `services/admin_service.py::AdminService` (`list_accounts`/`list_users`,
+  duck-typed repo protocols, mirrors `AccountService`'s shape) and new
+  `api/admin.py` (`GET /admin/accounts`, `GET /admin/users`, both gated by
+  `require_system_admin`), registered in `main.py` after `statistics_router`.
+  Layering decision recorded as D719 (Decision log): the service/repo split
+  stays, D711's carve-out is from account-scoping, not from
+  routes→services→repositories. New tests: 4 `require_system_admin` cases in
+  `test_deps.py`; new `tests/test_admin_api.py` (10 cases — cross-account
+  visibility, `user_count`, plain-admin 403, member 403, missing-credentials
+  401, and a blocked-system-admin-still-gets-403 case proving D713's gate
+  applies here too); 2 new integration tests (`test_account_repo.py`,
+  `test_user_repo.py`) against a real Postgres via
+  `scripts/integration_docker.sh`, both green. `bash scripts/verify.sh` green
+  end to end (771 backend unit tests, up from 757; 874 webapp tests
+  unchanged — no webapp files touched); `bash scripts/integration_docker.sh`
+  green (96 passed, up from 94).
+- **Next:** `/clear`, then **U4.4** (`POST /admin/accounts` — creates the
+  account, its first user and the seeded "General" category in one
+  transaction).

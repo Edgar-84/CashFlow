@@ -76,3 +76,25 @@ async def test_list_filters_by_account(db_conn: asyncpg.Connection) -> None:
     results = await repo.list(account_id=account_id)
     assert len(results) == 1
     assert results[0].name == "Bob"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_for_admin_returns_users_across_accounts_with_account_name(
+    db_conn: asyncpg.Connection,
+) -> None:
+    account_id = await make_account(db_conn, name="Home Account")
+    other_account_id = await make_account(db_conn, name="Foreign Account")
+    repo = UserRepository(db_conn)
+    await repo.create(
+        {"tg_id": 444, "name": "Dana", "role": Role.MEMBER.value, "account_id": account_id}
+    )
+    await repo.create(
+        {"tg_id": 555, "name": "Evan", "role": Role.MEMBER.value, "account_id": other_account_id}
+    )
+
+    rows = await repo.list_for_admin()
+
+    by_tg_id = {row.tg_id: row for row in rows}
+    assert by_tg_id[444].account_name == "Home Account"
+    assert by_tg_id[555].account_name == "Foreign Account"
