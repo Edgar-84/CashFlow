@@ -435,3 +435,193 @@ async def test_create_account_missing_credentials_is_401(
     response = await client.post("/admin/accounts", json=create_account_payload())
 
     assert response.status_code == 401
+
+
+async def test_block_user_as_system_admin_returns_200(
+    client: AsyncClient,
+    override_repo: OverrideRepo,
+    system_admin: UserResponse,
+    member: UserResponse,
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/users/{member.id}/block",
+        json={"is_blocked": True},
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_blocked"] is True
+
+
+async def test_unblock_user_as_system_admin_returns_200(
+    client: AsyncClient,
+    override_repo: OverrideRepo,
+    system_admin: UserResponse,
+    member: UserResponse,
+) -> None:
+    user_repo, _, _ = override_repo()
+    user_repo._users[member.id] = member.model_copy(update={"is_blocked": True})
+
+    response = await client.patch(
+        f"/admin/users/{member.id}/block",
+        json={"is_blocked": False},
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_blocked"] is False
+
+
+async def test_block_user_missing_is_404(
+    client: AsyncClient, override_repo: OverrideRepo, system_admin: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/users/{uuid4()}/block",
+        json={"is_blocked": True},
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 404
+
+
+async def test_block_self_as_system_admin_is_422(
+    client: AsyncClient, override_repo: OverrideRepo, system_admin: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/users/{system_admin.id}/block",
+        json={"is_blocked": True},
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_block_user_as_admin_is_403(
+    client: AsyncClient, override_repo: OverrideRepo, admin: UserResponse, member: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/users/{member.id}/block",
+        json={"is_blocked": True},
+        headers=auth_headers(admin.tg_id),
+    )
+
+    assert response.status_code == 403
+
+
+async def test_block_user_missing_credentials_is_401(
+    client: AsyncClient, override_repo: OverrideRepo, member: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(f"/admin/users/{member.id}/block", json={"is_blocked": True})
+
+    assert response.status_code == 401
+
+
+async def test_block_account_as_system_admin_returns_200(
+    client: AsyncClient,
+    override_repo: OverrideRepo,
+    system_admin: UserResponse,
+    other_account: AccountResponse,
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/accounts/{other_account.id}/block",
+        json={"is_blocked": True},
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_blocked"] is True
+
+
+async def test_unblock_account_restores_only_individually_unblocked_users(
+    client: AsyncClient,
+    override_repo: OverrideRepo,
+    system_admin: UserResponse,
+    other_account: AccountResponse,
+    foreign_user: UserResponse,
+) -> None:
+    user_repo, account_repo, _ = override_repo()
+    account_repo._accounts[other_account.id] = other_account.model_copy(update={"is_blocked": True})
+    # foreign_user belongs to other_account and was individually blocked too.
+    user_repo._users[foreign_user.id] = foreign_user.model_copy(update={"is_blocked": True})
+
+    response = await client.patch(
+        f"/admin/accounts/{other_account.id}/block",
+        json={"is_blocked": False},
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["is_blocked"] is False
+    # D714: unblocking the account never touched the individually-blocked user.
+    foreign_row = await user_repo.get(foreign_user.id)
+    assert foreign_row is not None
+    assert foreign_row.is_blocked is True
+
+
+async def test_block_account_missing_is_404(
+    client: AsyncClient, override_repo: OverrideRepo, system_admin: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/accounts/{uuid4()}/block",
+        json={"is_blocked": True},
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 404
+
+
+async def test_block_own_account_as_system_admin_is_422(
+    client: AsyncClient, override_repo: OverrideRepo, system_admin: UserResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/accounts/{system_admin.account_id}/block",
+        json={"is_blocked": True},
+        headers=auth_headers(system_admin.tg_id),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_block_account_as_admin_is_403(
+    client: AsyncClient,
+    override_repo: OverrideRepo,
+    admin: UserResponse,
+    other_account: AccountResponse,
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/accounts/{other_account.id}/block",
+        json={"is_blocked": True},
+        headers=auth_headers(admin.tg_id),
+    )
+
+    assert response.status_code == 403
+
+
+async def test_block_account_missing_credentials_is_401(
+    client: AsyncClient, override_repo: OverrideRepo, other_account: AccountResponse
+) -> None:
+    override_repo()
+
+    response = await client.patch(
+        f"/admin/accounts/{other_account.id}/block", json={"is_blocked": True}
+    )
+
+    assert response.status_code == 401

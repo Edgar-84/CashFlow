@@ -628,6 +628,15 @@ asserted hermetically; the real DB-level rollback guarantee is proven in
 | `test_create_account_defaults_currency_and_language` | Omitting `currency`/`language` in `AdminAccountCreate` yields `USD`/`en` |
 | `test_create_account_honours_explicit_currency_and_language` | An explicit `currency`/`language` is passed through |
 | `test_create_account_duplicate_owner_tg_id_is_conflict_not_500` | A duplicate `owner_tg_id` (`asyncpg.UniqueViolationError` from the fake) is translated to `ConflictError`, and the category write never runs |
+| `test_block_user_sets_is_blocked` | `block_user(..., True, caller)` sets the target's `is_blocked` (U4.5 AC) |
+| `test_unblock_user_clears_is_blocked` | `block_user(..., False, caller)` on a blocked target clears it |
+| `test_block_user_missing_is_not_found` | Unknown user id → `NotFoundError` |
+| `test_system_admin_cannot_block_themselves` | `block_user` on the caller's own id with `is_blocked=True` → `ValueError` (U4.5 AC) |
+| `test_system_admin_can_unblock_themselves` | The self-block guard is direction-only — `block_user(..., False, caller)` on the caller's own already-blocked id succeeds |
+| `test_block_account_sets_is_blocked_only_not_users` | `block_account(..., True, caller)` sets the account's `is_blocked` and leaves a fake user's `is_blocked` untouched (D714) |
+| `test_unblock_account_clears_is_blocked` | `block_account(..., False, caller)` on a blocked account clears it |
+| `test_block_account_missing_is_not_found` | Unknown account id → `NotFoundError` |
+| `test_system_admin_cannot_block_their_own_account` | `block_account` on the caller's own `account_id` with `is_blocked=True` → `ValueError` (U4.5 AC) |
 
 ## API/route tests (`test_admin_api.py`) → [`api/admin.py`](../api/admin.py)
 Hermetic — the real app with `AccountRepository`/`UserRepository`/
@@ -652,6 +661,18 @@ across **two** accounts to prove the cross-account read (D711).
 | `test_create_account_as_admin_is_403` | A plain `admin` → 403 |
 | `test_create_account_as_member_is_403` | Member → 403 |
 | `test_create_account_missing_credentials_is_401` | No auth headers → 401 |
+| `test_block_user_as_system_admin_returns_200` | `PATCH /admin/users/{id}/block` → 200, `is_blocked` reflects the body (U4.5 AC) |
+| `test_unblock_user_as_system_admin_returns_200` | Same route with `is_blocked=false` on an already-blocked user → 200, cleared |
+| `test_block_user_missing_is_404` | Unknown user id → 404 (`NotFoundError` mapped by `main.py`'s handler) |
+| `test_block_self_as_system_admin_is_422` | A system admin blocking their own id → 422, not 200 (U4.5 AC) |
+| `test_block_user_as_admin_is_403` | A plain `admin` → 403 (`require_system_admin` gate) |
+| `test_block_user_missing_credentials_is_401` | No auth headers → 401 |
+| `test_block_account_as_system_admin_returns_200` | `PATCH /admin/accounts/{id}/block` on a foreign account → 200, `is_blocked` reflects the body (U4.5 AC) |
+| `test_unblock_account_restores_only_individually_unblocked_users` | Unblocking a blocked account with one individually-blocked member → 200, that member's `is_blocked` is untouched (D714, U4.5 AC) |
+| `test_block_account_missing_is_404` | Unknown account id → 404 |
+| `test_block_own_account_as_system_admin_is_422` | A system admin blocking their own `account_id` → 422, not 200 (U4.5 AC) |
+| `test_block_account_as_admin_is_403` | A plain `admin` → 403 |
+| `test_block_account_missing_credentials_is_401` | No auth headers → 401 |
 
 ## API/route tests (`test_permissions_api.py`) → [`api/permissions.py`](../api/permissions.py)
 Hermetic — the real app (`client`/`app` fixtures) with `PermissionRepository`/
