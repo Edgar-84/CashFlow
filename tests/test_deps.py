@@ -54,6 +54,7 @@ def make_user(role: Role, tg_id: int = 100) -> UserResponse:
         tg_id=tg_id,
         name=f"{role.value}-user",
         role=role,
+        is_blocked=False,
         account_id=uuid4(),
         created_at=datetime.now(UTC),
     )
@@ -134,6 +135,24 @@ DEFAULT_MATRIX = [
     (Role.ADMIN, Resource.BUDGET_PLANS, Action.READ, True, False),
     (Role.ADMIN, Resource.BUDGET_PLANS, Action.UPDATE, True, False),
     (Role.ADMIN, Resource.BUDGET_PLANS, Action.DELETE, True, False),
+    # system_admin: full CRUD everywhere too, inside its own account (D712) —
+    # same shape as admin, never own_only-restricted (step 2).
+    (Role.SYSTEM_ADMIN, Resource.EXPENSES, Action.CREATE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.EXPENSES, Action.READ, True, False),
+    (Role.SYSTEM_ADMIN, Resource.EXPENSES, Action.UPDATE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.EXPENSES, Action.DELETE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.CATEGORIES, Action.CREATE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.CATEGORIES, Action.READ, True, False),
+    (Role.SYSTEM_ADMIN, Resource.CATEGORIES, Action.UPDATE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.CATEGORIES, Action.DELETE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.TAGS, Action.CREATE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.TAGS, Action.READ, True, False),
+    (Role.SYSTEM_ADMIN, Resource.TAGS, Action.UPDATE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.TAGS, Action.DELETE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.BUDGET_PLANS, Action.CREATE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.BUDGET_PLANS, Action.READ, True, False),
+    (Role.SYSTEM_ADMIN, Resource.BUDGET_PLANS, Action.UPDATE, True, False),
+    (Role.SYSTEM_ADMIN, Resource.BUDGET_PLANS, Action.DELETE, True, False),
     # member on expenses: C · R · U(own) · D(own)
     (Role.MEMBER, Resource.EXPENSES, Action.CREATE, True, False),
     (Role.MEMBER, Resource.EXPENSES, Action.READ, True, False),
@@ -242,6 +261,20 @@ def test_admin_ignores_override_row() -> None:
         # Full-decision equality: the row's own_only=True must not leak through
         # either, or admins would become ownership-restricted at step 6.
         assert resolve_permission(Role.ADMIN, Resource.EXPENSES, action, row) == (
+            PermissionDecision(allowed=True, own_only=False)
+        )
+
+
+def test_system_admin_ignores_override_row() -> None:
+    # Same step-2 shape as admin: a system admin behaves as admin inside its
+    # own account (D712) — this resource matrix has no cross-account concept.
+    user = make_user(Role.SYSTEM_ADMIN)
+    row = make_permission_row(
+        user.id, Resource.EXPENSES, can_create=False, can_read=False, own_only=True
+    )
+
+    for action in (Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE):
+        assert resolve_permission(Role.SYSTEM_ADMIN, Resource.EXPENSES, action, row) == (
             PermissionDecision(allowed=True, own_only=False)
         )
 

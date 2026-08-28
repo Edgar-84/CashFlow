@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from models.account import AccountResponse
+from models.admin import AdminAccountCreate, AdminAccountRow, AdminUserRow, BlockUpdate
 from models.budget_plan import BudgetPlanCreate, BudgetPlanResponse, BudgetPlanUpdate
 from models.category import CategoryCreate, CategoryResponse, CategoryUpdate
 from models.enums import Action, Currency, Language, Resource, Role
@@ -34,6 +35,7 @@ def test_user_models() -> None:
         tg_id=123456789,
         name="Wife",
         role=Role.MEMBER,
+        is_blocked=False,
         account_id=account_id,
         created_at=datetime.now(UTC),
     )
@@ -48,6 +50,7 @@ def test_account_response_and_user_me_response() -> None:
         currency=Currency.PLN,
         language=Language.RU,
         owner_id=None,
+        is_blocked=False,
         created_at=datetime.now(UTC),
     )
     assert account.currency == Currency.PLN
@@ -58,6 +61,7 @@ def test_account_response_and_user_me_response() -> None:
         tg_id=123456789,
         name="Wife",
         role=Role.MEMBER,
+        is_blocked=False,
         account_id=account_id,
         created_at=datetime.now(UTC),
         currency=account.currency,
@@ -81,6 +85,7 @@ def test_account_response_rejects_unsupported_currency() -> None:
             currency=cast(Currency, "XYZ"),
             language=Language.EN,
             owner_id=None,
+            is_blocked=False,
             created_at=datetime.now(UTC),
         )
 
@@ -293,8 +298,40 @@ def test_permission_models() -> None:
     assert response.resource == Resource.EXPENSES
 
 
+def test_admin_models() -> None:
+    account_id = uuid4()
+    account_row = AdminAccountRow(
+        id=account_id,
+        name="Smith Family",
+        currency=Currency.USD,
+        language=Language.EN,
+        is_blocked=False,
+        user_count=3,
+        created_at=datetime.now(UTC),
+    )
+    assert account_row.user_count == 3
+
+    user_row = AdminUserRow(
+        id=uuid4(),
+        tg_id=123456789,
+        name="Wife",
+        role=Role.MEMBER,
+        account_id=account_id,
+        account_name="Smith Family",
+        is_blocked=False,
+    )
+    assert user_row.account_id == account_id
+
+    create = AdminAccountCreate(name="Doe Family", owner_tg_id=987654321, owner_name="Husband")
+    assert create.currency == Currency.USD
+    assert create.language == Language.EN
+
+    block = BlockUpdate(is_blocked=True)
+    assert block.is_blocked is True
+
+
 def test_enums_have_expected_members() -> None:
-    assert set(Role) == {Role.ADMIN, Role.MEMBER, Role.VIEWER}
+    assert set(Role) == {Role.SYSTEM_ADMIN, Role.ADMIN, Role.MEMBER, Role.VIEWER}
     assert set(Resource) == {
         Resource.EXPENSES,
         Resource.CATEGORIES,

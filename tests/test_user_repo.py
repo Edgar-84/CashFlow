@@ -26,6 +26,7 @@ async def test_create_get_update_delete(db_conn: asyncpg.Connection) -> None:
     assert created.name == "Alice"
     assert created.role == Role.MEMBER
     assert created.account_id == account_id
+    assert created.is_blocked is False
 
     fetched = await repo.get(created.id)
     assert fetched is not None

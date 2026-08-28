@@ -34,6 +34,18 @@ async def test_get_returns_account_with_default_language(db_conn: asyncpg.Connec
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
+async def test_get_returns_account_with_default_is_blocked(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    repo = AccountRepository(db_conn)
+
+    account = await repo.get(account_id)
+
+    assert account is not None
+    assert account.is_blocked is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
 async def test_get_returns_account_with_explicit_currency(db_conn: asyncpg.Connection) -> None:
     account_id = await make_account(db_conn, currency=Currency.PLN)
     repo = AccountRepository(db_conn)

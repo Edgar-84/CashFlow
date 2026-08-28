@@ -25,6 +25,7 @@ def _user_json(tg_id: int) -> dict[str, Any]:
         "name": "Test User",
         "role": "member",
         "account_id": str(uuid4()),
+        "is_blocked": False,
         "created_at": "2026-01-01T00:00:00Z",
         "currency": "USD",
         "language": "en",

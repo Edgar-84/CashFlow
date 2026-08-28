@@ -82,6 +82,7 @@ def make_user(*, account_id: UUID, role: Role = Role.MEMBER, tg_id: int = 1) -> 
         tg_id=tg_id,
         name="Test User",
         role=role,
+        is_blocked=False,
         account_id=account_id,
         created_at=datetime.now(UTC),
     )

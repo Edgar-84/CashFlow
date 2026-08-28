@@ -334,7 +334,10 @@ def resolve_permission(
     before step 4 by design: a viewer can never be granted writes by an
     override row (though a row may still *restrict* a viewer's reads).
     """
-    if role is Role.ADMIN:
+    if role is Role.ADMIN or role is Role.SYSTEM_ADMIN:
+        # A system admin behaves as `admin` inside its own account (D712) —
+        # this resource matrix has no cross-account concept at all; the
+        # cross-account surface lives entirely in api/admin.py (D711).
         return PermissionDecision(allowed=True)
     if role is Role.VIEWER and action is not Action.READ:
         return PermissionDecision(allowed=False)

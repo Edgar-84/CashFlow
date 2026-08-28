@@ -21,6 +21,7 @@ def make_user(tg_id: int = 12345) -> UserResponse:
         tg_id=tg_id,
         name="Member",
         role=Role.MEMBER,
+        is_blocked=False,
         account_id=uuid4(),
         created_at=datetime.now(UTC),
     )
