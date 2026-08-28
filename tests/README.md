@@ -813,6 +813,13 @@ injected into handler data, no second round-trip).
 | `test_second_update_within_ttl_reuses_cached_language_with_no_second_probe` | The cached language survives a second update inside `ttl_ok` with no second probe (U3.12 AC: no extra round-trip) |
 | `test_resolve_language_returns_en_when_probe_denied` | `_resolve_language(None)` (a denied/failed probe) defaults to `Language.EN` rather than raising (U3.12 AC) |
 | `test_denied_tg_id_still_caches_en_language_with_no_second_probe` | A denied tg_id's cache entry still carries a language so a second update inside `ttl_deny` issues no second probe |
+| `test_blocked_tg_id_is_dropped_and_sent_the_suspended_message` | A tg_id the probe returns 403 for never reaches the handler and is sent `t(Language.EN, "common.suspended")` on the update's message (U4.6 AC) |
+| `test_blocked_tg_id_no_backend_call_beyond_the_probe` | A blocked caller's update causes no backend call beyond the `GET /users/me` probe itself — the handler never runs to make a second one (U4.6 AC, D715) |
+| `test_blocked_caller_who_was_previously_allowed_is_messaged_in_their_real_language` | A caller blocked after a prior allowed probe is messaged in that probe's language even though the 403 itself carries none (U4.6 AC) |
+| `test_second_update_from_blocked_caller_within_ttl_re_notifies_with_no_second_probe` | A second update from a still-cached-blocked tg_id is messaged again with no second probe — a suspension, not a one-time notice |
+| `test_blocked_caller_via_callback_query_is_answered_on_its_message` | A blocked caller's inline-keyboard tap (no top-level `message`) is answered via `callback_query.message` |
+| `test_blocked_update_with_no_respondable_message_is_dropped_without_error` | An update with neither `message` nor `callback_query` is dropped without raising (U4.6, no crash on an unhandled update shape) |
+| `test_blocked_tg_id_is_logged` | Dropping a blocked update logs a `WARNING` record naming the tg_id |
 
 ## Bot tests (`test_bot_i18n.py`) → [`bot/i18n.py`](../bot/i18n.py)
 Hermetic — pure functions, no fakes needed (U3.12 AC: EN catalogue; U3.15 AC:

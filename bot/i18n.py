@@ -22,6 +22,16 @@ Catalogue = dict[str, str]
 
 _en: Final[Catalogue] = {
     "readonly": "You don't have permission to do that.",
+    # U4.6 — shown by AllowlistMiddleware when the users/me probe comes back
+    # 403 (D713). Same title/body `docs/ui/screens/10-admin.md` gives the
+    # cross-cutting suspended state, one message regardless of whether it was
+    # the user or their whole account that got blocked (the probe's 403
+    # detail distinguishes the two but the copy shown to the caller doesn't
+    # need to).
+    "common.suspended": (
+        "This account has been suspended.\n\n"
+        "Contact your family's account owner if you think this is a mistake."
+    ),
     "error.tryAgain": "Try again.",
     # New in U3.14, alongside error.tryAgain — the generic catch-all fallback
     # message, identical wording to expense.error.fallback (U3.13) but kept
@@ -205,6 +215,11 @@ _en: Final[Catalogue] = {
 
 _ru: Final[Catalogue] = {
     "readonly": "У вас нет прав на это действие.",
+    "common.suspended": (
+        "Этот аккаунт заблокирован.\n\n"
+        "Если вы считаете, что это ошибка, обратитесь к владельцу вашего "
+        "семейного аккаунта."
+    ),
     "error.tryAgain": "Попробуйте ещё раз.",
     "error.fallback": "Что-то пошло не так. Попробуйте ещё раз.",
     "common.unknown": "Неизвестно",
@@ -385,6 +400,11 @@ _ru: Final[Catalogue] = {
 
 _uk: Final[Catalogue] = {
     "readonly": "У вас немає прав на цю дію.",
+    "common.suspended": (
+        "Цей акаунт заблоковано.\n\n"
+        "Якщо ви вважаєте, що це помилка, зверніться до власника вашого "
+        "сімейного акаунта."
+    ),
     "error.tryAgain": "Спробуйте ще раз.",
     "error.fallback": "Щось пішло не так. Спробуйте ще раз.",
     "common.unknown": "Невідомо",

@@ -6,18 +6,20 @@ beside the verdict and injected into handler data — no second round-trip."""
 
 from collections.abc import Callable
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import httpx
 import pytest
 
 from bot.client import BackendClient
+from bot.i18n import t
 from bot.middlewares import AllowlistMiddleware, _resolve_language
 from models.enums import Language
 
 ALLOWED_TG_ID = 555
 DENIED_TG_ID = 999
+BLOCKED_TG_ID = 777
 
 
 def _user_json(tg_id: int, *, language: str = "en") -> dict[str, Any]:
@@ -283,3 +285,137 @@ async def test_denied_tg_id_still_caches_en_language_with_no_second_probe() -> N
     await _run(middleware, DENIED_TG_ID)
 
     assert len(captured) == 1
+
+
+# -- U4.6: blocked callers ------------------------------------------------
+
+
+def _blocked_responder(
+    *, captured: list[httpx.Request], detail: str = "User is suspended"
+) -> Callable[[httpx.Request], httpx.Response]:
+    def responder(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(403, json={"detail": detail})
+
+    return responder
+
+
+def _message_event() -> tuple[Any, AsyncMock]:
+    """A `Mock()` event with an aiogram-shaped `.message.answer` — real
+    `Update`s carry a populated `message` for a plain text/command update."""
+    message = AsyncMock()
+    event = Mock(message=message, callback_query=None)
+    return event, message
+
+
+def _callback_query_event() -> tuple[Any, AsyncMock]:
+    """A `Mock()` event shaped like an update whose only populated field is
+    `callback_query` (an inline-keyboard tap) — `message` is unset (None), as
+    a real `Update` would have it."""
+    message = AsyncMock()
+    callback_query = Mock(message=message)
+    event = Mock(message=None, callback_query=callback_query)
+    return event, message
+
+
+async def test_blocked_tg_id_is_dropped_and_sent_the_suspended_message() -> None:
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(responder=_blocked_responder(captured=captured))
+    event, message = _message_event()
+    handler_called = False
+
+    async def handler(event: Any, data: dict[str, Any]) -> str:
+        nonlocal handler_called
+        handler_called = True
+        return "handled"
+
+    result = await middleware(handler, event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+
+    assert result is None
+    assert handler_called is False
+    message.answer.assert_awaited_once_with(t(Language.EN, "common.suspended"))
+
+
+async def test_blocked_tg_id_no_backend_call_beyond_the_probe() -> None:
+    """No handler runs, so the client injected into `data` (had the update
+    gone through) never gets a chance to make a second backend call — the
+    probe itself is the only request the blocked caller's update causes."""
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(responder=_blocked_responder(captured=captured))
+    event, _ = _message_event()
+
+    await middleware(AsyncMock(), event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+
+    assert len(captured) == 1
+
+
+async def test_blocked_caller_who_was_previously_allowed_is_messaged_in_their_real_language() -> (
+    None
+):
+    captured: list[httpx.Request] = []
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if len(captured) == 1:
+            return httpx.Response(200, json=_user_json(BLOCKED_TG_ID, language="uk"))
+        return httpx.Response(403, json={"detail": "User is suspended"})
+
+    # ttl_ok=-1 forces the second update to re-probe instead of reusing the
+    # first (allowed) verdict, simulating the caller getting blocked between
+    # the two updates.
+    middleware = make_middleware(responder=responder, ttl_ok=-1)
+    first_event, _ = _message_event()
+    second_event, second_message = _message_event()
+
+    await middleware(AsyncMock(), first_event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+    await middleware(AsyncMock(), second_event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+
+    second_message.answer.assert_awaited_once_with(t(Language.UK, "common.suspended"))
+
+
+async def test_second_update_from_blocked_caller_within_ttl_re_notifies_with_no_second_probe() -> (
+    None
+):
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(responder=_blocked_responder(captured=captured))
+    first_event, first_message = _message_event()
+    second_event, second_message = _message_event()
+
+    await middleware(AsyncMock(), first_event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+    await middleware(AsyncMock(), second_event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+
+    assert len(captured) == 1
+    first_message.answer.assert_awaited_once_with(t(Language.EN, "common.suspended"))
+    second_message.answer.assert_awaited_once_with(t(Language.EN, "common.suspended"))
+
+
+async def test_blocked_caller_via_callback_query_is_answered_on_its_message() -> None:
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(responder=_blocked_responder(captured=captured))
+    event, message = _callback_query_event()
+
+    result = await middleware(AsyncMock(), event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+
+    assert result is None
+    message.answer.assert_awaited_once_with(t(Language.EN, "common.suspended"))
+
+
+async def test_blocked_update_with_no_respondable_message_is_dropped_without_error() -> None:
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(responder=_blocked_responder(captured=captured))
+    event = Mock(message=None, callback_query=None)
+
+    result = await middleware(AsyncMock(), event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+
+    assert result is None
+
+
+async def test_blocked_tg_id_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    captured: list[httpx.Request] = []
+    middleware = make_middleware(responder=_blocked_responder(captured=captured))
+    event, _ = _message_event()
+
+    with caplog.at_level("WARNING", logger="bot.middlewares"):
+        await middleware(AsyncMock(), event, {"event_from_user": Mock(id=BLOCKED_TG_ID)})
+
+    assert any(str(BLOCKED_TG_ID) in r.getMessage() for r in caplog.records)
