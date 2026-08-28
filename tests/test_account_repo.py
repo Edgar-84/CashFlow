@@ -4,8 +4,10 @@ import asyncpg
 import pytest
 from factories import make_account, make_user
 
-from models.enums import Currency, Language
+from models.enums import Currency, Language, Role
 from repositories.account_repo import AccountRepository
+from repositories.category_repo import CategoryRepository
+from repositories.user_repo import UserRepository
 
 
 @pytest.mark.integration
@@ -79,3 +81,38 @@ async def test_list_for_admin_returns_every_account_with_user_count(
     by_id = {row.id: row for row in rows}
     assert by_id[account_id].user_count == 2
     assert by_id[empty_account_id].user_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_transaction_rolls_back_cross_repo_writes_on_failure(
+    db_conn: asyncpg.Connection,
+) -> None:
+    """`AdminService.create_account` (U4.4) composes `AccountRepository`,
+    `UserRepository` and `CategoryRepository` writes — all built on the same
+    per-request connection — inside one `AccountRepository.transaction()`
+    block (see `BaseRepository.transaction`). A duplicate `owner_tg_id`
+    partway through must leave no partial account behind. Exercised directly
+    against the repositories (not through the service) to prove the DB-level
+    guarantee the shared connection's transaction actually provides."""
+    account_repo = AccountRepository(db_conn)
+    user_repo = UserRepository(db_conn)
+    category_repo = CategoryRepository(db_conn)
+    other_account_id = await make_account(db_conn)
+    existing = await make_user(db_conn, account_id=other_account_id, tg_id=7001)
+
+    with pytest.raises(asyncpg.UniqueViolationError):
+        async with account_repo.transaction():
+            account = await account_repo.create({"name": "Rollback Test"})
+            await user_repo.create(
+                {
+                    "tg_id": existing.tg_id,
+                    "name": "Duplicate",
+                    "role": Role.ADMIN.value,
+                    "account_id": account.id,
+                }
+            )
+            await category_repo.create({"name": "General", "account_id": account.id})
+
+    row = await db_conn.fetchrow("SELECT id FROM accounts WHERE name = $1", "Rollback Test")
+    assert row is None

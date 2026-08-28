@@ -399,7 +399,7 @@ touching auth or scoping goes through the reviewer subagent.
       role but `system_admin` gets 403, including a plain `admin` (tested);
       the endpoints are unreachable without a valid credential.
       **Reviewer pass required.**
-- [ ] **U4.4** `POST /admin/accounts` — creates the account, its first user and
+- [x] **U4.4** `POST /admin/accounts` — creates the account, its first user and
       the seeded "General" category **in one transaction**.
       **AC:** a duplicate `owner_tg_id` is 409, not a 500 (`users.tg_id` is
       UNIQUE); a failure anywhere leaves no partial account behind (tested);
@@ -624,6 +624,31 @@ touching auth or scoping goes through the reviewer subagent.
   sole callers, so the unscoped read is still contained to one surface, just
   spread across the normal three layers instead of collapsed into the route
   function.
+- 2026-08-28: **D720** — U4.4's cross-repo atomicity (account + owner user +
+  seeded "General" category, one transaction) is implemented by adding a thin
+  `BaseRepository.transaction()` method (returns `self._conn.transaction()`)
+  rather than a full Unit-of-Work class. `repositories/CLAUDE.md`'s D31 note
+  had already flagged this as the first genuinely atomic cross-repo write and
+  invited "a small UoW or a transactional variant of `get_connection`" —
+  `transaction()` is that small variant: every repo built for one request
+  already shares the same connection (`database.get_connection` is cached
+  per request by FastAPI), so `AdminService.create_account` opens
+  `account_repo.transaction()` and then calls `user_repo.create`/
+  `category_repo.create` inside the same `async with` block, and asyncpg
+  groups all three inserts into one real transaction because it's the same
+  underlying connection object. Rejected: a dedicated UoW class — no second
+  caller exists yet to justify the abstraction; `transaction()` is a
+  one-line, generically reusable primitive any future cross-repo write can
+  reach for the same way. The owner user is created with `role=admin` (not
+  a fresh role) per D712's "a system admin still behaves as `admin` inside
+  its own account" — every account still needs an in-account admin, and the
+  system admin creating it is not a member of it. The seeded category's
+  `color_slot` is hardcoded to `1` rather than routed through
+  `CategoryService._next_free_color_slot`: this is always the first category
+  of a brand-new, empty account, so the two are provably equivalent, and
+  calling the per-account-scoped `CategoryService` from this cross-account
+  surface would be the kind of layering mismatch D719 already ruled out for
+  reads.
 
 ## STATE (handoff)
 - **Done:** Planning only. The five items were read against the code on
@@ -1701,6 +1726,42 @@ touching auth or scoping goes through the reviewer subagent.
   end to end (771 backend unit tests, up from 757; 874 webapp tests
   unchanged — no webapp files touched); `bash scripts/integration_docker.sh`
   green (96 passed, up from 94).
-- **Next:** `/clear`, then **U4.4** (`POST /admin/accounts` — creates the
-  account, its first user and the seeded "General" category in one
-  transaction).
+- **U4.4 is done**: `POST /admin/accounts` creates the account, its owner
+  user and the seeded "General" category in one transaction. New
+  `BaseRepository.transaction()` (`repositories/base.py`) exposes
+  `self._conn.transaction()` — the "small transactional variant" D31/D719
+  already anticipated for the project's first genuinely cross-repo
+  multi-write, recorded as **D720** (Decision log). `AdminService.create_account`
+  (`services/admin_service.py`) opens `account_repo.transaction()`, creates
+  the account, creates the owner (`role=admin`, D712) inside a `try`/`except
+  asyncpg.UniqueViolationError` translating a duplicate `owner_tg_id` to
+  `ConflictError` (409, same pattern as `user_service.py`), sets
+  `accounts.owner_id` via `account_repo.update`, then creates the "General"
+  category with `color_slot=1` hardcoded (always the first category of a
+  brand-new account, so provably equivalent to
+  `CategoryService._next_free_color_slot`'s result without pulling that
+  per-account service into this cross-account surface). `AdminAccountRepositoryProtocol`/
+  `AdminUserRepositoryProtocol` gained `create`/`update`/`transaction()` (account
+  repo) and `create()` (user repo); a new `AdminCategoryRepositoryProtocol`
+  was added, and `AdminService`'s constructor now takes `category_repo` too
+  — `api/deps.py::get_admin_service` updated to inject it.
+  `api/admin.py` gained `POST /admin/accounts` (`status_code=201`,
+  `require_system_admin`-gated, same as the two `GET` routes).
+  New tests: `tests/test_admin_service.py` (hermetic, 5 cases — happy path,
+  `owner_id` set, currency/language defaults and overrides, duplicate-tg_id
+  → `ConflictError` with no category write); `tests/test_admin_api.py`
+  gained 5 HTTP cases (201, 409, admin/member 403, missing-credentials 401)
+  and its `override_repo` fixture now also builds/overrides a fake
+  `CategoryRepository`, widening its return tuple to three (the one existing
+  `user_repo, _ = override_repo()` call site updated to `user_repo, _, _ =`);
+  `tests/test_account_repo.py` gained one integration test
+  (`test_transaction_rolls_back_cross_repo_writes_on_failure`) proving the
+  real DB-level guarantee directly against `AccountRepository`/
+  `UserRepository`/`CategoryRepository` sharing one connection — a duplicate
+  `tg_id` partway through leaves no `accounts` row behind. `tests/README.md`
+  updated with all of the above (repository, service and API/route
+  sections). `bash scripts/verify.sh` green end to end (781 backend unit
+  tests, up from 771; 874 webapp tests unchanged — no webapp files touched);
+  `bash scripts/integration_docker.sh` green (97 passed, up from 96).
+- **Next:** `/clear`, then **U4.5** (`PATCH /admin/users/{id}/block` and
+  `PATCH /admin/accounts/{id}/block`).

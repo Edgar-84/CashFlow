@@ -53,3 +53,14 @@ class BaseRepository[T: BaseModel]:
     async def delete(self, id: UUID) -> bool:
         row = await self._conn.fetchrow(f"DELETE FROM {self._table} WHERE id = $1 RETURNING id", id)
         return row is not None
+
+    def transaction(self) -> asyncpg.transaction.Transaction:
+        """Exposes the shared per-request connection's transaction so a
+        service can compose writes across sibling repositories (built on the
+        same `database.get_connection` dependency, hence the same live
+        connection) into one atomic unit — e.g. `AdminService.create_account`
+        (U4.4), this project's first genuinely cross-repo multi-write
+        (repositories/CLAUDE.md's D31 note). Only meaningful when the
+        repository instances involved share a connection; never spans two
+        different DB connections."""
+        return self._conn.transaction()
