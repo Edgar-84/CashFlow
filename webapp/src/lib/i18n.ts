@@ -299,6 +299,15 @@ const en = {
   "admin.role.admin": "Admin",
   "admin.role.member": "Member",
   "admin.role.viewer": "Viewer",
+  // U4.8 — the block/unblock confirm popups and the retry banner over a
+  // failed PATCH. Fed through `fillTemplate`, not `t()`'s vars: these feed
+  // Telegram's native `showConfirm`, not innerHTML (same reasoning as
+  // `categories.ts`'s own delete-confirm copy).
+  "admin.confirm.blockAccount": 'Block "{accountName}"? Every user in this account loses access immediately.',
+  "admin.confirm.unblockAccount": 'Unblock "{accountName}"? Every user who isn\'t individually blocked regains access immediately.',
+  "admin.confirm.blockUser": "Block {userName}? They lose access immediately; the rest of their account stays active.",
+  "admin.confirm.unblockUser": "Unblock {userName}? They regain access immediately.",
+  "admin.block.failed": "Couldn't update {name}.",
 } as const;
 
 export type Catalogue = Record<keyof typeof en, string>;
@@ -533,6 +542,11 @@ const ru: Catalogue = {
   "admin.role.admin": "Администратор",
   "admin.role.member": "Участник",
   "admin.role.viewer": "Наблюдатель",
+  "admin.confirm.blockAccount": "Заблокировать «{accountName}»? Все пользователи этого аккаунта немедленно потеряют доступ.",
+  "admin.confirm.unblockAccount": "Разблокировать «{accountName}»? Все пользователи, кто не заблокирован индивидуально, немедленно восстановят доступ.",
+  "admin.confirm.blockUser": "Заблокировать {userName}? Он немедленно потеряет доступ; остальной аккаунт продолжит работать.",
+  "admin.confirm.unblockUser": "Разблокировать {userName}? Он немедленно восстановит доступ.",
+  "admin.block.failed": "Не удалось обновить {name}.",
 };
 
 const uk: Catalogue = {
@@ -765,6 +779,11 @@ const uk: Catalogue = {
   "admin.role.admin": "Адміністратор",
   "admin.role.member": "Учасник",
   "admin.role.viewer": "Спостерігач",
+  "admin.confirm.blockAccount": "Заблокувати «{accountName}»? Усі користувачі цього акаунта негайно втратять доступ.",
+  "admin.confirm.unblockAccount": "Розблокувати «{accountName}»? Усі користувачі, які не заблоковані індивідуально, негайно відновлять доступ.",
+  "admin.confirm.blockUser": "Заблокувати {userName}? Він негайно втратить доступ; решта акаунта продовжить працювати.",
+  "admin.confirm.unblockUser": "Розблокувати {userName}? Він негайно відновить доступ.",
+  "admin.block.failed": "Не вдалося оновити {name}.",
 };
 
 // Exported (not just module-private) so `tests/i18n.test.ts` can assert the

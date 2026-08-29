@@ -3,12 +3,17 @@ import { ForbiddenError, RetryableError } from "../src/api/client";
 import type { AdminAccountRow, AdminUserRow } from "../src/api/types";
 import { setLanguage, t } from "../src/lib/i18n";
 import {
+  adminBlockConfirmMessage,
+  adminBlockFailureMessage,
   blockedAccountIds,
   buildAccountRowView,
   buildUserRowView,
+  createAdminBlockController,
   loadAdmin,
   renderAdmin,
   roleName,
+  withAccountBlocked,
+  withUserBlocked,
   type AdminApi,
 } from "../src/screens/admin";
 
@@ -43,6 +48,8 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     getMe: vi.fn().mockResolvedValue({ id: "user-me", account_id: "acc-me" }),
     listAdminAccounts: vi.fn().mockResolvedValue([account()]),
     listAdminUsers: vi.fn().mockResolvedValue([user()]),
+    blockAdminAccount: vi.fn().mockResolvedValue(undefined),
+    blockAdminUser: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -317,5 +324,167 @@ describe("renders in Russian and Ukrainian", () => {
       expect(ready).toContain(t("admin.section.users"));
     }
     setLanguage("en");
+  });
+});
+
+// -- withAccountBlocked / withUserBlocked (U4.8) -----------------------------
+
+describe("withAccountBlocked", () => {
+  it("flips only the matching row's is_blocked, leaving others untouched", () => {
+    const rows = [account({ id: "a", is_blocked: false }), account({ id: "b", is_blocked: false })];
+    const next = withAccountBlocked(rows, "a", true);
+    expect(next.find((r) => r.id === "a")?.is_blocked).toBe(true);
+    expect(next.find((r) => r.id === "b")?.is_blocked).toBe(false);
+  });
+
+  it("is a no-op for an id that isn't in the list", () => {
+    const rows = [account({ id: "a" })];
+    expect(withAccountBlocked(rows, "missing", true)).toEqual(rows);
+  });
+});
+
+describe("withUserBlocked", () => {
+  it("flips only the matching row's is_blocked", () => {
+    const rows = [user({ id: "x", is_blocked: false }), user({ id: "y", is_blocked: true })];
+    const next = withUserBlocked(rows, "y", false);
+    expect(next.find((r) => r.id === "x")?.is_blocked).toBe(false);
+    expect(next.find((r) => r.id === "y")?.is_blocked).toBe(false);
+  });
+});
+
+// -- adminBlockConfirmMessage / adminBlockFailureMessage (U4.8) -------------
+
+describe("adminBlockConfirmMessage", () => {
+  it("names the account and the block direction, unescaped for Telegram's native popup", () => {
+    expect(adminBlockConfirmMessage("account", "The Kims", true)).toBe(
+      'Block "The Kims"? Every user in this account loses access immediately.',
+    );
+  });
+
+  it("names the account and the unblock direction", () => {
+    expect(adminBlockConfirmMessage("account", "The Kims", false)).toBe(
+      "Unblock \"The Kims\"? Every user who isn't individually blocked regains access immediately.",
+    );
+  });
+
+  it("names the user and the block direction", () => {
+    expect(adminBlockConfirmMessage("user", "Anna Kim", true)).toBe(
+      "Block Anna Kim? They lose access immediately; the rest of their account stays active.",
+    );
+  });
+
+  it("names the user and the unblock direction", () => {
+    expect(adminBlockConfirmMessage("user", "Anna Kim", false)).toBe("Unblock Anna Kim? They regain access immediately.");
+  });
+});
+
+describe("adminBlockFailureMessage", () => {
+  it("names the target that failed to update", () => {
+    expect(adminBlockFailureMessage("The Kims")).toBe("Couldn't update The Kims.");
+  });
+});
+
+// -- createAdminBlockController (U4.8) ---------------------------------------
+
+describe("createAdminBlockController", () => {
+  it("a successful toggle calls the matching API method with the target id and direction", async () => {
+    const api = fakeApi();
+    const controller = createAdminBlockController(api);
+    const outcome = await controller.toggle("account", "acc-kims", true);
+    expect(outcome).toEqual({ status: "success" });
+    expect(api.blockAdminAccount).toHaveBeenCalledWith("acc-kims", true);
+    expect(api.blockAdminUser).not.toHaveBeenCalled();
+  });
+
+  it("routes a user toggle to blockAdminUser", async () => {
+    const api = fakeApi();
+    const controller = createAdminBlockController(api);
+    await controller.toggle("user", "user-anna", false);
+    expect(api.blockAdminUser).toHaveBeenCalledWith("user-anna", false);
+  });
+
+  it("maps a rejected PATCH to an error outcome", async () => {
+    const api = fakeApi({ blockAdminAccount: vi.fn().mockRejectedValue(new RetryableError()) });
+    const controller = createAdminBlockController(api);
+    expect(await controller.toggle("account", "acc-kims", true)).toEqual({ status: "error" });
+  });
+
+  it("is not pending before or after a toggle resolves", async () => {
+    const api = fakeApi();
+    const controller = createAdminBlockController(api);
+    expect(controller.isPending("account", "acc-kims")).toBe(false);
+    await controller.toggle("account", "acc-kims", true);
+    expect(controller.isPending("account", "acc-kims")).toBe(false);
+  });
+
+  it("is pending while the PATCH is in flight, and a duplicate toggle for the same target issues exactly one PATCH", async () => {
+    let resolve!: () => void;
+    const blockAdminAccount = vi.fn().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+    const api = fakeApi({ blockAdminAccount });
+    const controller = createAdminBlockController(api);
+
+    const first = controller.toggle("account", "acc-kims", true);
+    expect(controller.isPending("account", "acc-kims")).toBe(true);
+    const second = await controller.toggle("account", "acc-kims", true);
+    expect(second).toEqual({ status: "blocked" });
+
+    resolve();
+    expect(await first).toEqual({ status: "success" });
+    expect(blockAdminAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("a different target is never blocked by another target's in-flight toggle", async () => {
+    let resolveFirst!: () => void;
+    const blockAdminAccount = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<void>((r) => (resolveFirst = r)))
+      .mockResolvedValueOnce(undefined);
+    const api = fakeApi({ blockAdminAccount });
+    const controller = createAdminBlockController(api);
+
+    const first = controller.toggle("account", "acc-kims", true);
+    expect(controller.isPending("account", "acc-other")).toBe(false);
+    const second = await controller.toggle("account", "acc-other", true);
+    expect(second).toEqual({ status: "success" });
+
+    resolveFirst();
+    await first;
+  });
+});
+
+// -- renderAdmin's block-failure banner (U4.8) -------------------------------
+
+describe("renderAdmin with a block failure", () => {
+  it("renders no banner when there is no failure", () => {
+    const html = renderAdmin({ status: "ready", accounts: [account()], users: [user()], selfAccountId: "a", selfUserId: "u" });
+    expect(html).not.toContain('data-testid="admin-block-failed"');
+  });
+
+  it("renders the banner above the Accounts list for an account-kind failure, naming the target", () => {
+    const html = renderAdmin(
+      { status: "ready", accounts: [account()], users: [user()], selfAccountId: "a", selfUserId: "u" },
+      { kind: "account", id: "acc-kims", name: "The Kims", nextBlocked: true },
+    );
+    expect(html).toContain('data-testid="admin-block-failed"');
+    expect(html).toContain("Couldn't update The Kims.");
+    expect(html).toContain('data-action="retry-block"');
+    const bannerIndex = html.indexOf('data-testid="admin-block-failed"');
+    const accountsListIndex = html.indexOf('data-testid="admin-accounts-list"');
+    const usersListIndex = html.indexOf('data-testid="admin-users-list"');
+    expect(bannerIndex).toBeLessThan(accountsListIndex);
+    expect(bannerIndex).toBeLessThan(usersListIndex);
+  });
+
+  it("renders the banner above the Users list for a user-kind failure", () => {
+    const html = renderAdmin(
+      { status: "ready", accounts: [account()], users: [user()], selfAccountId: "a", selfUserId: "u" },
+      { kind: "user", id: "user-anna", name: "Anna Kim", nextBlocked: false },
+    );
+    const bannerIndex = html.indexOf('data-testid="admin-block-failed"');
+    const accountsListIndex = html.indexOf('data-testid="admin-accounts-list"');
+    const usersListIndex = html.indexOf('data-testid="admin-users-list"');
+    expect(bannerIndex).toBeGreaterThan(accountsListIndex);
+    expect(bannerIndex).toBeLessThan(usersListIndex);
+    expect(html).toContain("Couldn't update Anna Kim.");
   });
 });

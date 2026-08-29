@@ -2,12 +2,11 @@
  * from the side menu's eighth row, gated on `role === "system_admin"`
  * (U4.10 — not wired yet; this unit builds the screen itself, matching
  * task-methodology's own decomposition order of pure rendering before
- * wiring). This unit covers the Accounts/Users lists and the screen's four
- * top-level states (loading, error, 403, ready) — the block/unblock confirm
- * + PATCH flow (U4.8), the create-account form (U4.9) and the MainButton
- * that opens it (also U4.9, since a "Create account" button pointing at a
- * mode that doesn't exist yet would be worse than no button) are each their
- * own unit.
+ * wiring). U4.7 covered the Accounts/Users lists and the screen's four
+ * top-level states (loading, error, 403, ready). This unit (U4.8) wires
+ * the Block/Unblock trigger on each row: confirm → optimistic flip → PATCH
+ * → revert-and-banner on failure. The create-account form and its
+ * MainButton are U4.9, still its own unit.
  *
  * Unlike every other screen, there is no cache: `10-admin.md`'s States
  * table is explicit that this screen never persists cross-account data
@@ -23,10 +22,11 @@
  * `budgets.ts::loadBudgets` already catches its own role gate.
  *
  * Three-layer split, same shape as every other screen:
- *  - data: `loadAdmin` (one `GET /users/me` for the caller's own ids, plus
- *    the two admin list calls, in parallel) and the pure
- *    `buildAccountRowView`/`buildUserRowView` row-model builders — both
- *    directly unit-tested, no DOM.
+ *  - data: `loadAdmin`, the pure `buildAccountRowView`/`buildUserRowView`
+ *    row-model builders, the block confirm/failure copy builders and
+ *    `createAdminBlockController` (the double-submit guard, same shape as
+ *    `settings.ts::createSettingsController`) — all directly unit-tested,
+ *    no DOM.
  *  - presentation: `renderAdmin` (pure, HTML strings).
  *  - mount: thin DOM glue, not meaningfully unit-tested, same accepted gap
  *    as every other screen's mount.
@@ -35,7 +35,7 @@
 import { ForbiddenError } from "../api/client";
 import type { AdminAccountRow, AdminUserRow, Role, Uuid } from "../api/types";
 import { t, type Catalogue } from "../lib/i18n";
-import { mainButton, setBackButtonHandler } from "../lib/telegram";
+import { confirmAction, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { languageName } from "./language";
 
 // -- data ---------------------------------------------------------------
@@ -44,6 +44,8 @@ export interface AdminApi {
   getMe(): Promise<{ id: Uuid; account_id: Uuid }>;
   listAdminAccounts(): Promise<AdminAccountRow[]>;
   listAdminUsers(): Promise<AdminUserRow[]>;
+  blockAdminAccount(id: Uuid, isBlocked: boolean): Promise<unknown>;
+  blockAdminUser(id: Uuid, isBlocked: boolean): Promise<unknown>;
 }
 
 export interface AdminData {
@@ -167,6 +169,104 @@ export function buildUserRowView(
   };
 }
 
+// -- block/unblock (U4.8) --------------------------------------------------
+
+/** Immutable flip of one account row's `is_blocked` — the optimistic update
+ * and its own revert-on-failure both call this, just with the opposite
+ * `isBlocked` value. A missing `id` is a no-op, not an error: the caller's
+ * local list may already be stale by one render if two admins act at once
+ * (screen doc's Edge cases — "last write wins, no concurrency token"). */
+export function withAccountBlocked(accounts: readonly AdminAccountRow[], id: Uuid, isBlocked: boolean): AdminAccountRow[] {
+  return accounts.map((a) => (a.id === id ? { ...a, is_blocked: isBlocked } : a));
+}
+
+export function withUserBlocked(users: readonly AdminUserRow[], id: Uuid, isBlocked: boolean): AdminUserRow[] {
+  return users.map((u) => (u.id === id ? { ...u, is_blocked: isBlocked } : u));
+}
+
+/** A pending block/unblock failure to show above the affected list — `null`
+ * when none is in flight. Mirrors `categories.ts::CategoryDeleteFailure`'s
+ * shape; `nextBlocked` is the direction that failed, so "Try again" can
+ * re-issue the identical PATCH without re-opening the confirm popup (same
+ * rule `main.ts::onRetryDelete` already follows for 06c). */
+export interface AdminBlockFailure {
+  kind: "account" | "user";
+  id: Uuid;
+  name: string;
+  nextBlocked: boolean;
+}
+
+// Private, non-escaping substitution for strings fed to native Telegram
+// chrome (`confirmAction`) — same "pure modules don't share helpers"
+// convention every other screen's own copy already follows (e.g.
+// `categories.ts::fillTemplate`).
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? vars[name] : match));
+}
+
+const BLOCK_CONFIRM_KEYS: Readonly<Record<"account" | "user", Readonly<Record<"block" | "unblock", keyof Catalogue>>>> = {
+  account: { block: "admin.confirm.blockAccount", unblock: "admin.confirm.unblockAccount" },
+  user: { block: "admin.confirm.blockUser", unblock: "admin.confirm.unblockUser" },
+};
+
+/** The Telegram confirm popup's message (screen doc's `confirm.block.*`/
+ * `confirm.unblock.*`). `confirm.yes.*`/`confirm.cancel` from the screen
+ * doc's Copy table have no call site: `showConfirm` has no custom button
+ * text (same constraint `settings.ts::settingsConfirmMessage` already
+ * documents), so those keys would be dead catalogue entries. */
+export function adminBlockConfirmMessage(kind: "account" | "user", name: string, nextBlocked: boolean): string {
+  const key = BLOCK_CONFIRM_KEYS[kind][nextBlocked ? "block" : "unblock"];
+  const varName = kind === "account" ? "accountName" : "userName";
+  return fillTemplate(t(key), { [varName]: name });
+}
+
+/** The retry banner's message (screen doc's `block.failed`). */
+export function adminBlockFailureMessage(name: string): string {
+  return fillTemplate(t("admin.block.failed"), { name });
+}
+
+export type AdminBlockOutcome = { status: "success" } | { status: "blocked" } | { status: "error" };
+
+export interface AdminBlockController {
+  isPending(kind: "account" | "user", id: Uuid): boolean;
+  toggle(kind: "account" | "user", id: Uuid, nextBlocked: boolean): Promise<AdminBlockOutcome>;
+}
+
+/** Owns the double-submit guard for the block/unblock PATCH — same shape as
+ * `settings.ts::createSettingsController`'s `submitting` flag, keyed per
+ * target so blocking one account and unblocking a different user at the
+ * same time are independent, but a duplicate tap on the *same* trigger while
+ * its own request is in flight is rejected before a second PATCH fires. */
+export function createAdminBlockController(api: AdminApi): AdminBlockController {
+  const pending = new Set<string>();
+  const keyOf = (kind: "account" | "user", id: Uuid): string => `${kind}:${id}`;
+
+  return {
+    isPending(kind, id) {
+      return pending.has(keyOf(kind, id));
+    },
+    async toggle(kind, id, nextBlocked) {
+      const key = keyOf(kind, id);
+      if (pending.has(key)) {
+        return { status: "blocked" };
+      }
+      pending.add(key);
+      try {
+        if (kind === "account") {
+          await api.blockAdminAccount(id, nextBlocked);
+        } else {
+          await api.blockAdminUser(id, nextBlocked);
+        }
+        return { status: "success" };
+      } catch {
+        return { status: "error" };
+      } finally {
+        pending.delete(key);
+      }
+    },
+  };
+}
+
 // -- presentation ---------------------------------------------------------
 
 function escapeHtml(value: string): string {
@@ -205,11 +305,10 @@ function renderForbidden(): string {
 }
 
 /** Shared by both lists — `kind` picks the row/trigger `data-testid` and the
- * disabled-reason element's id, `targetIdAttr` the `data-account-id`/
- * `data-user-id` attribute U4.8's click wiring will read. The trigger is
- * rendered as a real (enabled or disabled) `<button>` per the screen doc's
- * Anatomy, but carries no click handler yet — that's U4.8's own unit (file
- * header). */
+ * disabled-reason element's id, and the `data-account-id`/`data-user-id`
+ * attribute `mount`'s click wiring reads. The trigger is rendered as a real
+ * (enabled or disabled) `<button>` per the screen doc's Anatomy; `mount`
+ * attaches the click handler only to the ones not already `disabled`. */
 function renderTrigger(
   kind: "account" | "user",
   id: Uuid,
@@ -256,21 +355,30 @@ function renderUserRow(view: AdminUserRowView): string {
   </div>`;
 }
 
-function renderAdminView(state: { status: "ready" } & AdminData): string {
+function renderBlockFailureBanner(failure: AdminBlockFailure): string {
+  return `<div class="admin-block-failed" data-testid="admin-block-failed" aria-live="polite">
+    <p>${escapeHtml(adminBlockFailureMessage(failure.name))}</p>
+    <button type="button" data-action="retry-block">${escapeHtml(t("error.retry"))}</button>
+  </div>`;
+}
+
+function renderAdminView(state: { status: "ready" } & AdminData, failure: AdminBlockFailure | null): string {
   const blocked = blockedAccountIds(state.accounts);
   const accountRows = state.accounts.map((row) => renderAccountRow(buildAccountRowView(row, state.selfAccountId))).join("");
   const userRows = state.users
     .map((row) => renderUserRow(buildUserRowView(row, state.selfUserId, blocked)))
     .join("");
   return `<div class="admin-view" data-testid="ready">
+    ${failure?.kind === "account" ? renderBlockFailureBanner(failure) : ""}
     <div class="admin-eyebrow">${escapeHtml(t("admin.section.accounts"))}</div>
     <div class="card admin-list" data-testid="admin-accounts-list">${accountRows}</div>
+    ${failure?.kind === "user" ? renderBlockFailureBanner(failure) : ""}
     <div class="admin-eyebrow admin-eyebrow--users">${escapeHtml(t("admin.section.users"))}</div>
     <div class="card admin-list" data-testid="admin-users-list">${userRows}</div>
   </div>`;
 }
 
-export function renderAdmin(state: AdminState): string {
+export function renderAdmin(state: AdminState, failure: AdminBlockFailure | null = null): string {
   switch (state.status) {
     case "loading":
       return renderSkeleton();
@@ -279,7 +387,7 @@ export function renderAdmin(state: AdminState): string {
     case "error":
       return renderError(state.message);
     case "ready":
-      return renderAdminView(state);
+      return renderAdminView(state, failure);
   }
 }
 
@@ -298,10 +406,106 @@ export function applyAdminChrome(onBack: () => void): void {
   mainButton.hide();
 }
 
-export function mount(root: HTMLElement, state: AdminState, handlers: AdminHandlers): void {
+export function mount(root: HTMLElement, state: AdminState, api: AdminApi, handlers: AdminHandlers): void {
   if (typeof document === "undefined") {
     return;
   }
-  root.innerHTML = renderAdmin(state);
-  root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
+
+  if (state.status !== "ready") {
+    root.innerHTML = renderAdmin(state);
+    root.querySelector('[data-action="retry"]')?.addEventListener("click", handlers.onRetry);
+    return;
+  }
+
+  const controller = createAdminBlockController(api);
+  let accounts = state.accounts;
+  let users = state.users;
+  let failure: AdminBlockFailure | null = null;
+
+  const render = (): void => {
+    root.innerHTML = renderAdmin(
+      { status: "ready", accounts, users, selfAccountId: state.selfAccountId, selfUserId: state.selfUserId },
+      failure,
+    );
+    wire();
+  };
+
+  /** Optimistically applies `nextBlocked`, fires the PATCH, and reverts with
+   * a banner on failure. Shared by a confirmed tap and by the retry banner's
+   * "Try again" — the retry re-issues this same call with no second confirm
+   * popup (`main.ts::onRetryDelete`'s own precedent for 06c). */
+  async function applyAndPatch(kind: "account" | "user", id: Uuid, name: string, nextBlocked: boolean): Promise<void> {
+    if (controller.isPending(kind, id)) {
+      return;
+    }
+    // Only clear the banner for *this* target — the controller's guard
+    // deliberately lets an unrelated account/user toggle run concurrently
+    // (doc comment above `createAdminBlockController`), so an action on a
+    // different target must never dismiss a still-unresolved failure shown
+    // for this one (reviewer finding, U4.8 round 1). `failure` stays a
+    // single slot, same as `categories.ts`/`tags.ts`'s own delete-failure
+    // banner — a second target failing while one is already shown replaces
+    // the display, which is an accepted limitation of that single-slot
+    // shape, not a regression this unit introduces.
+    if (failure?.kind === kind && failure.id === id) {
+      failure = null;
+    }
+    if (kind === "account") {
+      accounts = withAccountBlocked(accounts, id, nextBlocked);
+    } else {
+      users = withUserBlocked(users, id, nextBlocked);
+    }
+    render();
+
+    const outcome = await controller.toggle(kind, id, nextBlocked);
+    if (outcome.status === "error") {
+      if (kind === "account") {
+        accounts = withAccountBlocked(accounts, id, !nextBlocked);
+      } else {
+        users = withUserBlocked(users, id, !nextBlocked);
+      }
+      failure = { kind, id, name, nextBlocked };
+      render();
+    }
+  }
+
+  async function handleTriggerTap(kind: "account" | "user", id: Uuid, name: string, nextBlocked: boolean): Promise<void> {
+    if (controller.isPending(kind, id)) {
+      return;
+    }
+    const confirmed = await confirmAction(adminBlockConfirmMessage(kind, name, nextBlocked));
+    if (!confirmed) {
+      return;
+    }
+    haptics.impact("medium");
+    await applyAndPatch(kind, id, name, nextBlocked);
+  }
+
+  function wire(): void {
+    root.querySelectorAll<HTMLButtonElement>('[data-testid="admin-account-trigger"]:not([disabled])').forEach((el) => {
+      el.addEventListener("click", () => {
+        const id = el.dataset.accountId as Uuid;
+        const row = accounts.find((a) => a.id === id);
+        if (row) {
+          void handleTriggerTap("account", id, row.name, !row.is_blocked);
+        }
+      });
+    });
+    root.querySelectorAll<HTMLButtonElement>('[data-testid="admin-user-trigger"]:not([disabled])').forEach((el) => {
+      el.addEventListener("click", () => {
+        const id = el.dataset.userId as Uuid;
+        const row = users.find((u) => u.id === id);
+        if (row) {
+          void handleTriggerTap("user", id, row.name, !row.is_blocked);
+        }
+      });
+    });
+    root.querySelector('[data-action="retry-block"]')?.addEventListener("click", () => {
+      if (failure) {
+        void applyAndPatch(failure.kind, failure.id, failure.name, failure.nextBlocked);
+      }
+    });
+  }
+
+  render();
 }

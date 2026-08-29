@@ -420,7 +420,7 @@ touching auth or scoping goes through the reviewer subagent.
       **AC:** matches U0.5's spec; loading, empty, error and offline states all
       render; a non-system-admin reaching the route directly sees the 403
       state, not a blank screen.
-- [ ] **U4.8** Mini App admin screen: the block toggles.
+- [x] **U4.8** Mini App admin screen: the block toggles.
       **AC:** every block/unblock goes through Telegram's confirm popup naming
       the target; exactly one PATCH regardless of taps; the list reflects the
       new state without a full reload; a failed PATCH restores the previous
@@ -1952,5 +1952,82 @@ touching auth or scoping goes through the reviewer subagent.
   the reason span's own `id`) was closed by rewriting both self-disable
   tests to assert the exact `id`/`aria-describedby` pairing. Re-verified
   green after all fixes (906 webapp tests, typecheck/lint/build clean).
-- **Next:** `/clear`, then **U4.8** (Mini App admin screen: the block
-  toggles).
+- **U4.8 is done**: `webapp/src/screens/admin.ts` wires the Block/Unblock
+  trigger U4.7 rendered but left unhandled. Same three-layer split the file's
+  own header already documents: a pure `createAdminBlockController(api)`
+  (directly unit-tested, no DOM) owns the double-submit guard exactly like
+  `settings.ts::createSettingsController`'s `submitting` flag, except keyed
+  per `"account:<id>"`/`"user:<id>"` so blocking one account and unblocking
+  an unrelated user at the same time are independent, while a duplicate tap
+  on the *same* trigger while its own PATCH is in flight is rejected before
+  a second one fires. `withAccountBlocked`/`withUserBlocked` are tiny
+  immutable flips of one row's `is_blocked`, used for both the optimistic
+  apply and its own revert-on-failure (same value, opposite direction).
+  `adminBlockConfirmMessage`/`adminBlockFailureMessage` build the
+  Telegram-popup and retry-banner copy with a private, non-escaping
+  `fillTemplate` — the same "pure modules don't share helpers" convention
+  every other screen's own copy already follows — rather than `t()`'s
+  auto-escaping vars, since these strings feed `confirmAction`/innerHTML text
+  nodes, not markup. One deliberate gap from the screen doc's Copy table,
+  not a fresh `[?]`: `confirm.yes.block`/`confirm.yes.unblock`/
+  `confirm.cancel` are not implemented and not added to the catalogue —
+  `showConfirm` has no custom button text (the same constraint
+  `settings.ts::settingsConfirmMessage`'s own comment already documents),
+  so those three keys would be dead catalogue entries with no call site;
+  `06c-category-delete.md`'s own Copy table already omits the equivalent
+  keys for exactly this reason, so this isn't a new finding. `mount()`'s
+  `ready` branch now holds the accounts/users lists and an
+  `AdminBlockFailure | null` in its own closure (no cache, matching the
+  screen's own no-cache rule) and re-renders from that local state after
+  every change — blocking an *account* needs no separate user-list update:
+  `buildUserRowView`'s existing `blockedAccountIds(accounts)` join (U4.7)
+  recomputes every affected user row's Suspended badge and disabled-trigger
+  reason automatically on the next render, so the cascade the screen doc
+  describes falls out of the existing join rather than needing new code. A
+  confirmed tap (`handleTriggerTap`) opens `confirmAction`'s native popup,
+  fires the `medium` haptic only after confirming (matching `06c`'s own
+  rule), then delegates to `applyAndPatch` — the same function the retry
+  banner's "Try again" calls directly, with no second confirm popup, per
+  `main.ts::onRetryDelete`'s own precedent for 06c's delete-failure retry.
+  `client.ts` gained `blockAdminAccount`/`blockAdminUser`, typed by their
+  real response shapes (`AccountResponse`/`UserResponse`) even though
+  `admin.ts` never reads the body — it already knows the outcome optimistic
+  state already applied; no `BlockUpdate` mirror type was added to
+  `api/types.ts` for a single inline-bodied call site in one file. Five new
+  catalogue keys (`admin.confirm.blockAccount`/`unblockAccount`/
+  `blockUser`/`unblockUser`, `admin.block.failed`) shipped in all three
+  languages in this same change (D700). New `.admin-block-failed` CSS rule
+  reuses `06c`'s own `.cat-delete-failed` treatment verbatim — no new
+  design-system token. New tests in `webapp/tests/admin.test.ts` (17 cases,
+  49 total in the file): the two pure row-flip helpers; all four
+  confirm-message branches plus the failure message; the controller's
+  success/error/routing/pending/duplicate-tap/independent-target behaviour;
+  `renderAdmin`'s failure banner placed above the correct list for each
+  `kind`, and absent when there's no failure. `bash scripts/verify.sh` green
+  end to end (809 backend unit tests, unchanged — no backend file touched;
+  923 webapp tests, up from 906; typecheck/lint/build clean, including the
+  secret-grep). `mount()` itself stays the file's one accepted
+  not-meaningfully-unit-tested gap, same as every other screen's mount —
+  consistent with this file's own header, not a new deviation.
+  **Reviewer pass (round 1) returned APPROVE** with one WARN, fixed before
+  finishing: `applyAndPatch` cleared the single-slot `failure` banner
+  unconditionally on every call, so confirming an unrelated, independent
+  target (the controller's guard deliberately lets two different accounts/
+  users toggle concurrently) dismissed a still-unresolved failure banner for
+  a *different* target before its own outcome was known. Fixed by clearing
+  `failure` only when it belongs to the same `kind`/`id` being acted on.
+  `failure` is still a single slot (same shape as `categories.ts`/
+  `tags.ts`'s own delete-failure banner) — two different targets failing at
+  once still show only the most recent one — an accepted limitation of that
+  shape, not something this fix attempts to solve. Re-verified green after
+  the fix (923 webapp tests, typecheck/lint/build clean). **Reviewer pass
+  (round 2) returned APPROVE**, confirming the fix introduced no new bug.
+  Two NITs left deferred, both cosmetic/pre-existing from this unit's
+  original diff, not the fix: `.admin-block-failed` (app.css) drops the
+  `12px` bottom margin `.cat-delete-failed` has, despite the comment saying
+  "verbatim"; and an in-flight trigger stays visually enabled (no
+  disabled/spinner state) during its own PATCH — a rapid second tap is
+  still correctly swallowed by the controller (AC holds), just with no
+  visual feedback that the tap did nothing.
+- **Next:** `/clear`, then **U4.9** (Mini App admin screen: the
+  create-account form).
