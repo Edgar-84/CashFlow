@@ -33,6 +33,7 @@ import type {
   TagTotal,
   TagUpdate,
   UserMeResponse,
+  UserResponse,
   Uuid,
 } from "./types";
 
@@ -337,5 +338,16 @@ export class ApiClient {
 
   listAdminUsers(): Promise<AdminUserRow[]> {
     return this.request<AdminUserRow[]>("GET", "/admin/users");
+  }
+
+  // Block/unblock (U4.5/U4.8). `screens/admin.ts` applies the flag
+  // optimistically before this call and ignores the response body — it
+  // already knows the outcome it's asking for.
+  blockAdminAccount(id: Uuid, isBlocked: boolean): Promise<AccountResponse> {
+    return this.request<AccountResponse>("PATCH", `/admin/accounts/${id}/block`, { json: { is_blocked: isBlocked } });
+  }
+
+  blockAdminUser(id: Uuid, isBlocked: boolean): Promise<UserResponse> {
+    return this.request<UserResponse>("PATCH", `/admin/users/${id}/block`, { json: { is_blocked: isBlocked } });
   }
 }

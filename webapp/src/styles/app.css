@@ -2674,6 +2674,29 @@ body {
   border-radius: 14px;
 }
 
+/* U4.8 — block/unblock PATCH failure banner, above the affected list.
+   Same treatment as `.cat-delete-failed` (06c's own delete-failure banner),
+   reused verbatim rather than inventing a second failure-banner style. */
+.admin-block-failed {
+  margin: 0 4px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.admin-block-failed p {
+  margin: 0;
+}
+
+.admin-block-failed button[data-action="retry-block"] {
+  font: inherit;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  padding: 4px 0 0;
+  color: var(--ink);
+  cursor: pointer;
+}
+
 /* Visually hidden but screen-reader reachable — the one place this app
    needs text with no on-screen line to sit above (a disabled trigger's
    `aria-describedby` target, screen doc's Accessibility section: "hears
