@@ -14,6 +14,7 @@ import type { PeriodQuery } from "../lib/period";
 import type {
   AccountResponse,
   AccountUpdate,
+  AdminAccountCreate,
   AdminAccountRow,
   AdminUserRow,
   BudgetPlanCreate,
@@ -349,5 +350,13 @@ export class ApiClient {
 
   blockAdminUser(id: Uuid, isBlocked: boolean): Promise<UserResponse> {
     return this.request<UserResponse>("PATCH", `/admin/users/${id}/block`, { json: { is_blocked: isBlocked } });
+  }
+
+  // Create-account form (U4.4/U4.9). A duplicate `owner_tg_id` 409s
+  // (`users.tg_id` UNIQUE) — `screens/admin.ts` maps that via `ApiError`'s
+  // `status`, the same pattern `budget-form.ts::saveErrorMessage` uses for
+  // its own 409.
+  createAdminAccount(data: AdminAccountCreate): Promise<AdminAccountRow> {
+    return this.request<AdminAccountRow>("POST", "/admin/accounts", { json: data });
   }
 }

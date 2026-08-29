@@ -2697,6 +2697,67 @@ body {
   cursor: pointer;
 }
 
+/* -- admin create-account form (U4.9, 10-admin.md's Create-account mode) --
+   Regions 2-6 reuse `.card.field` verbatim (04b-budget-form.md's own
+   markup, per the screen doc's Components section) with a new plain-text/
+   select input pair — `.amount-input`/`.comment-input` are both sized and
+   coloured for their own specific roles, neither fits a generic field.
+   `.cat-form-label` and `.field-error` are reused as-is (no new label or
+   error-line style). Actions reuse `.detail-edit-actions` exactly like
+   `budget-form-actions` does. */
+.admin-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.admin-create-header {
+  margin: 6px 0 0; /* #app's 14px top padding + 6px reaches the spec's 20px, same trick `.budget-form-header` uses */
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.admin-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-input,
+.admin-select {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.admin-input:focus,
+.admin-select:focus {
+  outline: none;
+}
+
+.admin-input::placeholder {
+  color: var(--ink-secondary);
+}
+
+.admin-select:disabled,
+.admin-input:disabled {
+  color: var(--ink-secondary);
+}
+
+.admin-create-actions {
+  margin-top: 4px; /* +4px on the container's 20px gap reaches the spec's 24px above, same as `.budget-form-actions` */
+}
+
+.admin-create-actions button[data-action="admin-create-submit"] {
+  background: var(--ink);
+  color: var(--app-background);
+}
+
 /* Visually hidden but screen-reader reachable — the one place this app
    needs text with no on-screen line to sit above (a disabled trigger's
    `aria-describedby` target, screen doc's Accessibility section: "hears

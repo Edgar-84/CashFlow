@@ -308,6 +308,30 @@ const en = {
   "admin.confirm.blockUser": "Block {userName}? They lose access immediately; the rest of their account stays active.",
   "admin.confirm.unblockUser": "Unblock {userName}? They regain access immediately.",
   "admin.block.failed": "Couldn't update {name}.",
+  // U4.9 — the create-account form (List mode's MainButton, region 1-8's
+  // labels/placeholders/errors, the create confirm popup and the two submit
+  // failure branches). `confirm.yes`/`confirm.cancel`-style dead keys are
+  // skipped, same reasoning as U4.8's block confirm keys: `confirmAction` has
+  // no custom button text.
+  "admin.create.mainButton": "Create account",
+  "admin.create.header": "New account",
+  "admin.create.field.name.label": "Account name",
+  "admin.create.field.name.placeholder": "e.g. The Kims",
+  "admin.create.field.name.error": "Enter an account name.",
+  "admin.create.field.currency.label": "Currency",
+  "admin.create.field.language.label": "Language",
+  "admin.create.field.ownerTgId.label": "Owner's Telegram ID",
+  "admin.create.field.ownerTgId.placeholder": "e.g. 123456789",
+  "admin.create.field.ownerTgId.error": "Enter a numeric Telegram ID.",
+  "admin.create.field.ownerName.label": "Owner's name",
+  "admin.create.field.ownerName.placeholder": "e.g. Anna Kim",
+  "admin.create.field.ownerName.error": "Enter the owner's name.",
+  "admin.create.action.create": "Create account",
+  "admin.create.action.cancel": "Cancel",
+  "admin.create.confirm.message": '{ownerName} (Telegram ID {tgId}) will be added as the first admin of "{accountName}".',
+  "admin.create.error.duplicateOwner": "That Telegram user already has an account.",
+  "admin.create.error.generic": "Couldn't create the account. Try again.",
+  "admin.create.discardChanges": "Discard changes?",
 } as const;
 
 export type Catalogue = Record<keyof typeof en, string>;
@@ -547,6 +571,25 @@ const ru: Catalogue = {
   "admin.confirm.blockUser": "Заблокировать {userName}? Он немедленно потеряет доступ; остальной аккаунт продолжит работать.",
   "admin.confirm.unblockUser": "Разблокировать {userName}? Он немедленно восстановит доступ.",
   "admin.block.failed": "Не удалось обновить {name}.",
+  "admin.create.mainButton": "Создать аккаунт",
+  "admin.create.header": "Новый аккаунт",
+  "admin.create.field.name.label": "Название аккаунта",
+  "admin.create.field.name.placeholder": "например, Семья Кимов",
+  "admin.create.field.name.error": "Введите название аккаунта.",
+  "admin.create.field.currency.label": "Валюта",
+  "admin.create.field.language.label": "Язык",
+  "admin.create.field.ownerTgId.label": "Telegram ID владельца",
+  "admin.create.field.ownerTgId.placeholder": "например, 123456789",
+  "admin.create.field.ownerTgId.error": "Введите числовой Telegram ID.",
+  "admin.create.field.ownerName.label": "Имя владельца",
+  "admin.create.field.ownerName.placeholder": "например, Анна Ким",
+  "admin.create.field.ownerName.error": "Введите имя владельца.",
+  "admin.create.action.create": "Создать аккаунт",
+  "admin.create.action.cancel": "Отмена",
+  "admin.create.confirm.message": "{ownerName} (Telegram ID {tgId}) будет добавлен как первый администратор «{accountName}».",
+  "admin.create.error.duplicateOwner": "У этого пользователя Telegram уже есть аккаунт.",
+  "admin.create.error.generic": "Не удалось создать аккаунт. Попробуйте снова.",
+  "admin.create.discardChanges": "Отменить изменения?",
 };
 
 const uk: Catalogue = {
@@ -784,6 +827,25 @@ const uk: Catalogue = {
   "admin.confirm.blockUser": "Заблокувати {userName}? Він негайно втратить доступ; решта акаунта продовжить працювати.",
   "admin.confirm.unblockUser": "Розблокувати {userName}? Він негайно відновить доступ.",
   "admin.block.failed": "Не вдалося оновити {name}.",
+  "admin.create.mainButton": "Створити акаунт",
+  "admin.create.header": "Новий акаунт",
+  "admin.create.field.name.label": "Назва акаунта",
+  "admin.create.field.name.placeholder": "наприклад, Родина Кім",
+  "admin.create.field.name.error": "Введіть назву акаунта.",
+  "admin.create.field.currency.label": "Валюта",
+  "admin.create.field.language.label": "Мова",
+  "admin.create.field.ownerTgId.label": "Telegram ID власника",
+  "admin.create.field.ownerTgId.placeholder": "наприклад, 123456789",
+  "admin.create.field.ownerTgId.error": "Введіть числовий Telegram ID.",
+  "admin.create.field.ownerName.label": "Ім'я власника",
+  "admin.create.field.ownerName.placeholder": "наприклад, Анна Кім",
+  "admin.create.field.ownerName.error": "Введіть ім'я власника.",
+  "admin.create.action.create": "Створити акаунт",
+  "admin.create.action.cancel": "Скасувати",
+  "admin.create.confirm.message": "{ownerName} (Telegram ID {tgId}) буде доданий як перший адміністратор «{accountName}».",
+  "admin.create.error.duplicateOwner": "У цього користувача Telegram вже є акаунт.",
+  "admin.create.error.generic": "Не вдалося створити акаунт. Спробуйте ще раз.",
+  "admin.create.discardChanges": "Скасувати зміни?",
 };
 
 // Exported (not just module-private) so `tests/i18n.test.ts` can assert the
