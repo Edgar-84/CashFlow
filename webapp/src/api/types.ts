@@ -264,3 +264,15 @@ export interface AdminUserRow {
   account_name: string;
   is_blocked: boolean;
 }
+
+/** `models.admin.AdminAccountCreate` — `POST /admin/accounts` body only (U4.4,
+ * `screens/admin.ts`, U4.9). `currency`/`language` default to `USD`/`en` on
+ * the backend model, but this client always sends both explicitly — the
+ * create form's own defaults (screen doc's Layout table). */
+export interface AdminAccountCreate {
+  name: string;
+  currency: Currency;
+  language: Language;
+  owner_tg_id: number;
+  owner_name: string;
+}

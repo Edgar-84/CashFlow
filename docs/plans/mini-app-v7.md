@@ -425,7 +425,7 @@ touching auth or scoping goes through the reviewer subagent.
       the target; exactly one PATCH regardless of taps; the list reflects the
       new state without a full reload; a failed PATCH restores the previous
       toggle state and shows the error.
-- [ ] **U4.9** Mini App admin screen: the create-account form.
+- [x] **U4.9** Mini App admin screen: the create-account form.
       **AC:** name, currency, language, owner `tg_id` and owner name are all
       required; a non-numeric `tg_id` is caught client-side; a 409 renders as
       "that Telegram user already has an account", not a generic failure.
@@ -2029,5 +2029,86 @@ touching auth or scoping goes through the reviewer subagent.
   disabled/spinner state) during its own PATCH — a rapid second tap is
   still correctly swallowed by the controller (AC holds), just with no
   visual feedback that the tap did nothing.
-- **Next:** `/clear`, then **U4.9** (Mini App admin screen: the
-  create-account form).
+- **U4.9 is done**: `webapp/src/screens/admin.ts` gained Create-account mode
+  — List mode's new MainButton ("Create account", always enabled) switches
+  `mount`'s own internal `mode` (`"list" | "create"`) and replaces the two
+  lists with `renderCreateForm` in place, no navigation, matching the screen
+  doc's Layout section. `AdminState`/`renderAdmin`'s existing contract is
+  untouched: Create mode is entirely mount-local state
+  (`mode`/`createController`), the same choice `budget-form.ts` made for its
+  own single-mode screen, since it isn't fetched data and neither U4.7 nor
+  U4.8's tests needed to change. Three pure, directly-tested pieces do the
+  real work: `createNameError`/`createOwnerTgIdError`/`createOwnerNameError`
+  (the three validatable fields — currency/language are `<select>`s seeded
+  with a real default and can't be invalid, per the AC), `isCreateFormDirty`/
+  `createAccountConfirmMessage` (fed to `confirmDiscard`/`confirmAction` via
+  the file's existing non-escaping `fillTemplate`, same convention as every
+  other native-chrome message here), and `createAdminCreateController` — a
+  `budget-form.ts::createBudgetFormController`-shaped double-submit guard
+  that owns the draft and posts the trimmed, typed `AdminAccountCreate` body
+  on `submit()`, mapping a `409 ApiError` to `create.error.duplicateOwner`
+  and anything else to `create.error.generic` (mirroring
+  `budget-form.ts::saveErrorMessage`'s own 409 branch). Field errors are
+  gated by a single `attempted` flag (set on a blocked "Create account" tap,
+  cleared on reopen) rather than per-field blur tracking like
+  `categories.ts::nameInteracted` — a deliberate simplification for this
+  single-attempt form, noted here since it's an implementation choice the
+  spec left open, not a plan decision. `client.ts` gained
+  `createAdminAccount()`; `api/types.ts` gained `AdminAccountCreate`
+  (mirrors `models/admin.py` verbatim, U4.1's contract). Currency/language
+  `<option>` lists reuse `settings.ts::CURRENCY_ORDER`/`currencyName` and
+  `language.ts::LANGUAGE_ORDER`/`languageName` verbatim — no new list or
+  copy, per the screen doc's Components section. 20 new `admin.create.*`
+  catalogue keys shipped in all three languages in this same change (D700);
+  `confirm.yes`/`confirm.cancel`-shaped dead keys are skipped, same
+  reasoning U4.8 already gave `showConfirm`'s lack of custom button text.
+  New CSS (`app.css`): `.admin-create-form`/`.admin-create-header`/
+  `.admin-create-field` mirror `budget-form-screen`'s own 20px-gap/24px-above
+  rhythm; `.admin-input`/`.admin-select` are a new plain-text/select input
+  pair for `.card.field` (`.amount-input`/`.comment-input` are both sized
+  for their own specific roles, neither fits a generic field) — no new
+  design-system token, and no custom select-arrow glyph (the screen doc's
+  own no-new-glyph rule; the browser/OS supplies the native arrow).
+  BackButton and the in-screen Cancel button share the same dirty-check
+  mechanism (`requestCloseCreate`) but differ in destination exactly as the
+  screen doc's Interactions table states: BackButton always ends at Home in
+  both modes, Cancel returns to List mode only — `mount` now owns
+  `setBackButtonHandler`/`mainButton` directly (previously the unused,
+  now-superseded `applyAdminChrome` static call), since BackButton's
+  behaviour depends on mode, which only `mount` has visibility into.
+  `webapp/tests/admin.test.ts` gained 24 new cases (73 total): the three
+  field-error functions, `createFormValid`/`isCreateFormDirty`,
+  `createAccountConfirmMessage`, `createAdminCreateController`'s
+  blocked/success/409/generic-error/duplicate-tap-guard behaviour (mirroring
+  `createAdminBlockController`'s own duplicate-tap test), `renderCreateForm`
+  covering the header/fields/action buttons, the default-selected currency/
+  language options, the attempted-gated field errors, the submit-error
+  banner and value preservation, plus an RU/UK translation spot check.
+  `bash scripts/verify.sh` green end to end (809 backend unit tests,
+  unchanged — no backend file touched; 947 webapp tests, up from 923;
+  typecheck/lint/build clean, including the secret-grep). **Reviewer pass
+  (round 1) returned REQUEST_CHANGES**, no blockers, three findings fixed in
+  this same unit: (1) the Saving state didn't disable the form/buttons —
+  the controller's own guard already made "exactly one POST" hold, but
+  `10-admin.md`'s States table explicitly also says "form and buttons
+  disabled"; `renderCreateForm` gained a `saving` param that adds `disabled`
+  to every field and both buttons, set by `mount`'s `handleCreateSubmit`
+  around the `submit()` call. (2) `.admin-select`'s `appearance: none`
+  stripped the native dropdown arrow with no replacement glyph, directly
+  contradicting the screen doc's own stated "no custom select-arrow glyph...
+  the browser/OS supplies the native arrow" — removed. (3)
+  `createOwnerTgIdError` had no upper bound on digit count, so an absurdly
+  long id could silently lose precision through `Number(...)` in `submit()`
+  with no error surfaced; added a `Number.isSafeInteger` check to the same
+  function (same error copy, no new key). Two non-blocking NITs fixed
+  alongside: the Currency/Language fields no longer render an always-empty
+  `.field-error` node (the screen doc's Layout table has no 3a/4a error
+  region for them, only 2a/5a/6a — `renderCreateField` gained a
+  `withError` flag); `createAccountConfirmMessage` now trims every value
+  the same way `submit()` trims the POST body, so the popup can't diverge
+  from the request by whitespace. `webapp/tests/admin.test.ts` gained 5 more
+  cases (78 total) covering the safe-integer bound, the trimmed confirm
+  message, the removed error nodes, and the saving-disabled state.
+  Re-verified green (952 webapp tests, typecheck/lint/build clean).
+- **Next:** `/clear`, then **U4.10** (the eighth side-menu row, gated on the
+  role, plus the docs).

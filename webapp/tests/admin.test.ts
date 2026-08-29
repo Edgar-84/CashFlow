@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ForbiddenError, RetryableError } from "../src/api/client";
+import { ApiError, ForbiddenError, RetryableError } from "../src/api/client";
 import type { AdminAccountRow, AdminUserRow } from "../src/api/types";
 import { setLanguage, t } from "../src/lib/i18n";
 import {
@@ -8,13 +8,23 @@ import {
   blockedAccountIds,
   buildAccountRowView,
   buildUserRowView,
+  createAccountConfirmMessage,
   createAdminBlockController,
+  createAdminCreateController,
+  createFormValid,
+  createNameError,
+  createOwnerNameError,
+  createOwnerTgIdError,
+  EMPTY_CREATE_DRAFT,
+  isCreateFormDirty,
   loadAdmin,
   renderAdmin,
+  renderCreateForm,
   roleName,
   withAccountBlocked,
   withUserBlocked,
   type AdminApi,
+  type CreateAccountDraft,
 } from "../src/screens/admin";
 
 function account(overrides: Partial<AdminAccountRow> = {}): AdminAccountRow {
@@ -50,8 +60,13 @@ function fakeApi(overrides: Partial<AdminApi> = {}): AdminApi {
     listAdminUsers: vi.fn().mockResolvedValue([user()]),
     blockAdminAccount: vi.fn().mockResolvedValue(undefined),
     blockAdminUser: vi.fn().mockResolvedValue(undefined),
+    createAdminAccount: vi.fn().mockResolvedValue(account()),
     ...overrides,
   };
+}
+
+function createDraft(overrides: Partial<CreateAccountDraft> = {}): CreateAccountDraft {
+  return { ...EMPTY_CREATE_DRAFT, ...overrides };
 }
 
 // -- loadAdmin ----------------------------------------------------------
@@ -486,5 +501,261 @@ describe("renderAdmin with a block failure", () => {
     expect(bannerIndex).toBeGreaterThan(accountsListIndex);
     expect(bannerIndex).toBeLessThan(usersListIndex);
     expect(html).toContain("Couldn't update Anna Kim.");
+  });
+});
+
+// -- create-account form (U4.9) ----------------------------------------------
+
+describe("createNameError", () => {
+  it("is null for a non-empty name", () => {
+    expect(createNameError("The Kims")).toBeNull();
+  });
+
+  it("is the field error for an empty or whitespace-only name", () => {
+    expect(createNameError("")).toBe("Enter an account name.");
+    expect(createNameError("   ")).toBe("Enter an account name.");
+  });
+});
+
+describe("createOwnerTgIdError", () => {
+  it("is null for a numeric string, trimmed", () => {
+    expect(createOwnerTgIdError("123456789")).toBeNull();
+    expect(createOwnerTgIdError("  123456789  ")).toBeNull();
+  });
+
+  it("is the field error for empty, non-numeric or decimal input", () => {
+    expect(createOwnerTgIdError("")).toBe("Enter a numeric Telegram ID.");
+    expect(createOwnerTgIdError("abc")).toBe("Enter a numeric Telegram ID.");
+    expect(createOwnerTgIdError("123.45")).toBe("Enter a numeric Telegram ID.");
+    expect(createOwnerTgIdError("-123")).toBe("Enter a numeric Telegram ID.");
+  });
+
+  it("is the field error for a digit string beyond Number.MAX_SAFE_INTEGER", () => {
+    expect(createOwnerTgIdError("99999999999999999999")).toBe("Enter a numeric Telegram ID.");
+    expect(createOwnerTgIdError(String(Number.MAX_SAFE_INTEGER))).toBeNull();
+    expect(createOwnerTgIdError(String(Number.MAX_SAFE_INTEGER + 2))).toBe("Enter a numeric Telegram ID.");
+  });
+});
+
+describe("createOwnerNameError", () => {
+  it("is null for a non-empty name, error for empty", () => {
+    expect(createOwnerNameError("Anna Kim")).toBeNull();
+    expect(createOwnerNameError("")).toBe("Enter the owner's name.");
+  });
+});
+
+describe("createFormValid", () => {
+  it("is true when name, owner Telegram ID and owner name are all valid", () => {
+    expect(createFormValid(createDraft({ name: "The Kims", ownerTgId: "123456789", ownerName: "Anna Kim" }))).toBe(true);
+  });
+
+  it("is false when any of the three required fields is invalid", () => {
+    expect(createFormValid(createDraft({ name: "", ownerTgId: "123", ownerName: "Anna" }))).toBe(false);
+    expect(createFormValid(createDraft({ name: "The Kims", ownerTgId: "abc", ownerName: "Anna" }))).toBe(false);
+    expect(createFormValid(createDraft({ name: "The Kims", ownerTgId: "123", ownerName: "" }))).toBe(false);
+  });
+});
+
+describe("isCreateFormDirty", () => {
+  it("is false for the empty draft", () => {
+    expect(isCreateFormDirty(EMPTY_CREATE_DRAFT)).toBe(false);
+  });
+
+  it("is true when any field differs from its default", () => {
+    expect(isCreateFormDirty(createDraft({ name: "The Kims" }))).toBe(true);
+    expect(isCreateFormDirty(createDraft({ currency: "EUR" }))).toBe(true);
+    expect(isCreateFormDirty(createDraft({ language: "ru" }))).toBe(true);
+    expect(isCreateFormDirty(createDraft({ ownerTgId: "123" }))).toBe(true);
+    expect(isCreateFormDirty(createDraft({ ownerName: "Anna" }))).toBe(true);
+  });
+});
+
+describe("createAccountConfirmMessage", () => {
+  it("fills the owner name, trimmed Telegram ID and account name into the confirm popup's message", () => {
+    const draft = createDraft({ name: "The Kims", ownerTgId: " 123456789 ", ownerName: "Anna Kim" });
+    expect(createAccountConfirmMessage(draft)).toBe(
+      'Anna Kim (Telegram ID 123456789) will be added as the first admin of "The Kims".',
+    );
+  });
+
+  it("trims leading/trailing whitespace on every field, matching what submit() actually posts", () => {
+    const draft = createDraft({ name: "  The Kims  ", ownerTgId: " 123456789 ", ownerName: "  Anna Kim  " });
+    expect(createAccountConfirmMessage(draft)).toBe(
+      'Anna Kim (Telegram ID 123456789) will be added as the first admin of "The Kims".',
+    );
+  });
+});
+
+describe("createAdminCreateController", () => {
+  it("starts with the empty draft and applies setField immutably", () => {
+    const controller = createAdminCreateController(fakeApi());
+    expect(controller.getDraft()).toEqual(EMPTY_CREATE_DRAFT);
+    controller.setField("name", "The Kims");
+    expect(controller.getDraft().name).toBe("The Kims");
+    expect(controller.getDraft().currency).toBe("USD");
+  });
+
+  it("submit() is blocked when the draft is invalid, and calls no API method", async () => {
+    const createAdminAccount = vi.fn();
+    const controller = createAdminCreateController(fakeApi({ createAdminAccount }));
+    const outcome = await controller.submit();
+    expect(outcome).toEqual({ status: "blocked" });
+    expect(createAdminAccount).not.toHaveBeenCalled();
+  });
+
+  it("submit() posts the trimmed, typed draft and returns the created account on success", async () => {
+    const created = account({ id: "acc-new", name: "The Kims" });
+    const createAdminAccount = vi.fn().mockResolvedValue(created);
+    const controller = createAdminCreateController(fakeApi({ createAdminAccount }));
+    controller.setField("name", "  The Kims  ");
+    controller.setField("currency", "EUR");
+    controller.setField("language", "ru");
+    controller.setField("ownerTgId", " 123456789 ");
+    controller.setField("ownerName", "  Anna Kim  ");
+
+    const outcome = await controller.submit();
+
+    expect(createAdminAccount).toHaveBeenCalledWith({
+      name: "The Kims",
+      currency: "EUR",
+      language: "ru",
+      owner_tg_id: 123456789,
+      owner_name: "Anna Kim",
+    });
+    expect(outcome).toEqual({ status: "success", account: created });
+  });
+
+  it("submit() maps a 409 to the duplicate-owner error message", async () => {
+    const createAdminAccount = vi.fn().mockRejectedValue(new ApiError("conflict", 409));
+    const controller = createAdminCreateController(fakeApi({ createAdminAccount }));
+    controller.setField("name", "The Kims");
+    controller.setField("ownerTgId", "123456789");
+    controller.setField("ownerName", "Anna Kim");
+
+    const outcome = await controller.submit();
+    expect(outcome).toEqual({ status: "error", message: "That Telegram user already has an account." });
+  });
+
+  it("submit() maps any other failure to the generic error message", async () => {
+    const createAdminAccount = vi.fn().mockRejectedValue(new RetryableError());
+    const controller = createAdminCreateController(fakeApi({ createAdminAccount }));
+    controller.setField("name", "The Kims");
+    controller.setField("ownerTgId", "123456789");
+    controller.setField("ownerName", "Anna Kim");
+
+    const outcome = await controller.submit();
+    expect(outcome).toEqual({ status: "error", message: "Couldn't create the account. Try again." });
+  });
+
+  it("rejects a duplicate tap while the first submit is still in flight", async () => {
+    let resolveFirst!: (v: AdminAccountRow) => void;
+    const createAdminAccount = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<AdminAccountRow>((r) => (resolveFirst = r)));
+    const controller = createAdminCreateController(fakeApi({ createAdminAccount }));
+    controller.setField("name", "The Kims");
+    controller.setField("ownerTgId", "123456789");
+    controller.setField("ownerName", "Anna Kim");
+
+    const first = controller.submit();
+    const second = await controller.submit();
+    expect(second).toEqual({ status: "blocked" });
+    expect(createAdminAccount).toHaveBeenCalledTimes(1);
+
+    resolveFirst(account());
+    await first;
+  });
+});
+
+describe("renderCreateForm", () => {
+  it("renders the header, every field and both action buttons", () => {
+    const html = renderCreateForm(EMPTY_CREATE_DRAFT, false, null);
+    expect(html).toContain("New account");
+    expect(html).toContain('data-testid="admin-create-name"');
+    expect(html).toContain('data-testid="admin-create-currency"');
+    expect(html).toContain('data-testid="admin-create-language"');
+    expect(html).toContain('data-testid="admin-create-owner-tg-id"');
+    expect(html).toContain('data-testid="admin-create-owner-name"');
+    expect(html).toContain('data-action="admin-create-submit"');
+    expect(html).toContain('data-action="admin-create-cancel"');
+  });
+
+  it("defaults the currency select to USD and the language select to English, both selected", () => {
+    const html = renderCreateForm(EMPTY_CREATE_DRAFT, false, null);
+    expect(html).toMatch(/<option value="USD" selected>[^<]*<\/option>/);
+    expect(html).toMatch(/<option value="en" selected>[^<]*<\/option>/);
+  });
+
+  it("shows no field errors on a blank, un-attempted form", () => {
+    const html = renderCreateForm(EMPTY_CREATE_DRAFT, false, null);
+    expect(html).not.toContain("Enter an account name.");
+    expect(html).not.toContain("Enter a numeric Telegram ID.");
+    expect(html).not.toContain("Enter the owner's name.");
+  });
+
+  it("shows the three field errors once a blocked attempt has happened, for an invalid draft", () => {
+    const html = renderCreateForm(EMPTY_CREATE_DRAFT, true, null);
+    expect(html).toContain("Enter an account name.");
+    expect(html).toContain("Enter a numeric Telegram ID.");
+    expect(html).toContain("Enter the owner's name.");
+  });
+
+  it("shows no field errors after an attempt, for a valid draft", () => {
+    const draft = createDraft({ name: "The Kims", ownerTgId: "123456789", ownerName: "Anna Kim" });
+    const html = renderCreateForm(draft, true, null);
+    expect(html).not.toContain("Enter an account name.");
+    expect(html).not.toContain("Enter a numeric Telegram ID.");
+    expect(html).not.toContain("Enter the owner's name.");
+  });
+
+  it("renders the submit-error banner only when one is present", () => {
+    expect(renderCreateForm(EMPTY_CREATE_DRAFT, false, null)).not.toContain('data-testid="admin-create-submit-error"');
+    const html = renderCreateForm(EMPTY_CREATE_DRAFT, false, "That Telegram user already has an account.");
+    expect(html).toContain('data-testid="admin-create-submit-error"');
+    expect(html).toContain("That Telegram user already has an account.");
+  });
+
+  it("preserves the typed draft's values in the rendered fields", () => {
+    const draft = createDraft({ name: "The Kims", ownerTgId: "123456789", ownerName: "Anna Kim" });
+    const html = renderCreateForm(draft, false, null);
+    expect(html).toContain('value="The Kims"');
+    expect(html).toContain('value="123456789"');
+    expect(html).toContain('value="Anna Kim"');
+  });
+
+  it("renders no error line at all for the Currency/Language fields — the screen doc's Layout table has no 3a/4a error region", () => {
+    const html = renderCreateForm(EMPTY_CREATE_DRAFT, true, null);
+    expect(html).not.toContain('data-testid="admin-create-currency-error"');
+    expect(html).not.toContain('data-testid="admin-create-language-error"');
+  });
+
+  it("is not disabled by default (saving omitted)", () => {
+    const html = renderCreateForm(EMPTY_CREATE_DRAFT, false, null);
+    expect(html).not.toContain("disabled");
+  });
+
+  it("disables every field and both buttons while saving", () => {
+    const html = renderCreateForm(EMPTY_CREATE_DRAFT, false, null, true);
+    expect(html).toMatch(/data-testid="admin-create-name"[^>]*disabled/);
+    expect(html).toMatch(/data-testid="admin-create-currency"[^>]*disabled/);
+    expect(html).toMatch(/data-testid="admin-create-language"[^>]*disabled/);
+    expect(html).toMatch(/data-testid="admin-create-owner-tg-id"[^>]*disabled/);
+    expect(html).toMatch(/data-testid="admin-create-owner-name"[^>]*disabled/);
+    expect(html).toMatch(/data-action="admin-create-submit"[^>]*disabled/);
+    expect(html).toMatch(/data-action="admin-create-cancel"[^>]*disabled/);
+  });
+});
+
+describe("renderCreateForm in Russian and Ukrainian", () => {
+  afterEach(() => setLanguage("en"));
+
+  it("translates the header and field labels", () => {
+    for (const lang of ["ru", "uk"] as const) {
+      setLanguage(lang);
+      const html = renderCreateForm(EMPTY_CREATE_DRAFT, false, null);
+      expect(html).toContain(t("admin.create.header"));
+      expect(html).toContain(t("admin.create.field.name.label"));
+      expect(html).toContain(t("admin.create.action.create"));
+    }
   });
 });

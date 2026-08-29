@@ -1,12 +1,13 @@
-/** Screen 10 — Admin, list mode (docs/ui/screens/10-admin.md). Reached only
- * from the side menu's eighth row, gated on `role === "system_admin"`
- * (U4.10 — not wired yet; this unit builds the screen itself, matching
- * task-methodology's own decomposition order of pure rendering before
- * wiring). U4.7 covered the Accounts/Users lists and the screen's four
- * top-level states (loading, error, 403, ready). This unit (U4.8) wires
- * the Block/Unblock trigger on each row: confirm → optimistic flip → PATCH
- * → revert-and-banner on failure. The create-account form and its
- * MainButton are U4.9, still its own unit.
+/** Screen 10 — Admin (docs/ui/screens/10-admin.md). Reached only from the
+ * side menu's eighth row, gated on `role === "system_admin"` (U4.10 — not
+ * wired yet; this unit builds the screen itself, matching task-methodology's
+ * own decomposition order of pure rendering before wiring). U4.7 covered the
+ * Accounts/Users lists and the screen's four top-level states (loading,
+ * error, 403, ready); U4.8 wired the Block/Unblock trigger on each row. This
+ * unit (U4.9) adds Create-account mode: List mode's MainButton switches
+ * `mount`'s internal `mode` to `"create"`, replacing the two lists with
+ * `renderCreateForm` in place — same screen instance, no navigation, per the
+ * screen doc's Layout section.
  *
  * Unlike every other screen, there is no cache: `10-admin.md`'s States
  * table is explicit that this screen never persists cross-account data
@@ -23,20 +24,28 @@
  *
  * Three-layer split, same shape as every other screen:
  *  - data: `loadAdmin`, the pure `buildAccountRowView`/`buildUserRowView`
- *    row-model builders, the block confirm/failure copy builders and
- *    `createAdminBlockController` (the double-submit guard, same shape as
- *    `settings.ts::createSettingsController`) — all directly unit-tested,
- *    no DOM.
- *  - presentation: `renderAdmin` (pure, HTML strings).
+ *    row-model builders, the block confirm/failure copy builders,
+ *    `createAdminBlockController` (U4.8) and `createAdminCreateController`
+ *    (U4.9, the create form's own double-submit guard, same shape as
+ *    `budget-form.ts::createBudgetFormController`) — all directly
+ *    unit-tested, no DOM.
+ *  - presentation: `renderAdmin` (List mode) and `renderCreateForm` (Create
+ *    mode) — both pure, HTML strings.
  *  - mount: thin DOM glue, not meaningfully unit-tested, same accepted gap
- *    as every other screen's mount.
+ *    as every other screen's mount. Owns the List/Create mode switch itself
+ *    (`mode`, `createController`) since neither `AdminState` nor
+ *    `renderAdmin`'s own contract changed for this unit — Create mode is
+ *    entirely mount-local state, matching `budget-form.ts`'s own single-mode
+ *    screen instead of widening `AdminState` for a mode that isn't fetched
+ *    data.
  */
 
-import { ForbiddenError } from "../api/client";
-import type { AdminAccountRow, AdminUserRow, Role, Uuid } from "../api/types";
+import { ApiError, ForbiddenError } from "../api/client";
+import type { AdminAccountCreate, AdminAccountRow, AdminUserRow, Currency, Language, Role, Uuid } from "../api/types";
 import { t, type Catalogue } from "../lib/i18n";
-import { confirmAction, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
-import { languageName } from "./language";
+import { confirmAction, confirmDiscard, haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
+import { LANGUAGE_ORDER, languageName } from "./language";
+import { CURRENCY_ORDER, currencyName } from "./settings";
 
 // -- data ---------------------------------------------------------------
 
@@ -46,6 +55,7 @@ export interface AdminApi {
   listAdminUsers(): Promise<AdminUserRow[]>;
   blockAdminAccount(id: Uuid, isBlocked: boolean): Promise<unknown>;
   blockAdminUser(id: Uuid, isBlocked: boolean): Promise<unknown>;
+  createAdminAccount(data: AdminAccountCreate): Promise<AdminAccountRow>;
 }
 
 export interface AdminData {
@@ -267,6 +277,146 @@ export function createAdminBlockController(api: AdminApi): AdminBlockController 
   };
 }
 
+// -- create-account form (U4.9, 10-admin.md's Create-account mode) --------
+
+export interface CreateAccountDraft {
+  name: string;
+  currency: Currency;
+  language: Language;
+  /** Raw text, not yet parsed — `createOwnerTgIdError` validates it and
+   * `createAdminCreateController::submit` converts it to `number` only once
+   * the whole draft is valid (screen doc's Edge cases: caught client-side,
+   * never reaches the network). */
+  ownerTgId: string;
+  ownerName: string;
+}
+
+/** The form's opening state (screen doc's Layout table: defaults to USD/
+ * English) — also `isCreateFormDirty`'s baseline. */
+export const EMPTY_CREATE_DRAFT: CreateAccountDraft = {
+  name: "",
+  currency: "USD",
+  language: "en",
+  ownerTgId: "",
+  ownerName: "",
+};
+
+/** `null` while valid; inline error text otherwise. Same "empty is invalid,
+ * not merely untouched" shape as `categories.ts::categoryNameError` —
+ * `mount`'s own `attempted` flag (not part of this pure function) decides
+ * *when* to display it, matching every other field-error line in this app. */
+export function createNameError(name: string): string | null {
+  return name.trim() === "" ? t("admin.create.field.name.error") : null;
+}
+
+/** Real Telegram user ids fit well inside `Number.MAX_SAFE_INTEGER`; this
+ * guard exists so an absurdly long digit string fails here, client-side,
+ * rather than silently losing precision through `Number(...)` in
+ * `createAdminCreateController::submit` and posting the wrong id with no
+ * error surfaced anywhere (reviewer finding, U4.9 round 1). */
+export function createOwnerTgIdError(ownerTgId: string): string | null {
+  const trimmed = ownerTgId.trim();
+  if (!/^\d+$/.test(trimmed) || !Number.isSafeInteger(Number(trimmed))) {
+    return t("admin.create.field.ownerTgId.error");
+  }
+  return null;
+}
+
+export function createOwnerNameError(ownerName: string): string | null {
+  return ownerName.trim() === "" ? t("admin.create.field.ownerName.error") : null;
+}
+
+/** Currency/language are never invalid — both are `<select>`s seeded with a
+ * real default (screen doc's AC: name, owner Telegram ID and owner name are
+ * the three fields that can actually fail). */
+export function createFormValid(draft: CreateAccountDraft): boolean {
+  return (
+    createNameError(draft.name) === null &&
+    createOwnerTgIdError(draft.ownerTgId) === null &&
+    createOwnerNameError(draft.ownerName) === null
+  );
+}
+
+/** Dirty rule (screen doc's Interactions section): any field differs from
+ * `EMPTY_CREATE_DRAFT`. Gates Cancel/BackButton's discard popup. */
+export function isCreateFormDirty(draft: CreateAccountDraft): boolean {
+  return (
+    draft.name.trim() !== "" ||
+    draft.currency !== EMPTY_CREATE_DRAFT.currency ||
+    draft.language !== EMPTY_CREATE_DRAFT.language ||
+    draft.ownerTgId.trim() !== "" ||
+    draft.ownerName.trim() !== ""
+  );
+}
+
+/** The create-confirm popup's message (screen doc's `create.confirm.message`)
+ * — fed to `confirmAction`, so non-escaping `fillTemplate` like every other
+ * native-chrome message in this file. Trims every value the same way
+ * `createAdminCreateController::submit` trims the POST body, so the popup
+ * never shows leading/trailing whitespace the actual request wouldn't send
+ * (reviewer finding, U4.9 round 1). */
+export function createAccountConfirmMessage(draft: CreateAccountDraft): string {
+  return fillTemplate(t("admin.create.confirm.message"), {
+    ownerName: draft.ownerName.trim(),
+    tgId: draft.ownerTgId.trim(),
+    accountName: draft.name.trim(),
+  });
+}
+
+function createAccountErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status === 409) {
+    return t("admin.create.error.duplicateOwner");
+  }
+  return t("admin.create.error.generic");
+}
+
+export type CreateAccountOutcome =
+  | { status: "success"; account: AdminAccountRow }
+  | { status: "blocked" }
+  | { status: "error"; message: string };
+
+export interface AdminCreateController {
+  getDraft(): CreateAccountDraft;
+  setField<K extends keyof CreateAccountDraft>(field: K, value: CreateAccountDraft[K]): void;
+  submit(): Promise<CreateAccountOutcome>;
+}
+
+/** Owns the draft and the `POST /admin/accounts` round trip. `submitting`
+ * flips true synchronously (before the first `await`) so a double tap is
+ * rejected before a second request fires — same guard shape
+ * `budget-form.ts::createBudgetFormController` uses for its own `save`. */
+export function createAdminCreateController(api: AdminApi): AdminCreateController {
+  let draft: CreateAccountDraft = { ...EMPTY_CREATE_DRAFT };
+  let submitting = false;
+
+  return {
+    getDraft: () => draft,
+    setField(field, value): void {
+      draft = { ...draft, [field]: value };
+    },
+    async submit(): Promise<CreateAccountOutcome> {
+      if (submitting || !createFormValid(draft)) {
+        return { status: "blocked" };
+      }
+      submitting = true;
+      try {
+        const account = await api.createAdminAccount({
+          name: draft.name.trim(),
+          currency: draft.currency,
+          language: draft.language,
+          owner_tg_id: Number(draft.ownerTgId.trim()),
+          owner_name: draft.ownerName.trim(),
+        });
+        return { status: "success", account };
+      } catch (err) {
+        return { status: "error", message: createAccountErrorMessage(err) };
+      } finally {
+        submitting = false;
+      }
+    },
+  };
+}
+
 // -- presentation ---------------------------------------------------------
 
 function escapeHtml(value: string): string {
@@ -391,6 +541,95 @@ export function renderAdmin(state: AdminState, failure: AdminBlockFailure | null
   }
 }
 
+/** `withError` is false for the Currency/Language fields (screen doc's
+ * Layout table has no "3a"/"4a" error subregion for them, only 2a/5a/6a —
+ * NIT fixed, U4.9 round 1) — they render no `.field-error` node at all
+ * rather than an always-empty one. */
+function renderCreateField(id: string, label: string, inputHtml: string, error: string | null = null, withError = true): string {
+  const errorRow = withError
+    ? `<p class="field-error" data-testid="${id}-error" aria-live="polite">${error ? escapeHtml(error) : ""}</p>`
+    : "";
+  return `<div class="admin-create-field">
+    <label class="cat-form-label" for="${id}">${escapeHtml(label)}</label>
+    <div class="card field">${inputHtml}</div>
+    ${errorRow}
+  </div>`;
+}
+
+function renderCurrencyOptions(selected: Currency): string {
+  return CURRENCY_ORDER.map(
+    (code) => `<option value="${code}"${code === selected ? " selected" : ""}>${escapeHtml(currencyName(code))}</option>`,
+  ).join("");
+}
+
+function renderLanguageOptions(selected: Language): string {
+  return LANGUAGE_ORDER.map(
+    (code) => `<option value="${code}"${code === selected ? " selected" : ""}>${escapeHtml(languageName(code))}</option>`,
+  ).join("");
+}
+
+/** Create-account mode (screen doc's Create-account mode Layout table).
+ * `attempted` gates when field errors render — `false` on open (a blank form
+ * shows no errors), set once a blocked "Create account" tap is caught (same
+ * "never shown immediately on open" rule `categories.ts::nameInteracted`
+ * documents for 06b, simplified to one flag for this single-attempt form
+ * rather than per-field blur tracking). `saving` disables every field and
+ * both buttons — screen doc's States table: "Saving | ... | form and
+ * buttons disabled; exactly one POST regardless of taps" (reviewer finding,
+ * U4.9 round 1 — the controller's own guard already made the POST-count half
+ * of that AC hold, but nothing visually disabled the form while it did). */
+export function renderCreateForm(
+  draft: CreateAccountDraft,
+  attempted: boolean,
+  submitError: string | null,
+  saving = false,
+): string {
+  const nameError = attempted ? createNameError(draft.name) : null;
+  const ownerTgIdError = attempted ? createOwnerTgIdError(draft.ownerTgId) : null;
+  const ownerNameError = attempted ? createOwnerNameError(draft.ownerName) : null;
+  const disabledAttr = saving ? " disabled" : "";
+  return `<div class="admin-create-form" data-testid="admin-create-form">
+    <p class="admin-create-header">${escapeHtml(t("admin.create.header"))}</p>
+    ${renderCreateField(
+      "admin-create-name",
+      t("admin.create.field.name.label"),
+      `<input id="admin-create-name" class="admin-input" data-testid="admin-create-name" placeholder="${escapeHtml(t("admin.create.field.name.placeholder"))}" value="${escapeHtml(draft.name)}"${disabledAttr} />`,
+      nameError,
+    )}
+    ${renderCreateField(
+      "admin-create-currency",
+      t("admin.create.field.currency.label"),
+      `<select id="admin-create-currency" class="admin-select" data-testid="admin-create-currency"${disabledAttr}>${renderCurrencyOptions(draft.currency)}</select>`,
+      null,
+      false,
+    )}
+    ${renderCreateField(
+      "admin-create-language",
+      t("admin.create.field.language.label"),
+      `<select id="admin-create-language" class="admin-select" data-testid="admin-create-language"${disabledAttr}>${renderLanguageOptions(draft.language)}</select>`,
+      null,
+      false,
+    )}
+    ${renderCreateField(
+      "admin-create-owner-tg-id",
+      t("admin.create.field.ownerTgId.label"),
+      `<input id="admin-create-owner-tg-id" class="admin-input" data-testid="admin-create-owner-tg-id" inputmode="numeric" placeholder="${escapeHtml(t("admin.create.field.ownerTgId.placeholder"))}" value="${escapeHtml(draft.ownerTgId)}"${disabledAttr} />`,
+      ownerTgIdError,
+    )}
+    ${renderCreateField(
+      "admin-create-owner-name",
+      t("admin.create.field.ownerName.label"),
+      `<input id="admin-create-owner-name" class="admin-input" data-testid="admin-create-owner-name" placeholder="${escapeHtml(t("admin.create.field.ownerName.placeholder"))}" value="${escapeHtml(draft.ownerName)}"${disabledAttr} />`,
+      ownerNameError,
+    )}
+    ${submitError ? `<p class="submit-error" data-testid="admin-create-submit-error">${escapeHtml(submitError)}</p>` : ""}
+    <div class="detail-edit-actions admin-create-actions">
+      <button type="button" data-action="admin-create-submit"${disabledAttr}>${escapeHtml(t("admin.create.action.create"))}</button>
+      <button type="button" data-action="admin-create-cancel"${disabledAttr}>${escapeHtml(t("admin.create.action.cancel"))}</button>
+    </div>
+  </div>`;
+}
+
 // -- mount (DOM glue; not meaningfully unit-testable under Node, same
 //    accepted gap as every other screen's mount) ---------------------------
 
@@ -399,8 +638,10 @@ export interface AdminHandlers {
   onBack: () => void;
 }
 
-/** No MainButton in this unit — the only List-mode action it would offer is
- * "Create account" (U4.9), which doesn't exist yet. */
+/** List mode's MainButton (screen doc's Telegram section: "Create account" —
+ * always enabled, always visible). Create mode hides MainButton entirely
+ * (`04b-budget-form.md`'s own reasoning, reused verbatim) — `mount` calls
+ * this again on switching back to List mode. */
 export function applyAdminChrome(onBack: () => void): void {
   setBackButtonHandler(onBack);
   mainButton.hide();
@@ -422,7 +663,190 @@ export function mount(root: HTMLElement, state: AdminState, api: AdminApi, handl
   let users = state.users;
   let failure: AdminBlockFailure | null = null;
 
+  // -- create-account mode (U4.9) -----------------------------------------
+  // `createController` is `null` in List mode and freshly instantiated on
+  // every `openCreateMode()` — never reused across a cancel/reopen, so a
+  // discarded draft never resurfaces.
+  let mode: "list" | "create" = "list";
+  let createController: AdminCreateController | null = null;
+  let createAttempted = false;
+  let createSubmitError: string | null = null;
+  /** Screen doc's Saving state: "form and buttons disabled". Set once the
+   * confirm popup resolves and the `POST` is actually about to fire, cleared
+   * when it settles (reviewer finding, U4.9 round 1 — the controller's own
+   * guard already made the POST-count half of that AC hold, but nothing
+   * visually disabled the form while it did). */
+  let createSaving = false;
+
+  /** Re-applied on every `render()` (cheap: `setBackButtonHandler`/
+   * `mainButton.onClick` both unwire-then-rewire per their own contract) so
+   * chrome always matches the current mode without separate bookkeeping.
+   * BackButton's destination is Home in **both** modes (screen doc's
+   * Interactions table); only whether a discard popup interrupts first
+   * depends on mode. */
+  function updateChrome(): void {
+    setBackButtonHandler(() => void requestCloseCreate(true));
+    if (mode === "create") {
+      mainButton.hide();
+    } else {
+      mainButton.show(t("admin.create.mainButton"));
+      mainButton.onClick(openCreateMode);
+    }
+  }
+
+  function openCreateMode(): void {
+    mode = "create";
+    createController = createAdminCreateController(api);
+    createAttempted = false;
+    createSubmitError = null;
+    createSaving = false;
+    render();
+    // Screen doc's Viewport section: autofocus the account-name field, once,
+    // on open — not on every re-render while typing/failing a submit.
+    root.querySelector<HTMLInputElement>('[data-testid="admin-create-name"]')?.focus();
+  }
+
+  /** Shared by BackButton (`exitToHome: true`, always) and Cancel
+   * (`exitToHome: false` — "back to List mode", screen doc's Interactions
+   * table). Both apply the same dirty-check mechanism first. */
+  async function requestCloseCreate(exitToHome: boolean): Promise<void> {
+    if (!createController) {
+      if (exitToHome) {
+        handlers.onBack();
+      }
+      return;
+    }
+    if (isCreateFormDirty(createController.getDraft())) {
+      const confirmed = await confirmDiscard(t("admin.create.discardChanges"));
+      if (!confirmed) {
+        return;
+      }
+    }
+    createController = null;
+    createAttempted = false;
+    createSubmitError = null;
+    if (exitToHome) {
+      handlers.onBack();
+    } else {
+      mode = "list";
+      render();
+    }
+  }
+
+  async function handleCreateSubmit(): Promise<void> {
+    if (!createController) {
+      return;
+    }
+    // Captured once, before any `await` — `createController` is reassigned
+    // elsewhere in this closure (`openCreateMode`/`requestCloseCreate`), so
+    // TS can't narrow it as non-null past an `await` without this.
+    const draftController = createController;
+    const draft = draftController.getDraft();
+    if (!createFormValid(draft)) {
+      createAttempted = true;
+      render();
+      return;
+    }
+    const confirmed = await confirmAction(createAccountConfirmMessage(draft));
+    if (!confirmed) {
+      return;
+    }
+    createSaving = true;
+    render();
+    const outcome = await draftController.submit();
+    createSaving = false;
+    if (outcome.status === "success") {
+      haptics.notification("success");
+      mode = "list";
+      createController = null;
+      createAttempted = false;
+      createSubmitError = null;
+      // Screen doc's Success state: both lists refetch so the new account
+      // and its owner appear immediately, no manual reload.
+      try {
+        const [freshAccounts, freshUsers] = await Promise.all([api.listAdminAccounts(), api.listAdminUsers()]);
+        accounts = freshAccounts;
+        users = freshUsers;
+      } catch {
+        // The account was already created successfully; keep the pre-create
+        // lists rather than crash on a refetch failure — a stale list here
+        // is a display nicety, not correctness, and this screen has no
+        // offline cache to fall back on either (its own States table).
+      }
+      render();
+    } else if (outcome.status === "error") {
+      haptics.notification("error");
+      createSubmitError = outcome.message;
+      render();
+    }
+    // "blocked" only fires from a stale double tap racing `confirmAction`'s
+    // own await — nothing left to update.
+  }
+
+  function wireCreateForm(): void {
+    if (!createController) {
+      return;
+    }
+    const draftController = createController;
+
+    function patchCreateValidity(): void {
+      if (!createAttempted) {
+        return;
+      }
+      const draft = draftController.getDraft();
+      const nameErrorEl = root.querySelector<HTMLElement>('[data-testid="admin-create-name-error"]');
+      if (nameErrorEl) {
+        nameErrorEl.textContent = createNameError(draft.name) ?? "";
+      }
+      const tgIdErrorEl = root.querySelector<HTMLElement>('[data-testid="admin-create-owner-tg-id-error"]');
+      if (tgIdErrorEl) {
+        tgIdErrorEl.textContent = createOwnerTgIdError(draft.ownerTgId) ?? "";
+      }
+      const ownerNameErrorEl = root.querySelector<HTMLElement>('[data-testid="admin-create-owner-name-error"]');
+      if (ownerNameErrorEl) {
+        ownerNameErrorEl.textContent = createOwnerNameError(draft.ownerName) ?? "";
+      }
+    }
+
+    const nameInput = root.querySelector<HTMLInputElement>('[data-testid="admin-create-name"]');
+    nameInput?.addEventListener("input", () => {
+      draftController.setField("name", nameInput.value);
+      patchCreateValidity();
+    });
+    const currencySelect = root.querySelector<HTMLSelectElement>('[data-testid="admin-create-currency"]');
+    currencySelect?.addEventListener("change", () => {
+      draftController.setField("currency", currencySelect.value as Currency);
+    });
+    const languageSelect = root.querySelector<HTMLSelectElement>('[data-testid="admin-create-language"]');
+    languageSelect?.addEventListener("change", () => {
+      draftController.setField("language", languageSelect.value as Language);
+    });
+    const ownerTgIdInput = root.querySelector<HTMLInputElement>('[data-testid="admin-create-owner-tg-id"]');
+    ownerTgIdInput?.addEventListener("input", () => {
+      draftController.setField("ownerTgId", ownerTgIdInput.value);
+      patchCreateValidity();
+    });
+    const ownerNameInput = root.querySelector<HTMLInputElement>('[data-testid="admin-create-owner-name"]');
+    ownerNameInput?.addEventListener("input", () => {
+      draftController.setField("ownerName", ownerNameInput.value);
+      patchCreateValidity();
+    });
+
+    root.querySelector('[data-action="admin-create-submit"]')?.addEventListener("click", () => {
+      void handleCreateSubmit();
+    });
+    root.querySelector('[data-action="admin-create-cancel"]')?.addEventListener("click", () => {
+      void requestCloseCreate(false);
+    });
+  }
+
   const render = (): void => {
+    updateChrome();
+    if (mode === "create" && createController) {
+      root.innerHTML = renderCreateForm(createController.getDraft(), createAttempted, createSubmitError, createSaving);
+      wireCreateForm();
+      return;
+    }
     root.innerHTML = renderAdmin(
       { status: "ready", accounts, users, selfAccountId: state.selfAccountId, selfUserId: state.selfUserId },
       failure,
