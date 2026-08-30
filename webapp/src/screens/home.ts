@@ -41,6 +41,7 @@ import type {
   Currency,
   Language,
   PeriodTotal,
+  Role,
   Uuid,
 } from "../api/types";
 import { setLanguage, t, type Catalogue } from "../lib/i18n";
@@ -138,13 +139,25 @@ export interface HomeData {
   /** `UserMeResponse.account_name` — the side menu's header (D409); the menu
    * never fetches its own copy of it (`../components/side-menu.md`). */
   accountName: string;
+  /** `UserMeResponse.role === "system_admin"` (U4.10) — gates the side menu's
+   * eighth row. Optional/defaulted rather than a new required field, so the
+   * many existing `buildHomeData`/`HomeState` fixtures that don't care about
+   * it stay unchanged. */
+  isSystemAdmin?: boolean;
 }
 
 export type HomeState =
   | { status: "loading"; period: PeriodValue }
   | { status: "error"; message: string; period: PeriodValue }
   | { status: "forbidden" }
-  | { status: "empty"; period: PeriodValue; currency: Currency; today: string; accountName: string }
+  | {
+      status: "empty";
+      period: PeriodValue;
+      currency: Currency;
+      today: string;
+      accountName: string;
+      isSystemAdmin?: boolean;
+    }
   | ({ status: "ready" } & HomeData)
   | ({ status: "offline"; lastSyncedAt: string } & HomeData);
 
@@ -159,6 +172,7 @@ export function buildHomeData(input: {
   period: PeriodValue;
   today: string;
   accountName: string;
+  isSystemAdmin?: boolean;
 }): HomeData {
   const colorBySlot = new Map(assignCategoryColors(input.categories).map((c) => [c.id, c.slot]));
   const nameById = new Map(input.categories.map((c) => [c.id, c.name]));
@@ -288,11 +302,12 @@ export function buildHomeData(input: {
     period: input.period,
     today: input.today,
     accountName: input.accountName,
+    isSystemAdmin: input.isSystemAdmin ?? false,
   };
 }
 
 export interface HomeApi {
-  getMe(): Promise<{ currency: Currency; today: string; account_name: string; language: Language }>;
+  getMe(): Promise<{ currency: Currency; today: string; account_name: string; language: Language; role: Role }>;
   listCategories(): Promise<CategoryResponse[]>;
   statisticsByCategory(query: PeriodQuery): Promise<CategoryTotal[]>;
   statisticsByPeriod(query: PeriodQuery): Promise<PeriodTotal>;
@@ -351,10 +366,18 @@ export async function loadHome(api: HomeApi, cache: HomeCache, period: PeriodVal
       period,
       today: me.today,
       accountName: me.account_name,
+      isSystemAdmin: me.role === "system_admin",
     });
     cache.set({ data, syncedAt: new Date().toISOString() });
     return periodTotal.total === 0
-      ? { status: "empty", period, currency: data.currency, today: data.today, accountName: data.accountName }
+      ? {
+          status: "empty",
+          period,
+          currency: data.currency,
+          today: data.today,
+          accountName: data.accountName,
+          isSystemAdmin: data.isSystemAdmin,
+        }
       : { status: "ready", ...data };
   } catch (err) {
     if (err instanceof ForbiddenError) {
@@ -913,23 +936,29 @@ function openPicker(
 // the forbidden state only — every other state's viewer can write.
 function menuPropsFor(
   state: HomeState,
-): Pick<SideMenuProps, "accountName" | "currency" | "lastSyncedAt" | "readOnly"> {
+): Pick<SideMenuProps, "accountName" | "currency" | "lastSyncedAt" | "readOnly" | "isSystemAdmin"> {
   switch (state.status) {
     case "empty":
     case "ready":
-      return { accountName: state.accountName, currency: state.currency, readOnly: false };
+      return {
+        accountName: state.accountName,
+        currency: state.currency,
+        readOnly: false,
+        isSystemAdmin: state.isSystemAdmin ?? false,
+      };
     case "offline":
       return {
         accountName: state.accountName,
         currency: state.currency,
         lastSyncedAt: state.lastSyncedAt,
         readOnly: false,
+        isSystemAdmin: state.isSystemAdmin ?? false,
       };
     case "forbidden":
-      return { accountName: null, currency: null, readOnly: true };
+      return { accountName: null, currency: null, readOnly: true, isSystemAdmin: false };
     case "loading":
     case "error":
-      return { accountName: null, currency: null, readOnly: false };
+      return { accountName: null, currency: null, readOnly: false, isSystemAdmin: false };
   }
 }
 

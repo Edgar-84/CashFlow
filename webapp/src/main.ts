@@ -105,6 +105,12 @@ import {
   mount as mountLanguage,
   type LanguageHandlers,
 } from "./screens/language";
+import {
+  applyAdminChrome,
+  loadAdmin,
+  mount as mountAdmin,
+  type AdminHandlers,
+} from "./screens/admin";
 import type { CategoryResponse, Currency, ExpenseResponse, Uuid } from "./api/types";
 
 const client = new ApiClient({ getInitData });
@@ -174,7 +180,8 @@ type ActiveScreen =
   | "tag-form"
   | "statistics"
   | "settings"
-  | "language";
+  | "language"
+  | "admin";
 let activeScreen: ActiveScreen | null = null;
 
 /** Central setter for `activeScreen`, called at the top of every `showX`
@@ -294,6 +301,8 @@ async function showHome(): Promise<void> {
         void showTags();
       } else if (item === "settings") {
         void showSettings();
+      } else if (item === "admin") {
+        void showAdmin();
       }
     },
     onRowTap: (target) => {
@@ -1100,6 +1109,41 @@ async function showLanguage(): Promise<void> {
   const state = await loadLanguage(client, languageCache);
   applyLanguageChrome(handlers.onBack);
   mountLanguage(root, state, client, handlers);
+}
+
+/** Mounts Admin (screen 10), reached only from the side menu's eighth row —
+ * `isSystemAdmin`-gated there, so this route is unreachable from the UI for
+ * any other role. There is no separate client-side role check here: the real
+ * gate is server-side (`GET /admin/accounts`/`GET /admin/users`'s own
+ * `require_system_admin`), and `loadAdmin` already turns that 403 into its
+ * `forbidden` state for any caller who somehow lands on this function anyway.
+ * `onBack` always returns to Home, in both List and Create mode
+ * (`admin.ts`'s own `mount` owns the mode-dependent discard-confirm before
+ * calling it — see its `requestCloseCreate`). No cache: `10-admin.md`'s
+ * States table is explicit this screen never persists cross-account data
+ * locally, so `showAdmin` always refetches, same as `showSettings`/
+ * `showLanguage`. */
+async function showAdmin(): Promise<void> {
+  const root = getRoot();
+  if (!root) {
+    return;
+  }
+  setActiveScreen("admin");
+
+  const handlers: AdminHandlers = {
+    onRetry: () => {
+      void showAdmin();
+    },
+    onBack: () => {
+      void showHome();
+    },
+  };
+
+  applyAdminChrome(handlers.onBack);
+  mountAdmin(root, { status: "loading" }, client, handlers);
+  const state = await loadAdmin(client);
+  applyAdminChrome(handlers.onBack);
+  mountAdmin(root, state, client, handlers);
 }
 
 /** Boots the app onto `#app`. Guarded the same way every DOM-touching export

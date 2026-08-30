@@ -40,6 +40,7 @@ const en = {
   "item.categories": "Categories",
   "item.tags": "Tags",
   "item.settings": "Settings",
+  "item.admin": "Admin", // U4.10 — rendered only for system_admin
   "footer.synced": "Synced {date} {time}",
   // Composed with a raw, non-escaping substitution (home.ts's own
   // `fillTemplate`), never `t()`'s vars — `budgetAlertMessage` is reused
@@ -356,6 +357,7 @@ const ru: Catalogue = {
   "item.categories": "Категории",
   "item.tags": "Теги",
   "item.settings": "Настройки",
+  "item.admin": "Админ",
   "footer.synced": "Синхронизировано {date} {time}",
   "alert.over": "{category}: превышен бюджет на {amount} {currency}",
   "alert.warn": "{category}: использовано {pct}% — {spent} из {limit} {currency}",
@@ -612,6 +614,7 @@ const uk: Catalogue = {
   "item.categories": "Категорії",
   "item.tags": "Теги",
   "item.settings": "Налаштування",
+  "item.admin": "Адмін",
   "footer.synced": "Синхронізовано {date} {time}",
   "alert.over": "{category}: перевищено бюджет на {amount} {currency}",
   "alert.warn": "{category}: використано {pct}% — {spent} з {limit} {currency}",

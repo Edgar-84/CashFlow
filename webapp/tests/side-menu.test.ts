@@ -66,6 +66,40 @@ describe("renderSideMenu — rows", () => {
   });
 });
 
+describe("renderSideMenu — admin row (U4.10)", () => {
+  it("is absent from the DOM when isSystemAdmin is not set", () => {
+    const html = renderSideMenu(props());
+    expect(html).not.toContain('data-item="admin"');
+    expect((html.match(/data-item="/g) ?? []).length).toBe(7);
+  });
+
+  it("is absent from the DOM when isSystemAdmin is explicitly false", () => {
+    const html = renderSideMenu(props({ isSystemAdmin: false }));
+    expect(html).not.toContain('data-item="admin"');
+  });
+
+  it("renders an eighth row, directly after Settings, when isSystemAdmin is true", () => {
+    const html = renderSideMenu(props({ isSystemAdmin: true }));
+    expect((html.match(/data-item="/g) ?? []).length).toBe(8);
+    const settingsIdx = html.indexOf('data-item="settings"');
+    const adminIdx = html.indexOf('data-item="admin"');
+    expect(adminIdx).toBeGreaterThan(settingsIdx);
+    expect(html).toMatch(/data-item="admin"[^>]*>Admin</);
+    expect(html).toContain('data-testid="side-menu-row-admin"');
+  });
+
+  it("gives the admin row no gap class of its own — only Settings gets one", () => {
+    const html = renderSideMenu(props({ isSystemAdmin: true }));
+    expect((html.match(/class="side-menu-row side-menu-row-settings"/g) ?? []).length).toBe(1);
+    expect(html).toMatch(/class="side-menu-row" data-item="admin"/);
+  });
+
+  it("is not merely dimmed for a read-only viewer who isn't a system admin — it's absent", () => {
+    const html = renderSideMenu(props({ readOnly: true, isSystemAdmin: false }));
+    expect(html).not.toContain('data-item="admin"');
+  });
+});
+
 describe("renderSideMenu — read-only", () => {
   it("disables only Add expense, leaving the other six enabled", () => {
     const html = renderSideMenu(props({ readOnly: true }));
@@ -153,5 +187,12 @@ describe("renderSideMenu — language (U3.5)", () => {
     setLanguage("ru");
     const html = renderSideMenu(props({ lastSyncedAt: "2026-08-07T17:18:00.000Z" }));
     expect(html).toMatch(/data-testid="side-menu-footer">Синхронизировано \d{1,2}\/\d{1,2}\/\d{4} \d{2}:\d{2}</);
+  });
+
+  it("renders the admin row's label in RU/UK when isSystemAdmin is true (U4.10)", () => {
+    setLanguage("ru");
+    expect(renderSideMenu(props({ isSystemAdmin: true }))).toMatch(/data-item="admin"[^>]*>Админ</);
+    setLanguage("uk");
+    expect(renderSideMenu(props({ isSystemAdmin: true }))).toMatch(/data-item="admin"[^>]*>Адмін</);
   });
 });

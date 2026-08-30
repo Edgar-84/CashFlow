@@ -74,7 +74,10 @@ Backend-only — none of them are secrets, and none are injected into the
 browser bundle. No CORS variable: the Mini App is served from the same
 origin as the API (D201). Currency is **not** an env var — it's a per-account
 `accounts.currency` column (`models.enums.Currency`, D211), set at account
-creation (see api/CLAUDE.md's "Adding users manually").
+creation via the Mini App admin panel's create-account form
+(`docs/ui/screens/10-admin.md`); see api/CLAUDE.md's "Adding users manually"
+for adding an additional family member to an existing account (still a
+manual `INSERT` — the panel creates one account and its first user only).
 One `.env` per machine, never committed; no `.env.dev`/`.env.prod` variants —
 dev vs prod values (incl. the separate dev bot token) are documented in
 README "Environments & .env".
@@ -83,12 +86,6 @@ README "Environments & .env".
 - Voice input · Bot self-registration · OAuth/JWT (tg_id + internal token is enough for now) · Scheduled digests/APScheduler (V1 notifies on expense creation only).
 - The Mini App frontend is no longer out of scope — it is being planned in
   `docs/design/mini-app-ux.md`. Its §0 decisions (D200–D205) gate implementation.
-- Admin panel for account/user management. Its prerequisite — migrating the
-  bot allowlist from an `.env` var to a DB lookup — is DONE
-  (`docs/plans/bot-allowlist-db.md`): adding a family member is now one
-  `INSERT` into `users`, no `.env` edit, no bot restart. When this panel
-  lands, account creation should let the user pick `accounts.currency`
-  (D211) instead of the manual SQL `INSERT` being the only way to set it.
 
 ## Do not edit without asking
 `migrations/versions/`, `.env*`, `uv.lock`, `webapp/pnpm-lock.yaml`.

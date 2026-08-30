@@ -128,6 +128,33 @@ describe("buildHomeData", () => {
     expect(data.period).toBe(THIS_MONTH);
   });
 
+  it("defaults isSystemAdmin to false when the caller doesn't pass it, and passes it through when set (U4.10)", () => {
+    const withoutFlag = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+    });
+    expect(withoutFlag.isSystemAdmin).toBe(false);
+
+    const withFlag = buildHomeData({
+      categories: CATEGORIES,
+      categoryTotals: CATEGORY_TOTALS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      budgetProgress: [],
+      period: THIS_MONTH,
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+      isSystemAdmin: true,
+    });
+    expect(withFlag.isSystemAdmin).toBe(true);
+  });
+
   it("(D606) reports an approaching-limit budget with percentage, spent and limit, no red anywhere", () => {
     const data = buildHomeData({
       categories: CATEGORIES,
@@ -482,7 +509,13 @@ describe("buildHomeData", () => {
 
 function fakeApi(overrides: Partial<HomeApi> = {}): HomeApi {
   return {
-    getMe: vi.fn().mockResolvedValue({ currency: "EUR", today: TODAY, account_name: ACCOUNT_NAME, language: "en" }),
+    getMe: vi.fn().mockResolvedValue({
+      currency: "EUR",
+      today: TODAY,
+      account_name: ACCOUNT_NAME,
+      language: "en",
+      role: "member",
+    }),
     listCategories: vi.fn().mockResolvedValue(CATEGORIES),
     statisticsByCategory: vi.fn().mockResolvedValue(CATEGORY_TOTALS),
     statisticsByPeriod: vi.fn().mockResolvedValue(PERIOD_TOTAL),
@@ -511,7 +544,13 @@ describe("loadHome", () => {
 
   it("reconciles i18n against the account's language from the same GET /users/me call, never a second fetch (D716)", async () => {
     const api = fakeApi({
-      getMe: vi.fn().mockResolvedValue({ currency: "EUR", today: TODAY, account_name: ACCOUNT_NAME, language: "ru" }),
+      getMe: vi.fn().mockResolvedValue({
+        currency: "EUR",
+        today: TODAY,
+        account_name: ACCOUNT_NAME,
+        language: "ru",
+        role: "member",
+      }),
     });
     await loadHome(api, createMemoryCache(), THIS_MONTH);
     expect(setLanguage).toHaveBeenCalledWith("ru");
@@ -540,7 +579,55 @@ describe("loadHome", () => {
       createMemoryCache(),
       THIS_MONTH,
     );
-    expect(state).toEqual({ status: "empty", period: THIS_MONTH, currency: "EUR", today: TODAY, accountName: ACCOUNT_NAME });
+    expect(state).toEqual({
+      status: "empty",
+      period: THIS_MONTH,
+      currency: "EUR",
+      today: TODAY,
+      accountName: ACCOUNT_NAME,
+      isSystemAdmin: false,
+    });
+  });
+
+  it("derives isSystemAdmin from GET /users/me's role, for both List states (U4.10)", async () => {
+    const ready = await loadHome(
+      fakeApi({
+        getMe: vi.fn().mockResolvedValue({
+          currency: "EUR",
+          today: TODAY,
+          account_name: ACCOUNT_NAME,
+          language: "en",
+          role: "system_admin",
+        }),
+      }),
+      createMemoryCache(),
+      THIS_MONTH,
+    );
+    expect(ready.status).toBe("ready");
+    if (ready.status === "ready") {
+      expect(ready.isSystemAdmin).toBe(true);
+    }
+
+    const empty = await loadHome(
+      fakeApi({
+        statisticsByCategory: vi.fn().mockResolvedValue([]),
+        statisticsByPeriod: vi.fn().mockResolvedValue({ ...PERIOD_TOTAL, total: 0 }),
+        listBudgetPlans: vi.fn().mockResolvedValue([]),
+        getMe: vi.fn().mockResolvedValue({
+          currency: "EUR",
+          today: TODAY,
+          account_name: ACCOUNT_NAME,
+          language: "en",
+          role: "admin",
+        }),
+      }),
+      createMemoryCache(),
+      THIS_MONTH,
+    );
+    expect(empty.status).toBe("empty");
+    if (empty.status === "empty") {
+      expect(empty.isSystemAdmin).toBe(false);
+    }
   });
 
   it("maps a 403 to a forbidden state", async () => {
