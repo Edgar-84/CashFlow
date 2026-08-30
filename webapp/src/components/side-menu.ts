@@ -18,7 +18,8 @@ export type MenuItem =
   | "statistics"
   | "categories"
   | "tags"
-  | "settings";
+  | "settings"
+  | "admin";
 
 export interface SideMenuProps {
   open: boolean;
@@ -26,6 +27,10 @@ export interface SideMenuProps {
   currency: string | null; // header line 2
   lastSyncedAt?: string; // footer; omitted -> no footer
   readOnly?: boolean; // disables "Add expense" only
+  // U4.10: renders the "Admin" row, directly under Settings, when true. The
+  // row doesn't exist in the DOM otherwise (component doc's "Admin row
+  // visibility" — it hides rather than dims, unlike every other gate here).
+  isSystemAdmin?: boolean;
   onSelect(item: MenuItem): void; // host navigates AND closes
   onClose(): void; // scrim tap, BackButton, Escape
 }
@@ -48,6 +53,11 @@ const ROWS: readonly RowDef[] = [
   { id: "tags", labelKey: "item.tags" },
   { id: "settings", labelKey: "item.settings", gap: true },
 ];
+
+// Admin joins Settings' trailing group with no gap of its own (component
+// doc's Anatomy: "no further gap") — appended only for a system admin, never
+// present in `ROWS` itself so every other caller's row count is untouched.
+const ADMIN_ROW: RowDef = { id: "admin", labelKey: "item.admin" };
 
 function escapeHtml(value: string): string {
   return value
@@ -94,7 +104,8 @@ export function renderSideMenu(props: SideMenuProps): string {
     return "";
   }
   const readOnly = props.readOnly ?? false;
-  const rows = ROWS.map((row) => renderRow(row, readOnly)).join("");
+  const rowDefs = props.isSystemAdmin ? [...ROWS, ADMIN_ROW] : ROWS;
+  const rows = rowDefs.map((row) => renderRow(row, readOnly)).join("");
   return `<div class="side-menu-root" data-testid="side-menu-root">
     <div class="side-menu-scrim" aria-hidden="true" data-testid="side-menu-scrim"></div>
     <div class="side-menu-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(t("menu.title"))}" data-testid="side-menu-panel">

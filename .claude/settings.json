@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/format-on-edit.sh",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/.claude/hooks/format-on-edit.sh\"",
             "timeout": 30
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/guard-bash.sh",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/.claude/hooks/guard-bash.sh\"",
             "timeout": 10
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/verify-gate.sh",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}/.claude/hooks/verify-gate.sh\"",
             "timeout": 600,
             "statusMessage": "Running verify gate (lint + types + tests)..."
           }

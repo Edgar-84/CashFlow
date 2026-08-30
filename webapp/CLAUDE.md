@@ -120,6 +120,7 @@ until a category is chosen. On success: haptic, close to Home, donut redrawn.
   permission check hours later is worse than no queue.
 - Voice input, user self-registration.
 - Notifications: they stay bot-side. This app never sends a Telegram message.
-- Admin surfaces (users, permissions) — still the V2 admin panel. Its DB
-  allowlist prerequisite is done (`docs/plans/bot-allowlist-db.md`); the
-  panel itself is simply not built yet.
+- Admin surfaces beyond the existing panel: no in-app way to grant
+  `system_admin` itself (still direct DB access only), no bulk user
+  management. The panel that exists (`screens/admin.ts`, U4.7–U4.10) covers
+  account/user block-unblock and creating a new account plus its first user.

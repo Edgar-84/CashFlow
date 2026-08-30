@@ -429,7 +429,7 @@ touching auth or scoping goes through the reviewer subagent.
       **AC:** name, currency, language, owner `tg_id` and owner name are all
       required; a non-numeric `tg_id` is caught client-side; a 409 renders as
       "that Telegram user already has an account", not a generic failure.
-- [ ] **U4.10** The eighth side-menu row, gated on the role, plus the docs.
+- [x] **U4.10** The eighth side-menu row, gated on the role, plus the docs.
       **AC:** the Admin row is the **last** row, after Settings, and is
       **absent from the DOM** for every other role — not dimmed, not
       `aria-hidden`; `CLAUDE.md`'s "Out of scope (V2)" section no longer lists
@@ -2110,5 +2110,51 @@ touching auth or scoping goes through the reviewer subagent.
   cases (78 total) covering the safe-integer bound, the trimmed confirm
   message, the removed error nodes, and the saving-disabled state.
   Re-verified green (952 webapp tests, typecheck/lint/build clean).
-- **Next:** `/clear`, then **U4.10** (the eighth side-menu row, gated on the
-  role, plus the docs).
+- **U4.10 is done**: the side menu gains its eighth row and Admin becomes
+  reachable end to end. `components/side-menu.ts`'s `MenuItem` gains
+  `"admin"`; `SideMenuProps.isSystemAdmin` (optional, default-false) appends a
+  single `ADMIN_ROW` after the existing seven — never mutating `ROWS` itself,
+  so every other caller's row count and markup are byte-identical to before.
+  No gap class on the row, per the component doc's Anatomy ("no further
+  gap"); absent from the DOM (not disabled) whenever the flag is false or
+  unset, matching "Admin row visibility"'s hide-not-dim rule. `lib/i18n.ts`
+  gained `item.admin` in all three languages ("Admin"/"Админ"/"Адмін" — the
+  first two role/screen-title keys already existed from U4.7-U4.9, but named
+  the role or the screen, not a short nav-row label, so this is a new,
+  independently-chosen short form, not a reuse).
+  `screens/home.ts` threads the role the screen doc's gate needs:
+  `HomeApi.getMe()` widens to also return `role` (already on
+  `UserMeResponse` — no backend change), `buildHomeData`'s input/output and
+  `HomeState`'s `"empty"` variant both gain `isSystemAdmin?: boolean`
+  (optional-with-default, not required) specifically so the ~30 existing
+  `buildHomeData`/hand-built `HomeState` fixtures across `home.test.ts` stay
+  untouched — a required field would have forced an out-of-scope mechanical
+  edit across every unrelated test in that file. `loadHome` sets it from
+  `me.role === "system_admin"`; the private `menuPropsFor` reads
+  `state.isSystemAdmin ?? false` (`forbidden`/`loading`/`error` hard-code
+  `false` — role is unknown or irrelevant in those states, and hiding is
+  always the safe default per the component doc). `main.ts` wires the actual
+  navigation `screens/admin.ts` flagged as "not wired yet" since U4.7: a new
+  `"admin"` `ActiveScreen`, a `showAdmin()` matching `showSettings`/
+  `showLanguage`'s exact shape (`applyAdminChrome` called before the loading
+  mount and again before the final one, no cache — `10-admin.md`'s States
+  table rules one out), and `onMenuSelect`'s `"admin"` branch. `onBack`
+  always targets Home; `admin.ts::mount`'s own `requestCloseCreate` already
+  owns the mode-dependent discard-confirm before calling it, so `showAdmin`
+  itself needs no mode awareness. Docs: root `CLAUDE.md`'s "Out of scope
+  (V2)" no longer lists the admin panel (built), and its currency-at-creation
+  note under Environment now points at the admin panel's create-account form
+  instead of the manual SQL `INSERT`, which api/CLAUDE.md's "Adding users
+  manually" is kept for (still true for a second user on an existing
+  account — the panel only creates one account plus its first user).
+  `webapp/CLAUDE.md`'s own "not built yet" line was equally stale and is
+  updated in the same change, though the plan's AC didn't name that file
+  explicitly. `docs/ui/components/side-menu.md` needed no edit — its Admin
+  row content was already written in U0.5, and this unit's job was to make
+  the code match a spec that already existed, not to write a new one.
+  `bash scripts/verify.sh` green end to end (809 backend unit tests,
+  unchanged; 960 webapp tests, up from 952; typecheck/lint/build clean,
+  including the secret-grep).
+- **Next:** `/clear`. M4 (the admin panel milestone) is now fully done —
+  U4.1 through U4.10 all ticked. Re-read this plan's "Review of the brief"
+  and Non-goals before picking the next milestone.
