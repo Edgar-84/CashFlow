@@ -6,11 +6,14 @@
  * Layers, same split as every other screen:
  *  - data: `loadStatistics`/`buildStatisticsData` — fetches `GET /users/me`,
  *    `/categories`, `/tags`, `/statistics/by-period|by-category|by-tag` for
- *    one `PeriodValue` (V7, D704 — replaces the old `months_back` presets)
- *    and turns them into a `StatisticsState`. Never throws, same
- *    never-throws/cache-fallback contract as every other screen's loader.
- *    Both groupings' bars are computed in the same call, so the grouping
- *    toggle never needs a second fetch.
+ *    one `PeriodValue` (V7, D704 — replaces the old `months_back` presets),
+ *    plus `/statistics/by-budget` whenever the unit is Month (V8, D810 — that
+ *    endpoint 422s on any other unit), and turns them into a
+ *    `StatisticsState`. Never throws, same never-throws/cache-fallback
+ *    contract as every other screen's loader. All three groupings' bars are
+ *    computed in the same call, so the grouping toggle never needs a second
+ *    fetch — except swapping to Budgets under a non-Month unit, which coerces
+ *    the period and does refetch (D809, `main.ts`'s job, not this module's).
  *  - presentation: `renderStatistics`/`renderReady` (pure, HTML strings) and
  *    `mount` (thin DOM glue, the one part with no meaningful unit test — same
  *    accepted gap as every other screen's `mount`). `mount` re-renders on a
@@ -21,7 +24,10 @@
  * The donut always reflects the category breakdown (same server-authoritative
  * `color_slot` colours as Home, D301/U2.0) regardless of grouping — tags have
  * no colour column, so a "by tag" donut has no fixed palette to draw from.
- * Only the ranked-bar list below switches between `categoryBars`/`tagBars`.
+ * The ranked-bar list below switches between `categoryBars`/`tagBars`; the
+ * Budgets grouping (V8) renders a third, differently-shaped list —
+ * `budgetRows`, reusing `04-budgets.md`'s row anatomy rather than a ranked
+ * bar (see `renderBudgetRow`) — and is not a drill-down target (D812).
  *
  * Bar width is relative to the leader (the top row), not to the period
  * total — "bars sorted descending with the leader at full width" (AC) is a
@@ -45,6 +51,7 @@ import { MAX_RANGE_DAYS, toQuery, type PeriodQuery, type PeriodUnit, type Period
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ForbiddenError } from "../api/client";
 import type {
+  BudgetFill,
   CategoryResponse,
   CategoryTotal,
   Currency,
@@ -61,7 +68,7 @@ const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 // silently drift between screens).
 const MAX_DONUT_SLOTS = 6;
 
-export type Grouping = "category" | "tag";
+export type Grouping = "category" | "tag" | "budget";
 
 export interface StatisticsSegment {
   categoryId: Uuid | null;
@@ -82,6 +89,23 @@ export interface StatisticsBar {
   widthPct: number;
 }
 
+// D816 (Decision log): the frozen Contracts stub carried no field for the
+// exceeded-status text's "{amount}" — `remainingMinor` added here mid-unit,
+// same shape as D814's `notifyThreshold` gap.
+export interface StatisticsBudgetRow {
+  planId: Uuid;
+  categoryId: Uuid;
+  label: string;
+  colorVar: string;
+  amountMinor: number;
+  spentMinor: number;
+  remainingMinor: number;
+  fillPct: number | null;
+  notifyThreshold: number;
+  isOverThreshold: boolean;
+  isExceeded: boolean;
+}
+
 export interface StatisticsData {
   totalMinor: number;
   currency: Currency;
@@ -90,6 +114,7 @@ export interface StatisticsData {
   segments: StatisticsSegment[];
   categoryBars: StatisticsBar[];
   tagBars: StatisticsBar[];
+  budgetRows: StatisticsBudgetRow[];
 }
 
 function rankedBars(rows: { id: Uuid; label: string; colorVar: string | null; minor: number }[]): StatisticsBar[] {
@@ -101,11 +126,32 @@ function rankedBars(rows: { id: Uuid; label: string; colorVar: string | null; mi
   }));
 }
 
+function rowFromBudgetFill(fill: BudgetFill, label: string, colorVar: string): StatisticsBudgetRow {
+  return {
+    planId: fill.budget_plan_id,
+    categoryId: fill.category_id,
+    label,
+    colorVar,
+    amountMinor: fill.amount,
+    spentMinor: fill.spent,
+    remainingMinor: fill.remaining,
+    fillPct: fill.fill_pct,
+    notifyThreshold: fill.notify_threshold,
+    isOverThreshold: fill.is_over_threshold,
+    isExceeded: fill.is_exceeded,
+  };
+}
+
 export function buildStatisticsData(input: {
   categories: CategoryResponse[];
   tags: TagResponse[];
   categoryTotals: CategoryTotal[];
   tagTotals: TagTotal[];
+  /** Absent ⇒ no budget rows — same "absent means the feature isn't in play"
+   * shape as `PeriodSelectorProps.allowedUnits` (U3.2). Callers not exercising
+   * the Budgets grouping (most existing tests, and every non-month load) can
+   * omit it rather than pass `[]` everywhere. */
+  budgetFills?: BudgetFill[];
   periodTotal: PeriodTotal;
   currency: Currency;
   period: PeriodValue;
@@ -156,6 +202,30 @@ export function buildStatisticsData(input: {
     })),
   );
 
+  // Budget rows are not ranked (order follows category creation order, same
+  // as budgets.ts::buildBudgetsData) and are not sorted by spend — this is a
+  // fill-status list, not a leaderboard.
+  const budgetFills = input.budgetFills ?? [];
+  const fillByCategoryId = new Map(budgetFills.map((f) => [f.category_id, f]));
+  const budgetRows: StatisticsBudgetRow[] = [];
+  for (const category of orderedCategories) {
+    const fill = fillByCategoryId.get(category.id);
+    if (!fill) {
+      continue;
+    }
+    const slot = colorBySlot.get(category.id) ?? null;
+    budgetRows.push(rowFromBudgetFill(fill, category.name, slot !== null ? categorySlotCssVar(slot) : OTHER_COLOR_VAR));
+  }
+  // A plan whose category isn't in this fetch (archived, D808) still renders
+  // — same fallback budgets.ts:133 already applies.
+  const knownCategoryIds = new Set(orderedCategories.map((c) => c.id));
+  for (const fill of budgetFills) {
+    if (knownCategoryIds.has(fill.category_id)) {
+      continue;
+    }
+    budgetRows.push(rowFromBudgetFill(fill, t("statistics.unknownCategory"), OTHER_COLOR_VAR));
+  }
+
   return {
     totalMinor: input.periodTotal.total,
     currency: input.currency,
@@ -164,6 +234,7 @@ export function buildStatisticsData(input: {
     segments,
     categoryBars,
     tagBars,
+    budgetRows,
   };
 }
 
@@ -174,6 +245,7 @@ export interface StatisticsApi {
   statisticsByPeriod(query: PeriodQuery): Promise<PeriodTotal>;
   statisticsByCategory(query: PeriodQuery): Promise<CategoryTotal[]>;
   statisticsByTag(query: PeriodQuery): Promise<TagTotal[]>;
+  statisticsByBudget(query: PeriodQuery): Promise<BudgetFill[]>;
 }
 
 export interface StatisticsSnapshot {
@@ -217,19 +289,24 @@ export async function loadStatistics(
 ): Promise<StatisticsState> {
   try {
     const query = toQuery(period);
-    const [me, categories, tags, periodTotal, categoryTotals, tagTotals] = await Promise.all([
+    // `by-budget` 422s on any unit other than month (U3.1), so it's only
+    // fetched then — still one `Promise.all`, so the grouping toggle keeps
+    // its "never refetches" guarantee either way (D810).
+    const [me, categories, tags, periodTotal, categoryTotals, tagTotals, budgetFills] = await Promise.all([
       api.getMe(),
       api.listCategories(),
       api.listTags(),
       api.statisticsByPeriod(query),
       api.statisticsByCategory(query),
       api.statisticsByTag(query),
+      period.unit === "month" ? api.statisticsByBudget(query) : Promise.resolve<BudgetFill[]>([]),
     ]);
     const data = buildStatisticsData({
       categories,
       tags,
       categoryTotals,
       tagTotals,
+      budgetFills,
       periodTotal,
       currency: me.currency,
       period,
@@ -296,6 +373,7 @@ function renderGroupingToggle(grouping: Grouping): string {
   return `<div class="chip-row" data-testid="grouping-toggle">
     <button type="button" class="chip${grouping === "category" ? " active" : ""}" data-testid="grouping-category" data-grouping="category">${escapeHtml(t("statistics.byCategory"))}</button>
     <button type="button" class="chip${grouping === "tag" ? " active" : ""}" data-testid="grouping-tag" data-grouping="tag">${escapeHtml(t("statistics.byTag"))}</button>
+    <button type="button" class="chip${grouping === "budget" ? " active" : ""}" data-testid="grouping-budget" data-grouping="budget">${escapeHtml(t("statistics.byBudget"))}</button>
   </div>`;
 }
 
@@ -351,6 +429,59 @@ function renderBars(bars: StatisticsBar[], grouping: Grouping): string {
   return `<div class="card" data-testid="stats-bars">${rows}</div>`;
 }
 
+// design-system.md's Iconography table, "Warning" row — same triangle+bar+dot
+// shape home.ts::renderWarningGlyph already draws, this module's own copy per
+// the file header's "each pure module owns its own" convention. `currentColor`
+// throughout so the wrapping `.alert-line--*` modifier carries the state.
+function renderWarningGlyph(): string {
+  return `<svg class="alert-glyph" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M7 1.3 13 12.3H1L7 1.3Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none" /><line x1="7" y1="5.2" x2="7" y2="8.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /><circle cx="7" cy="10.4" r="0.9" fill="currentColor" /></svg>`;
+}
+
+/** Reuses `04-budgets.md`'s row anatomy verbatim (dot + head + bar + tick,
+ * `.budget-row`/`.budget-bar-*` — `screens/budgets.ts`'s own classes) rather
+ * than inventing a second one, per this screen's own Budget row spec. Ships
+ * no three-way status line, only two strings (`budget.of`/`budget.exceeded`)
+ * plus a trailing Warning glyph: icon-only for `isOverThreshold`, icon +
+ * `budget.exceeded` text in `--status-red` for `isExceeded`; an un-flagged
+ * row gets neither (spec's Open questions: no "on track" text here). */
+function renderBudgetRow(row: StatisticsBudgetRow, currency: Currency): string {
+  const pct = row.fillPct === null ? 0 : Math.min(100, Math.max(0, row.fillPct));
+  const tick = Math.min(100, Math.max(0, row.notifyThreshold));
+  const ofLine = `${t("statistics.budget.of", {
+    spent: formatAmount(row.spentMinor),
+    limit: formatAmount(row.amountMinor),
+  })} ${escapeHtml(currency)}`;
+  let status = "";
+  if (row.isExceeded) {
+    const exceededText = `${t("statistics.budget.exceeded", { amount: formatAmount(-row.remainingMinor) })} ${escapeHtml(currency)}`;
+    status = `<div class="alert-line alert-line--exceeded" data-testid="budget-status-exceeded">${renderWarningGlyph()}<span>${exceededText}</span></div>`;
+  } else if (row.isOverThreshold) {
+    status = `<div class="alert-line alert-line--approaching" data-testid="budget-status-warn">${renderWarningGlyph()}</div>`;
+  }
+  return `<div class="budget-row" data-testid="budget-row" data-plan-id="${row.planId}">
+    <div class="budget-row-head">
+      <span class="dot" style="background:${row.colorVar}"></span>
+      <span class="budget-cat">${escapeHtml(row.label)}</span>
+      <span class="budget-amt">${ofLine}</span>
+    </div>
+    <div class="budget-bar-track">
+      <div class="budget-bar-fill" style="width:${pct}%;background:${row.colorVar}"></div>
+      <div class="budget-bar-tick" data-testid="budget-tick" style="left:${tick}%"></div>
+    </div>
+    ${status}
+  </div>`;
+}
+
+/** Budget rows aren't ranked (no leaderboard, D812 — no drill-down target
+ * either, so no `[data-id]` here for `mount`'s bar-tap wiring to pick up). */
+function renderBudgetRows(rows: StatisticsBudgetRow[], currency: Currency): string {
+  if (rows.length === 0) {
+    return `<p class="stats-bars-empty" data-testid="bars-empty">${escapeHtml(t("statistics.bars.emptyBudget"))}</p>`;
+  }
+  const body = rows.map((row) => renderBudgetRow(row, currency)).join("");
+  return `<div class="card" data-testid="stats-bars">${body}</div>`;
+}
+
 function renderOfflineBanner(lastSyncedAt: string | undefined): string {
   if (!lastSyncedAt) {
     return "";
@@ -359,13 +490,16 @@ function renderOfflineBanner(lastSyncedAt: string | undefined): string {
 }
 
 function renderReady(data: StatisticsData, lastSyncedAt: string | undefined, now: Date): string {
-  const bars = data.grouping === "category" ? data.categoryBars : data.tagBars;
+  const barsSection =
+    data.grouping === "budget"
+      ? renderBudgetRows(data.budgetRows, data.currency)
+      : renderBars(data.grouping === "category" ? data.categoryBars : data.tagBars, data.grouping);
   return `<div class="statistics-ready" data-testid="ready">
     ${renderOfflineBanner(lastSyncedAt)}
     ${renderPeriodControl(data.period, now)}
     ${renderDonut(data)}
     ${renderGroupingToggle(data.grouping)}
-    ${renderBars(bars, data.grouping)}
+    ${barsSection}
   </div>`;
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
-import type { CategoryResponse, CategoryTotal, PeriodTotal, TagResponse, TagTotal } from "../src/api/types";
+import type { BudgetFill, CategoryResponse, CategoryTotal, PeriodTotal, TagResponse, TagTotal } from "../src/api/types";
 import { setLanguage, t } from "../src/lib/i18n";
 import { toQuery, type PeriodValue } from "../src/lib/period";
 import {
@@ -39,6 +39,30 @@ const CATEGORY_TOTALS: CategoryTotal[] = [
 const TAG_TOTALS: TagTotal[] = [
   { tag_id: "tag-vacation", total: 18000 },
   { tag_id: "tag-work", total: 6000 },
+];
+const BUDGET_FILLS: BudgetFill[] = [
+  {
+    budget_plan_id: "plan-groceries",
+    category_id: "cat-groceries",
+    amount: 20000,
+    spent: 15000,
+    remaining: 5000,
+    fill_pct: 75,
+    notify_threshold: 80,
+    is_over_threshold: false,
+    is_exceeded: false,
+  },
+  {
+    budget_plan_id: "plan-transport",
+    category_id: "cat-transport",
+    amount: 10000,
+    spent: 12000,
+    remaining: -2000,
+    fill_pct: 120,
+    notify_threshold: 80,
+    is_over_threshold: true,
+    is_exceeded: true,
+  },
 ];
 
 // -- buildStatisticsData ------------------------------------------------------
@@ -101,6 +125,52 @@ describe("buildStatisticsData", () => {
     expect(data.period).toEqual(period);
     expect(data.grouping).toBe("tag");
   });
+
+  it("defaults to no budget rows when budgetFills is omitted", () => {
+    const data = build();
+    expect(data.budgetRows).toEqual([]);
+  });
+
+  it("maps budget fills to rows in category order, with an exceeded plan flagged", () => {
+    const data = build({ budgetFills: BUDGET_FILLS, grouping: "budget" });
+    expect(data.budgetRows).toEqual([
+      {
+        planId: "plan-groceries",
+        categoryId: "cat-groceries",
+        label: "Groceries",
+        colorVar: "var(--category-slot-1)",
+        amountMinor: 20000,
+        spentMinor: 15000,
+        remainingMinor: 5000,
+        fillPct: 75,
+        notifyThreshold: 80,
+        isOverThreshold: false,
+        isExceeded: false,
+      },
+      {
+        planId: "plan-transport",
+        categoryId: "cat-transport",
+        label: "Transport",
+        colorVar: "var(--category-slot-2)",
+        amountMinor: 10000,
+        spentMinor: 12000,
+        remainingMinor: -2000,
+        fillPct: 120,
+        notifyThreshold: 80,
+        isOverThreshold: true,
+        isExceeded: true,
+      },
+    ]);
+  });
+
+  it("falls back to 'Unknown category' for a plan whose category is archived (D808)", () => {
+    const data = build({
+      budgetFills: [{ ...BUDGET_FILLS[0], category_id: "cat-archived" }],
+    });
+    expect(data.budgetRows).toEqual([
+      expect.objectContaining({ label: "Unknown category", colorVar: "var(--ink-secondary)" }),
+    ]);
+  });
 });
 
 // -- loadStatistics ------------------------------------------------------------
@@ -113,6 +183,7 @@ function fakeApi(overrides: Partial<StatisticsApi> = {}): StatisticsApi {
     statisticsByPeriod: vi.fn().mockResolvedValue(PERIOD_TOTAL),
     statisticsByCategory: vi.fn().mockResolvedValue(CATEGORY_TOTALS),
     statisticsByTag: vi.fn().mockResolvedValue(TAG_TOTALS),
+    statisticsByBudget: vi.fn().mockResolvedValue(BUDGET_FILLS),
     ...overrides,
   };
 }
@@ -154,6 +225,24 @@ describe("loadStatistics", () => {
     await loadStatistics(api, cache, MONTH_PERIOD, "category");
     expect(api.statisticsByCategory).toHaveBeenCalledTimes(1);
     expect(api.statisticsByTag).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches by-budget in the same load whenever the unit is month (D810)", async () => {
+    const api = fakeApi();
+    const cache = createMemoryCache();
+    const state = await loadStatistics(api, cache, MONTH_PERIOD, "budget");
+    expect(api.statisticsByBudget).toHaveBeenCalledWith(toQuery(MONTH_PERIOD));
+    if (state.status !== "ready") throw new Error("expected ready");
+    expect(state.budgetRows).toHaveLength(2);
+  });
+
+  it("never calls by-budget for a non-month unit, even under the budget grouping", async () => {
+    for (const period of PERIOD_CASES.filter((p) => p.unit !== "month")) {
+      const api = fakeApi();
+      const cache = createMemoryCache();
+      await loadStatistics(api, cache, period, "budget");
+      expect(api.statisticsByBudget).not.toHaveBeenCalled();
+    }
   });
 
   it("resolves empty when the period total is zero", async () => {
@@ -284,6 +373,43 @@ describe("renderStatistics", () => {
     const html = renderStatistics({ status: "ready", ...data }, NOW);
     expect(html).toContain('data-testid="bars-empty"');
     expect(html).toContain("tagged");
+  });
+
+  it("renders two budget rows reading 'spent of limit', the exceeded one marked", () => {
+    const data = buildStatisticsData({
+      categories: CATEGORIES,
+      tags: TAGS,
+      categoryTotals: CATEGORY_TOTALS,
+      tagTotals: TAG_TOTALS,
+      budgetFills: BUDGET_FILLS,
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      period: MONTH_PERIOD,
+      grouping: "budget",
+    });
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
+    expect(html).toContain('data-testid="grouping-budget"');
+    expect(html).toContain(t("statistics.budget.of", { spent: "150.00", limit: "200.00" }));
+    expect(html).toContain(t("statistics.budget.of", { spent: "120.00", limit: "100.00" }));
+    expect(html).toContain(t("statistics.budget.exceeded", { amount: "20.00" }));
+    expect((html.match(/data-testid="budget-row"/g) ?? []).length).toBe(2);
+  });
+
+  it("shows 'No budgets set.' for the Budgets grouping with zero plans", () => {
+    const data = buildStatisticsData({
+      categories: CATEGORIES,
+      tags: TAGS,
+      categoryTotals: CATEGORY_TOTALS,
+      tagTotals: TAG_TOTALS,
+      budgetFills: [],
+      periodTotal: PERIOD_TOTAL,
+      currency: "EUR",
+      period: MONTH_PERIOD,
+      grouping: "budget",
+    });
+    const html = renderStatistics({ status: "ready", ...data }, NOW);
+    expect(html).toContain('data-testid="bars-empty"');
+    expect(html).toContain(t("statistics.bars.emptyBudget"));
   });
 
   it("renders the empty-period state with the grouping toggle still reachable", () => {
