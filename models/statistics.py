@@ -22,3 +22,21 @@ class CategoryTotal(BaseModel):
 class TagTotal(BaseModel):
     tag_id: UUID
     total: int
+
+
+class BudgetFill(BaseModel):
+    """One budget plan scored against a resolved month's spend (U3.1, D807):
+    `amount` is the plan's CURRENT limit, not a historical snapshot — same
+    fields as `models.budget_plan.BudgetProgress`, built via
+    `services.budget_service.calculate_progress` rather than a second copy of
+    its arithmetic."""
+
+    budget_plan_id: UUID
+    category_id: UUID
+    amount: int
+    spent: int
+    remaining: int
+    fill_pct: float | None
+    notify_threshold: int
+    is_over_threshold: bool
+    is_exceeded: bool

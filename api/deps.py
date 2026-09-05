@@ -183,8 +183,11 @@ def get_budget_service(
 
 def get_statistics_service(
     expense_repo: Annotated[ExpenseRepository, Depends(get_expense_repo)],
+    budget_plan_repo: Annotated[BudgetPlanRepository, Depends(get_budget_plan_repo)],
 ) -> StatisticsService:
-    return StatisticsService(expense_repo, get_settings().family_tz)
+    return StatisticsService(
+        expense_repo, get_settings().family_tz, budget_plan_repo=budget_plan_repo
+    )
 
 
 def _unauthorized(detail: str) -> HTTPException:

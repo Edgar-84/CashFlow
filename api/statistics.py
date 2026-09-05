@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from api.deps import PermissionChecker, get_statistics_service
 from api.period_params import validate_period_params
 from models.enums import Action, PeriodUnit, Resource
-from models.statistics import CategoryTotal, PeriodTotal, TagTotal
+from models.statistics import BudgetFill, CategoryTotal, PeriodTotal, TagTotal
 from models.user import UserResponse
 from services.statistics_service import StatisticsService
 
@@ -138,6 +138,49 @@ async def get_statistics_by_tag(
             start=start,
             end=end,
             months_back=months_back,
+            period=period,
+            offset=offset,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
+@router.get("/by-budget", response_model=list[BudgetFill])
+async def get_statistics_by_budget(
+    user: Annotated[UserResponse, Depends(PermissionChecker(Resource.EXPENSES, Action.READ))],
+    service: Annotated[StatisticsService, Depends(get_statistics_service)],
+    period: PeriodUnit | None = None,
+    offset: Annotated[int, Query(le=0)] = 0,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> list[BudgetFill]:
+    """No `months_back` arm and no `start`/`end` selector — Contracts (U3.1)
+    gives this endpoint only `period`/`offset`/`start_date`/`end_date`, and it
+    rejects every `period` other than `MONTH` (absent defaults to the current
+    month, same as its siblings). `own_only` is deliberately not applied
+    (D813) — unlike `by-period`/`by-category`/`by-tag`, no `_own_user_id`
+    call here."""
+    validate_period_params(
+        start=None,
+        end=None,
+        months_back=None,
+        period=period,
+        offset=offset,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if period is not None and period != PeriodUnit.MONTH:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="GET /statistics/by-budget only supports period=month",
+        )
+    try:
+        return await service.by_budget(
+            user.account_id,
             period=period,
             offset=offset,
             start_date=start_date,

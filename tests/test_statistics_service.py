@@ -3,8 +3,10 @@
 (U2.6 AC: by-period/by-category/by-tag aggregates match seeded data)."""
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
+from models.budget_plan import BudgetPlanResponse
 from models.enums import PeriodUnit
 from models.expense import ExpenseResponse
 from models.tag import TagResponse
@@ -12,9 +14,16 @@ from services.statistics_service import StatisticsService
 
 
 class FakeExpensePeriodRepo:
-    def __init__(self, expenses: list[ExpenseResponse] | None = None) -> None:
+    def __init__(
+        self,
+        expenses: list[ExpenseResponse] | None = None,
+        *,
+        sums: dict[UUID, int] | None = None,
+    ) -> None:
         self._expenses = list(expenses or [])
+        self._sums = sums or {}
         self.calls: list[tuple[UUID, datetime, datetime, str]] = []
+        self.sum_calls: list[tuple[UUID, datetime, datetime, str]] = []
 
     async def get_by_period(
         self, account_id: UUID, start: datetime, end: datetime, *, tz: str = "UTC"
@@ -23,6 +32,40 @@ class FakeExpensePeriodRepo:
         return [
             e for e in self._expenses if e.account_id == account_id and start <= e.created_at < end
         ]
+
+    async def sum_by_category_month(
+        self, account_id: UUID, start: datetime, end: datetime, *, tz: str = "UTC"
+    ) -> dict[UUID, int]:
+        self.sum_calls.append((account_id, start, end, tz))
+        return dict(self._sums)
+
+
+class FakeBudgetPlanListRepo:
+    def __init__(self, plans: list[BudgetPlanResponse] | None = None) -> None:
+        self._plans = list(plans or [])
+
+    async def list(self, **filters: Any) -> list[BudgetPlanResponse]:
+        account_id = filters.get("account_id")
+        return [p for p in self._plans if p.account_id == account_id]
+
+
+def make_plan(
+    *,
+    account_id: UUID,
+    category_id: UUID | None = None,
+    amount: int = 10000,
+    notify_threshold: int = 70,
+) -> BudgetPlanResponse:
+    return BudgetPlanResponse(
+        id=uuid4(),
+        category_id=category_id or uuid4(),
+        amount=amount,
+        period="monthly",
+        notify_threshold=notify_threshold,
+        account_id=account_id,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
 
 
 def _tag(tag_id: UUID, account_id: UUID) -> TagResponse:
@@ -512,3 +555,77 @@ async def test_by_tag_own_user_id_filters_to_own_expenses() -> None:
     result = await service.by_tag(account_id, user_id=mine_user_id, now=now)
 
     assert [(r.tag_id, r.total) for r in result] == [(tag_id, 1000)]
+
+
+# --- by_budget (U3.1) ---
+
+
+async def test_by_budget_scores_plans_against_current_month_spend() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    groceries = uuid4()
+    transport = uuid4()
+    plans = [
+        make_plan(account_id=account_id, category_id=groceries, amount=10000),
+        make_plan(account_id=account_id, category_id=transport, amount=5000),
+    ]
+    expense_repo = FakeExpensePeriodRepo(sums={groceries: 6000, transport: 6000})
+    service = StatisticsService(expense_repo, budget_plan_repo=FakeBudgetPlanListRepo(plans))
+
+    result = await service.by_budget(account_id, now=now)
+
+    by_category = {r.category_id: r for r in result}
+    assert by_category[groceries].spent == 6000
+    assert by_category[groceries].remaining == 4000
+    assert by_category[groceries].is_exceeded is False
+    assert by_category[transport].spent == 6000
+    assert by_category[transport].remaining == -1000
+    assert by_category[transport].is_exceeded is True
+    assert all(type(r.spent) is int and type(r.remaining) is int for r in result)
+
+
+async def test_by_budget_no_plans_returns_empty_list_without_summing() -> None:
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    expense_repo = FakeExpensePeriodRepo()
+    service = StatisticsService(expense_repo, budget_plan_repo=FakeBudgetPlanListRepo([]))
+
+    result = await service.by_budget(account_id, now=now)
+
+    assert result == []
+    assert expense_repo.sum_calls == []
+
+
+async def test_by_budget_offset_minus_1_uses_last_months_window_and_current_limit() -> None:
+    """AC: `period=month&offset=-1` scores last month's spend against this
+    month's (i.e. the plan's current, D807) limit — the plan lookup carries
+    no period at all, only the spend window shifts."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    category_id = uuid4()
+    plan = make_plan(account_id=account_id, category_id=category_id, amount=10000)
+    expense_repo = FakeExpensePeriodRepo(sums={category_id: 3000})
+    service = StatisticsService(expense_repo, budget_plan_repo=FakeBudgetPlanListRepo([plan]))
+
+    result = await service.by_budget(account_id, now=now, period=PeriodUnit.MONTH, offset=-1)
+
+    assert result[0].amount == 10000
+    assert result[0].spent == 3000
+    account, start, end, tz = expense_repo.sum_calls[0]
+    assert (start, end) == (datetime(2026, 6, 1, tzinfo=UTC), datetime(2026, 7, 1, tzinfo=UTC))
+
+
+async def test_by_budget_period_none_matches_month_bounds() -> None:
+    """`period=None` (the route's default) resolves the same bounds as
+    `resolve_period`'s own `unit=None` fallback — the current month."""
+    account_id = uuid4()
+    now = datetime(2026, 7, 17, tzinfo=UTC)
+    category_id = uuid4()
+    plan = make_plan(account_id=account_id, category_id=category_id, amount=10000)
+    expense_repo = FakeExpensePeriodRepo(sums={})
+    service = StatisticsService(expense_repo, budget_plan_repo=FakeBudgetPlanListRepo([plan]))
+
+    await service.by_budget(account_id, now=now)
+
+    _, start, end, _ = expense_repo.sum_calls[0]
+    assert (start, end) == (datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 8, 1, tzinfo=UTC))

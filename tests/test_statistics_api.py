@@ -16,10 +16,16 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 from test_deps import FakeAccountRepo, FakePermissionRepo, make_account
-from test_statistics_service import FakeExpensePeriodRepo, make_expense
+from test_statistics_service import (
+    FakeBudgetPlanListRepo,
+    FakeExpensePeriodRepo,
+    make_expense,
+    make_plan,
+)
 from test_users_api import TgLookupFakeUserRepo, auth_headers
 
 from api import deps, period_params, statistics
+from models.budget_plan import BudgetPlanResponse
 from models.enums import Resource, Role
 from models.expense import ExpenseResponse
 from models.permission import PermissionResponse
@@ -81,7 +87,12 @@ def override_repos(
     viewer: UserResponse,
     account_id: UUID,
 ) -> OverrideRepos:
-    def _apply(expenses: list[ExpenseResponse] | None = None) -> FakeExpensePeriodRepo:
+    def _apply(
+        expenses: list[ExpenseResponse] | None = None,
+        *,
+        plans: list[BudgetPlanResponse] | None = None,
+        sums: dict[UUID, int] | None = None,
+    ) -> FakeExpensePeriodRepo:
         app.dependency_overrides[deps.get_user_repo] = lambda: TgLookupFakeUserRepo(
             [member, other_member, viewer]
         )
@@ -89,8 +100,13 @@ def override_repos(
         app.dependency_overrides[deps.get_account_repo] = lambda: FakeAccountRepo(
             [make_account(account_id)]
         )
-        repo = FakeExpensePeriodRepo(expenses)
+        repo = FakeExpensePeriodRepo(expenses, sums=sums)
         app.dependency_overrides[deps.get_expense_repo] = lambda: repo
+        # get_statistics_service also depends on get_budget_plan_repo (U3.1's
+        # by-budget) — every statistics route now resolves it, not just
+        # by-budget, so it must be overridden here too or it falls through to
+        # a real DB connection.
+        app.dependency_overrides[deps.get_budget_plan_repo] = lambda: FakeBudgetPlanListRepo(plans)
         return repo
 
     return _apply
@@ -532,3 +548,121 @@ async def test_by_period_conflicting_families_message_names_offset(
 
     assert response.status_code == 422
     assert "period/offset" in response.json()["detail"]
+
+
+# --- by-budget (U3.1) ---
+
+
+async def test_by_budget_as_member(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
+) -> None:
+    groceries = uuid4()
+    transport = uuid4()
+    override_repos(
+        [],
+        plans=[
+            make_plan(account_id=account_id, category_id=groceries, amount=10000),
+            make_plan(account_id=account_id, category_id=transport, amount=5000),
+        ],
+        sums={groceries: 6000, transport: 6000},
+    )
+
+    response = await client.get("/statistics/by-budget", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    by_category = {row["category_id"]: row for row in response.json()}
+    assert by_category[str(groceries)]["spent"] == 6000
+    assert by_category[str(groceries)]["is_exceeded"] is False
+    assert by_category[str(transport)]["spent"] == 6000
+    assert by_category[str(transport)]["is_exceeded"] is True
+
+
+async def test_by_budget_no_plans_returns_empty_list(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse
+) -> None:
+    override_repos([], plans=[])
+
+    response = await client.get("/statistics/by-budget", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+async def test_by_budget_rejects_non_month_period(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
+) -> None:
+    override_repos([], plans=[make_plan(account_id=account_id)])
+
+    response = await client.get(
+        "/statistics/by-budget",
+        headers=auth_headers(member.tg_id),
+        params={"period": "day"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_by_budget_offset_minus_1_scores_last_months_spend(
+    client: AsyncClient, override_repos: OverrideRepos, member: UserResponse, account_id: UUID
+) -> None:
+    category_id = uuid4()
+    override_repos(
+        [],
+        plans=[make_plan(account_id=account_id, category_id=category_id, amount=10000)],
+        sums={category_id: 3000},
+    )
+
+    response = await client.get(
+        "/statistics/by-budget",
+        headers=auth_headers(member.tg_id),
+        params={"period": "month", "offset": -1},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "budget_plan_id": response.json()[0]["budget_plan_id"],
+            "category_id": str(category_id),
+            "amount": 10000,
+            "spent": 3000,
+            "remaining": 7000,
+            "fill_pct": 30.0,
+            "notify_threshold": 70,
+            "is_over_threshold": False,
+            "is_exceeded": False,
+        }
+    ]
+
+
+async def test_by_budget_own_only_override_does_not_restrict_totals(
+    client: AsyncClient,
+    app: FastAPI,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    """D813: unlike its three siblings, `by-budget` ignores `own_only` — a
+    budget limit is an account-level number, so a per-user slice of it would
+    be meaningless. An `own_only=True` override must not change the result."""
+    category_id = uuid4()
+    override_repos(
+        [],
+        plans=[make_plan(account_id=account_id, category_id=category_id, amount=10000)],
+        sums={category_id: 6000},
+    )
+    app.dependency_overrides[deps.get_permission_repo] = lambda: FakePermissionRepo(
+        [
+            PermissionResponse(
+                id=uuid4(),
+                user_id=member.id,
+                resource=Resource.EXPENSES,
+                can_read=True,
+                own_only=True,
+            )
+        ]
+    )
+
+    response = await client.get("/statistics/by-budget", headers=auth_headers(member.tg_id))
+
+    assert response.status_code == 200
+    assert response.json()[0]["spent"] == 6000

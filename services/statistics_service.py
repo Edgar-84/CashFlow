@@ -6,12 +6,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
+from models.budget_plan import BudgetPlanResponse
 from models.enums import PeriodUnit
 from models.expense import ExpenseResponse
-from models.statistics import CategoryTotal, PeriodTotal, TagTotal
+from models.statistics import BudgetFill, CategoryTotal, PeriodTotal, TagTotal
+from services.budget_service import calculate_progress
 from services.period import month_bounds, resolve_period
 
 
@@ -45,14 +47,27 @@ def _window_for_months_back(
 
 
 class ExpensePeriodRepositoryProtocol(Protocol):
-    """Narrow slice of ExpenseRepositoryProtocol — the only expense_repo method
-    needed here. `get_by_period` already attaches tags (repositories/CLAUDE.md,
-    plan Decision log D21), which is enough to derive all three aggregates
-    without a new repo method (plan Decision log D35)."""
+    """Narrow slice of ExpenseRepositoryProtocol needed here. `get_by_period`
+    already attaches tags (repositories/CLAUDE.md, plan Decision log D21),
+    which is enough to derive by_period/by_category/by_tag without a new repo
+    method (plan Decision log D35). `sum_by_category_month` (U3.1) is the same
+    method `budget_service.get_progress` already uses — by_budget reuses it
+    rather than deriving category sums from `get_by_period`'s full rows."""
 
     async def get_by_period(
         self, account_id: UUID, start: datetime, end: datetime, *, tz: str = "UTC"
     ) -> list[ExpenseResponse]: ...
+
+    async def sum_by_category_month(
+        self, account_id: UUID, start: datetime, end: datetime, *, tz: str = "UTC"
+    ) -> dict[UUID, int]: ...
+
+
+class BudgetPlanListRepositoryProtocol(Protocol):
+    """Narrow slice of budget_service.BudgetPlanRepositoryProtocol — by_budget
+    only ever lists an account's current plans (D807: no history to read)."""
+
+    async def list(self, **filters: Any) -> list[BudgetPlanResponse]: ...
 
 
 class StatisticsService:
@@ -68,10 +83,15 @@ class StatisticsService:
     """
 
     def __init__(
-        self, expense_repo: ExpensePeriodRepositoryProtocol, family_tz: str = "UTC"
+        self,
+        expense_repo: ExpensePeriodRepositoryProtocol,
+        family_tz: str = "UTC",
+        *,
+        budget_plan_repo: BudgetPlanListRepositoryProtocol | None = None,
     ) -> None:
         self._expense_repo = expense_repo
         self._family_tz = family_tz
+        self._budget_plan_repo = budget_plan_repo
 
     async def _expenses(
         self,
@@ -215,3 +235,55 @@ class StatisticsService:
             for tag in expense.tags:
                 totals[tag.id] += expense.amount
         return [TagTotal(tag_id=tid, total=total) for tid, total in totals.items()]
+
+    async def by_budget(
+        self,
+        account_id: UUID,
+        *,
+        period: PeriodUnit | None = None,
+        offset: int = 0,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        now: datetime | None = None,
+    ) -> list[BudgetFill]:
+        """Scores each of the account's current budget plans (D807: today's
+        limit, no history) against `sum_by_category_month`'s spend for the
+        resolved `[start, end)` window, via the shared `calculate_progress`
+        (services/budget_service.py) rather than a second copy of its
+        arithmetic. `own_only` is deliberately not applied here (D813) — the
+        caller passes no `user_id`. The route rejects every unit other than
+        `month` with 422 before this is ever called, so `period` here is
+        always `None` or `PeriodUnit.MONTH`.
+
+        `now` is not part of this unit's frozen Contracts signature — added
+        mid-unit for the same reason D814 added `notifyThreshold`: every
+        sibling aggregate here takes `now` for deterministic tests, and the
+        contract stub omitting it looks like an oversight, not a deliberate
+        cut (plan Decision log D815)."""
+        assert self._budget_plan_repo is not None, "by_budget needs a budget_plan_repo"
+        start, end = resolve_period(
+            period,
+            offset=offset,
+            start_date=start_date,
+            end_date=end_date,
+            now=now,
+            tz=self._family_tz,
+        )
+        plans = await self._budget_plan_repo.list(account_id=account_id)
+        if not plans:
+            return []
+        sums = await self._expense_repo.sum_by_category_month(
+            account_id, start, end, tz=self._family_tz
+        )
+        return [
+            BudgetFill(
+                **calculate_progress(
+                    budget_plan_id=plan.id,
+                    category_id=plan.category_id,
+                    spent=sums.get(plan.category_id, 0),
+                    limit=plan.amount,
+                    notify_threshold=plan.notify_threshold,
+                ).model_dump()
+            )
+            for plan in plans
+        ]
