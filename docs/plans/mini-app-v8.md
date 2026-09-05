@@ -304,6 +304,7 @@ export type Grouping = "category" | "tag" | "budget";   // widened
 export interface StatisticsBudgetRow {
   planId: Uuid; categoryId: Uuid; label: string; colorVar: string;
   amountMinor: number; spentMinor: number; fillPct: number | null;
+  notifyThreshold: number;   // NEW, D814 — percent 0-100, ticks the bar
   isOverThreshold: boolean; isExceeded: boolean;
 }
 // StatisticsData gains `budgetRows: StatisticsBudgetRow[]`.
@@ -345,7 +346,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       screen that opened it (`../navigation.md`)".
       **AC:** `grep -rl "returns to Home" docs/ui/screens/` returns nothing
       that is not explicitly justified as a floor case in the same line.
-- [ ] **U0.3** `docs/ui/screens/05-statistics.md` — the Budgets grouping.
+- [x] **U0.3** `docs/ui/screens/05-statistics.md` — the Budgets grouping.
       A third chip in region 4; a new bar anatomy for region 5 under that
       grouping (name, `spent of limit`, fill bar, over-budget treatment —
       reusing `04-budgets.md`'s existing budget-row vocabulary rather than
@@ -353,8 +354,10 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       tabs; the coercion when Budgets is chosen under a non-month unit; the
       new States rows (no budgets set; a budget whose category was archived);
       the D807 limitation stated in the user's terms ("the limit shown is
-      today's limit"); Data gains `GET /statistics/by-budget`; Copy gains the
-      five keys above. **Depends on U0.1 (same file).**
+      today's limit"); Data gains `GET /statistics/by-budget`; Copy gains four
+      of the five keys above (`periodSelector.aria.unitUnavailable` is
+      `period-selector.md`'s own key, U0.4's file to add). **Depends on U0.1
+      (same file).**
       **AC:** the spec states, in the Data section, that `by-budget` is
       fetched in the same parallel load as the other three whenever the unit
       is month, so the grouping toggle still never refetches (D810).
@@ -575,6 +578,16 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   real fill. Flag this one to the reviewer explicitly — it is a deliberate
   deviation from `_own_user_id`'s pattern, and it is the kind of line a
   reviewer should challenge.
+- 2026-09-05: **D814** — `StatisticsBudgetRow` gains `notifyThreshold: number`
+  (Contracts, Frontend — budgets grouping). Found mid-U0.3: the spec's row
+  anatomy reuses `04-budgets.md`'s bar-plus-tick vocabulary, and the tick
+  needs a threshold to sit at, but the original Contracts stub carried only
+  `isOverThreshold`/`isExceeded` (booleans, useless for positioning a tick)
+  even though the backend's `BudgetFill` already returns `notify_threshold`.
+  Recorded per this plan's own rule ("a limitation found mid-unit → stop,
+  record it in the Decision log, then continue") rather than dropping the
+  tick from the spec — 04-budgets' tick is exactly the anatomy this grouping
+  was asked to reuse, not reinvent a poorer version of.
 
 ## STATE (handoff)
 - **Done:** Planning only, 2026-09-04. The three brief items were read against
@@ -652,7 +665,53 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   `07-tags.md`'s AC wording ("opened that way") aligned with
   `06-categories.md`'s ("opened from that tile"). `scripts/verify.sh` re-run
   and green after each round.
-- **Next:** `/clear`, then `/unit U0.3 docs/plans/mini-app-v8.md`. M0 is
+- **Done (U0.3, 2026-09-05):** `docs/ui/screens/05-statistics.md` updated for
+  the Budgets grouping. Purpose/Delta gain a third-grouping bullet stating the
+  Month-only rule, the D809 coercion and the D807 current-limit limitation in
+  the user's terms; Layout's region 4 gains the "Budgets" chip and region 5
+  gains a new "Budget row" anatomy subsection reusing `04-budgets.md`'s dot +
+  head + bar + tick vocabulary, with a trailing Warning glyph (icon-only for
+  `isOverThreshold`, icon + `budget.exceeded` text for `isExceeded`) standing
+  in for `04-budgets.md`'s three-way status line; States gains two rows (no
+  budgets set; a plan whose category was archived, falling back to
+  `statistics.unknownCategory` per `budgets.ts:133`); Interactions gains the
+  budget bar's no-op tap (D812), the dimmed-tab no-op, the `‹`/`›` offset
+  behaviour under Budgets, and a refetch exception on the grouping toggle for
+  D809's coercion case; Copy gains four keys (`grouping.budget`,
+  `bars.empty.budget`, `budget.of`, `budget.exceeded` — `periodSelector.aria.
+  unitUnavailable` stays out of this file, it's U0.4's own key); Data gains
+  `GET /statistics/by-budget` with the D810 parallel-load note and the D807
+  limitation restated plainly. `design-system.md`'s Warning icon row extended
+  to name this screen as a third consumer — no new token, value or icon
+  invented. This unit applies D807–D812 and makes one new decision, **D814**:
+  `StatisticsBudgetRow` (Contracts) gains `notifyThreshold: number` — the
+  original stub had no field the tick could sit at even though the backend's
+  `BudgetFill` already returns `notify_threshold`. One inferred choice flagged
+  in Open questions for the human to confirm or overturn: no "on track" text
+  for un-flagged budget rows (only the two Contracts strings ship), with a
+  matching accessibility gap noted (the approaching-state glyph has no
+  accessible name yet). No code was touched (M0 is spec-only);
+  `scripts/verify.sh` was run as the Stop-gate and passed because nothing it
+  checks changed.
+  **Reviewer round 1** (REQUEST_CHANGES, all fixed before round 2): one
+  BLOCKER — `StatisticsBudgetRow` had no field to position the anatomy's tick
+  at, resolved as D814 above. Three WARNs, all fixed: a rule citation
+  attributed to "root CLAUDE.md" that actually lives in `webapp/CLAUDE.md`
+  (status red + icon + word on over-budget); the States table's Error row
+  still said "three" statistics calls after the Data section's new text said
+  a fourth (`by-budget`) can join under Month; the Grouping-toggle
+  Interactions row phrased the no-refetch guarantee so it read as if
+  category↔tag's pre-existing no-refetch behaviour were also Month-gated,
+  when only the new Budgets arm is. One NIT, fixed: the unit's own plan
+  bullet said "five keys" when this unit ships four
+  (`periodSelector.aria.unitUnavailable` is `period-selector.md`'s/U0.4's).
+  `scripts/verify.sh` re-run and green.
+  **Reviewer round 2** (APPROVE, no fixes needed): confirmed all four round-1
+  fixes landed correctly with no regressions; a fresh pass over Contracts/
+  Decision-log alignment, `ui-spec` provenance markers and the Delta/
+  Acceptance-criteria sections found nothing further. `scripts/verify.sh`
+  unchanged and green.
+- **Next:** `/clear`, then `/unit U0.4 docs/plans/mini-app-v8.md`. M0 is
   `ui-spec` work and must land before any code — three of the three items
   contradict a currently-written spec line. Do **not** start M1 until U0.1,
   U0.2, U0.3 and U0.4 are all ticked.

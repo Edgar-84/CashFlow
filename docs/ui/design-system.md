@@ -382,7 +382,7 @@ SVG in the module that uses them**, 24px box, 2px stroke, `currentColor`:
 | `+` | Add button (01), Add tag (02), More (02), open the full colour sheet (06b) | two 2.5px strokes, 24px box — 2px strokes in a 16px box at the colour picker's circle size |
 | `‹` `›` | Period arrows (01, 05) | chevron, 2px stroke, 20px box |
 | Calendar | Date row (02), Period tab (01) | rounded square + two ticks |
-| Warning | Budget alert strip (01), toast (`components/toast.md`) | triangle + bar + dot. `--status-red` on an **exceeded** line; `currentColor` on an **approaching** line and inside the toast, so the one shape serves both states without red claiming a state it does not own |
+| Warning | Budget alert strip (01), toast (`components/toast.md`), Budgets grouping row (05, V8) | triangle + bar + dot. `--status-red` on an **exceeded** line; `currentColor` on an **approaching** line and inside the toast, so the one shape serves both states without red claiming a state it does not own |
 | `☰` | Menu button (01) | three 2px horizontal strokes, 20px box, 5px apart |
 | Skip-to-present | Period selector's jump control | two `›` chevrons + a 2px vertical bar at the right edge, 20px box — the "skip to end" shape, not a plain double chevron |
 | `✓` | Selected currency (08), selected language (09), selected colour slot (06b) | two 2px strokes, 20px box |
