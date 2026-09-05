@@ -166,8 +166,8 @@ export function budgetToastMessage(
  * optimistic navigation back to Categories, and by the time it settles the
  * user may have moved on to a different screen — this guards a failed
  * request from yanking them back to Categories mid-draft elsewhere. Not a
- * generic router; there is no navigation history here, only "what's on
- * screen right now". */
+ * navigation stack itself — `navStack` below is where history lives
+ * (U2.1–U2.3); this tracks only "what's on screen right now". */
 type ActiveScreen =
   | "home"
   | "add-expense"
@@ -199,20 +199,25 @@ function setActiveScreen(next: ActiveScreen): void {
 }
 
 /** `main.ts`'s single stack instance (U2.2, `docs/ui/navigation.md`) — owns
- * back-navigation for the menu-reachable screens wired this unit (Expenses,
- * Budgets, Statistics, Settings, Admin). Categories/Tags/Add-expense/Expense
- * detail/Budget form/Language keep their pre-existing `*ReturnTo`/`onBack`
- * closures for now (U2.3 retires those); `showHome`'s own `reset()` below
- * clears any entry left over from either mechanism, so the two never
- * interfere with each other. */
+ * back-navigation for every screen reachable via BackButton. U2.2 wired the
+ * five menu-reachable screens (Expenses, Budgets, Statistics, Settings,
+ * Admin); U2.3 finished the rest (Add-expense/Edit-expense, Expense detail,
+ * Budget form, Categories, Tags, Language), retiring the `categoriesReturnTo`/
+ * `tagsReturnTo` module-level closures and `showExpenseDetail`/
+ * `showEditExpense`'s `onBack` parameters those units used instead — a
+ * sub-screen opened mid-draft (Categories/Tags from Add Expense's "More"/"+
+ * Add tag") now updates its parent's own stack entry with a fresh `restore`
+ * closure carrying the live draft (D805: entries are thunks, not serialized
+ * state) rather than pointing a separate variable at it. `showHome`'s own
+ * `reset()` below empties the stack on every arrival at the floor. */
 const navStack = createNavStack();
 
 /** Pure push-vs-replace decision for `navigate` below — pulled out for
  * direct test coverage under Node, same reasoning as
  * `withCreatedTagPreselected`. `topScreen` and `screen` coincide exactly
  * when the caller is re-rendering the screen already on top: a retry, a
- * period/grouping change, or a child screen not yet wired into the stack
- * (Budget form, Expense detail) returning to the list that opened it. That
+ * period/grouping change, or a child screen not itself wired onto the stack
+ * (Category form, Tag form) returning to the list that opened it. That
  * case must always replace, never push — the plan's Risks section: "a user
  * retrying a failed load five times must not need five back taps". */
 export function navStackAction(topScreen: string | null, screen: string): "push" | "replace" {
@@ -246,37 +251,20 @@ function goBack(): void {
   }
 }
 
-/** Where Categories' BackButton goes (U3.2). Defaults to Home; Add Expense's
- * "More" cell (`showAddExpense`'s `onMore` handler, below) points it back to
- * itself instead, with the draft it was carrying, so a category created
- * mid-composer returns the user to their in-progress expense rather than
- * bouncing them to Home. Reset to Home at every *other* entry into
- * Categories (the side menu's row tap) so a stale "return to Add Expense" target
- * never leaks into an unrelated visit. */
-let categoriesReturnTo: () => void = () => void showHome();
-
-/** Where Tags' BackButton goes (U3.4) — same shape as `categoriesReturnTo`.
- * Add Expense's "+ Add tag" chip (`showAddExpense`'s `onAddTag` handler,
- * below) points it back to itself with the draft it was carrying; every
- * other entry into Tags (the side menu's row tap) resets it to Home so a stale
- * "return to Add Expense" target never leaks into an unrelated visit. */
-let tagsReturnTo: () => void = () => void showHome();
-
-/** The most recently *created* (not renamed) tag's id, read by
- * `tagsReturnTo`'s Add-Expense closure to pre-select it on return (screen
- * doc: "a tag created there returns pre-selected"). Set in `showTagForm`'s
- * `onSaved` only when that form was opened in create mode. Reset at *every*
- * entry into Tags — the side menu's row tap, and `onAddTag` itself — not just the
- * non-Add-Expense one: without also resetting on the Add-Expense leg, a tag
- * created on some earlier, unrelated Tags visit (reached via the side menu,
- * whose own BackButton runs the default `tagsReturnTo` and so never
- * consumes this var) would still be sitting here and would wrongly attach
+/** The most recently *created* (not renamed) tag's id, read by the
+ * `onAddTag` closure below (`showAddExpense`/`showEditExpense`) to
+ * pre-select it on return (screen doc: "a tag created there returns
+ * pre-selected"). Set in `showTagForm`'s `onSaved` only when that form was
+ * opened in create mode. Reset at *every* entry into Tags — the side menu's
+ * row tap, and `onAddTag` itself — not just the Add-Expense one: without
+ * also resetting on the side-menu leg, a tag created on some earlier,
+ * unrelated Tags visit would still be sitting here and would wrongly attach
  * itself to a *later*, unconnected draft. Only one id is ever held — if a
  * single Tags visit creates two tags, only the second is pre-selected, which
  * matches the AC's singular "a tag created there". */
 let lastCreatedTagId: Uuid | null = null;
 
-/** Pure merge step of `tagsReturnTo`'s Add-Expense closure — appends
+/** Pure merge step of `showAddExpense`/`showEditExpense`'s `onAddTag` closure — appends
  * `createdId` if it's set and not already present, otherwise returns
  * `tagIds` unchanged. Pulled out and exported so this unit's routing
  * decision has direct test coverage under Node, unlike the DOM-bound `showX`
@@ -347,10 +335,8 @@ async function showHome(): Promise<void> {
       } else if (item === "statistics") {
         void showStatistics();
       } else if (item === "categories") {
-        categoriesReturnTo = () => void showHome();
         void showCategories();
       } else if (item === "tags") {
-        tagsReturnTo = () => void showHome();
         lastCreatedTagId = null;
         void showTags();
       } else if (item === "settings") {
@@ -423,17 +409,18 @@ async function refreshHome(root: HTMLElement, handlers: HomeHandlers): Promise<v
 }
 
 /** Mounts Add Expense (U2.2, screen 02; grid/account redesign U3.2, date row
- * U3.3, tags/comment U3.4). `initialDraft` is set on the return leg of a
- * "More" trip to Categories (see `onMore` below and `categoriesReturnTo`) or
- * a "+ Add tag" trip to Tags (see `onAddTag` below and `tagsReturnTo`) —
- * undefined on every other entry, which `mountAddExpense` treats as an empty
- * draft. */
+ * U3.3, tags/comment U3.4; back stack U2.3). `initialDraft` is set on the
+ * return leg of a "More" trip to Categories or a "+ Add tag" trip to Tags
+ * (see `onMore`/`onAddTag` below, each replacing this call's own stack entry
+ * with one carrying the live draft before navigating away) — undefined on
+ * every other entry, which `mountAddExpense` treats as an empty draft. */
 async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
   }
   setActiveScreen("add-expense");
+  navigate("add-expense", () => void showAddExpense(initialDraft));
 
   const handlers: AddExpenseHandlers = {
     onRetry: () => {
@@ -450,7 +437,11 @@ async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
       // `categoryId` is deliberately dropped — "More" exists to create a new
       // category, so the whole point of returning is to pick one, not to
       // silently keep whatever was selected before (component doc's AC).
-      categoriesReturnTo = () => void showAddExpense({ ...draft, categoryId: null });
+      // Refreshes this call's own stack entry (same screen name ⇒ `replace`,
+      // per `navStackAction`) with a `restore` closing over the live draft,
+      // so Categories' `goBack` lands back here with it intact (D805) rather
+      // than replaying the stale `initialDraft` this call started with.
+      navigate("add-expense", () => void showAddExpense({ ...draft, categoryId: null }));
       void showCategories();
     },
     onAddTag: (draft) => {
@@ -458,19 +449,18 @@ async function showAddExpense(initialDraft?: AddExpenseDraft): Promise<void> {
       // tag created on screen 07 comes back pre-selected, appended to
       // whatever was already picked. Reset here, not just at the side menu's
       // entry: without this, a tag created on some earlier, unrelated Tags
-      // visit (reached via the side menu, then never consumed because that
-      // visit's own BackButton ran the default `tagsReturnTo` rather than
-      // this closure) would still be sitting in `lastCreatedTagId` and would
-      // wrongly attach itself to *this* draft even though nothing was
-      // created on this trip. `tagsReturnTo`'s own closure reads
-      // `lastCreatedTagId` at call time (not closure-creation time), so it
-      // still sees whatever *this* Tags visit creates after this reset.
+      // visit (reached via the side menu) would still be sitting in
+      // `lastCreatedTagId` and would wrongly attach itself to *this* draft
+      // even though nothing was created on this trip. The replaced entry's
+      // `restore` reads `lastCreatedTagId` at call time (not closure-creation
+      // time), so it still sees whatever *this* Tags visit creates after
+      // this reset.
       lastCreatedTagId = null;
-      tagsReturnTo = () => {
+      navigate("add-expense", () => {
         const tagIds = withCreatedTagPreselected(draft.tagIds, lastCreatedTagId);
         lastCreatedTagId = null;
         void showAddExpense({ ...draft, tagIds });
-      };
+      });
       void showTags();
     },
   };
@@ -519,16 +509,17 @@ export async function withArchivedCategory(
 /** Mounts Screen 02b (Edit expense, U1.4) — the composer opened in `"edit"`
  * mode, pre-filled from `expense`, straight off the record screen 03b
  * already loaded (docs/ui/screens/02b-edit-expense.md's Data section: "the
- * expense itself is not fetched here"). `onBack` returns to 03b, never Home
- * — both a clean BackButton and a successful save land back on the record
- * being edited, unlike `showAddExpense`'s Home destination.
+ * expense itself is not fetched here"). BackButton and a successful save
+ * both pop this screen's own stack entry (`goBack`), landing back on
+ * whatever pushed it — screen 03b's Expense detail (its own stack entry,
+ * unaffected by this screen) — never Home, unlike `showAddExpense`'s Home
+ * destination.
  *
  * Wired from screen 03b's "Edit" action (`showExpenseDetail`'s
  * `DetailHandlers.onEdit`, U1.5) — that unit also deleted the old
  * field-picker this route replaced. */
 export async function showEditExpense(
   expense: ExpenseResponse,
-  onBack: () => void,
   initialDraft?: AddExpenseDraft,
 ): Promise<void> {
   const root = getRoot();
@@ -536,27 +527,28 @@ export async function showEditExpense(
     return;
   }
   setActiveScreen("add-expense");
+  navigate("add-expense", () => void showEditExpense(expense, initialDraft));
 
   const handlers: AddExpenseHandlers = {
     onRetry: () => {
-      void showEditExpense(expense, onBack, initialDraft);
+      void showEditExpense(expense, initialDraft);
     },
-    onClose: onBack,
+    onClose: goBack,
     onSuccess: (categoryId) => {
       pendingBudgetToastCategoryId = categoryId;
-      onBack();
+      goBack();
     },
     onMore: (draft) => {
-      categoriesReturnTo = () => void showEditExpense(expense, onBack, { ...draft, categoryId: null });
+      navigate("add-expense", () => void showEditExpense(expense, { ...draft, categoryId: null }));
       void showCategories();
     },
     onAddTag: (draft) => {
       lastCreatedTagId = null;
-      tagsReturnTo = () => {
+      navigate("add-expense", () => {
         const tagIds = withCreatedTagPreselected(draft.tagIds, lastCreatedTagId);
         lastCreatedTagId = null;
-        void showEditExpense(expense, onBack, { ...draft, tagIds });
-      };
+        void showEditExpense(expense, { ...draft, tagIds });
+      });
       void showTags();
     },
   };
@@ -594,7 +586,7 @@ async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
       void controller.loadMore().then(render);
     },
     onRowTap: (id) => {
-      void showExpenseDetail(id, () => void showExpenses(filter));
+      void showExpenseDetail(id);
     },
   };
 
@@ -611,32 +603,34 @@ async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
   render(state);
 }
 
-/** Mounts Expense detail (U2.3b, screen 03b), reached by tapping a row on
- * Expenses. `onBack` returns to the Expenses list this row was tapped from,
- * preserving whatever filter was in force — captured by `showExpenses`'s
- * `onRowTap` closure above, same shape as `showAddExpense`'s `onClose`. */
-async function showExpenseDetail(id: Uuid, onBack: () => void): Promise<void> {
+/** Mounts Expense detail (U2.3b, screen 03b; back stack U2.3), reached by
+ * tapping a row on Expenses. BackButton pops this screen's own stack entry
+ * (`goBack`), landing back on the Expenses list this row was tapped from,
+ * preserving whatever filter was in force — that entry's own `restore`
+ * closure, pushed by `showExpenses` before this screen ever mounts. */
+async function showExpenseDetail(id: Uuid): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
   }
   setActiveScreen("expense-detail");
+  navigate("expense-detail", () => void showExpenseDetail(id));
 
   const handlers: DetailHandlers = {
     onRetry: () => {
-      void showExpenseDetail(id, onBack);
+      void showExpenseDetail(id);
     },
-    onBack,
-    onDeleted: onBack,
+    onBack: goBack,
+    onDeleted: goBack,
     onEdit: (expense) => {
-      void showEditExpense(expense, () => void showExpenseDetail(id, onBack));
+      void showEditExpense(expense);
     },
   };
 
-  applyDetailChrome(onBack);
+  applyDetailChrome(goBack);
   mountExpenseDetail(root, { status: "loading" }, client, handlers);
   const state = await loadDetail(client, id);
-  applyDetailChrome(onBack);
+  applyDetailChrome(goBack);
   mountExpenseDetail(root, state, client, handlers);
 }
 
@@ -667,10 +661,10 @@ export function budgetFormModeFromUnbudgeted(row: UnbudgetedRow, currency: Curre
  * menu's "Budgets" row only, so BackButton always returns to Home
  * (`goBack`). Tapping a budgeted row, an unbudgeted category, or MainButton
  * navigates to `screens/budget-form.ts` (U3.2, D506) instead of opening an
- * inline form — that screen isn't wired into the stack yet (U2.3), so its
- * `onSaved`/`onCancelled`/`onDeleted` calling `showBudgets()` below finds
- * "budgets" already on top and replaces it in place rather than growing the
- * stack (`navStackAction`). */
+ * inline form — that screen has its own stack entry (U2.3), so its
+ * `onSaved`/`onCancelled`/`onDeleted` popping back (`goBack`) always lands
+ * here and re-fetches, the "fully reloaded Budgets" D511 calls for on all
+ * three outcomes. */
 async function showBudgets(): Promise<void> {
   const root = getRoot();
   if (!root) {
@@ -699,47 +693,45 @@ async function showBudgets(): Promise<void> {
   mountBudgets(root, state, handlers);
 }
 
-/** Mounts the budget form (U3.1's `screens/budget-form.ts`, screen 04b),
- * reached from Budgets' row/invitation/MainButton taps above. Per D511, all
- * three outcomes — a successful save, a successful delete, and cancelling
- * out (Cancel or BackButton) — return to a fully reloaded Budgets, the same
- * re-fetch-on-return shape `06-categories.md` uses after 06b: this screen
- * fetches nothing on open and performs no in-place patch, so there is
- * nothing cheaper to fall back to on cancel. */
+/** Mounts the budget form (U3.1's `screens/budget-form.ts`, screen 04b; back
+ * stack U2.3), reached from Budgets' row/invitation/MainButton taps above.
+ * Per D511, all three outcomes — a successful save, a successful delete, and
+ * cancelling out (Cancel or BackButton) — pop this screen's own stack entry
+ * (`goBack`), which always lands on Budgets (the only screen that ever
+ * pushes this one) and re-fetches, the same re-fetch-on-return shape
+ * `06-categories.md` uses after 06b: this screen fetches nothing on open and
+ * performs no in-place patch, so there is nothing cheaper to fall back to on
+ * cancel. */
 async function showBudgetForm(mode: BudgetFormMode): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
   }
   setActiveScreen("budget-form");
+  navigate("budget-form", () => void showBudgetForm(mode));
 
   const handlers: BudgetFormHandlers = {
-    onSaved: () => {
-      void showBudgets();
-    },
-    onCancelled: () => {
-      void showBudgets();
-    },
-    onDeleted: () => {
-      void showBudgets();
-    },
+    onSaved: goBack,
+    onCancelled: goBack,
+    onDeleted: goBack,
   };
 
   mountBudgetForm(root, mode, client, handlers);
 }
 
-/** Mounts Categories (U2.1, screen 06). BackButton returns to `categoriesReturnTo`
- * — Home by default (same shape as Budgets/Expenses, the original fix for the
- * previously dead "Categories" row), or back to Add Expense with its draft
- * when reached via that screen's "More" cell (U3.2). */
+/** Mounts Categories (U2.1, screen 06; back stack U2.3). BackButton pops this
+ * screen's own stack entry (`goBack`) — Home by default (same shape as
+ * Budgets/Expenses, the original fix for the previously dead "Categories"
+ * row, since Home never pushes an entry of its own), or back to Add Expense
+ * with its draft when reached via that screen's "More" cell (U3.2) — that
+ * call site replaces Add Expense's own entry with a fresh draft-carrying
+ * `restore` before pushing this one (see `showAddExpense`'s `onMore`). */
 function buildCategoriesHandlers(): CategoriesHandlers {
   return {
     onRetry: () => {
       void showCategories();
     },
-    onBack: () => {
-      categoriesReturnTo();
-    },
+    onBack: goBack,
     onSelectCategory: (id) => {
       void showCategoryForm(id);
     },
@@ -758,6 +750,7 @@ async function showCategories(deleteFailure: CategoryDeleteFailure | null = null
     return;
   }
   setActiveScreen("categories");
+  navigate("categories", () => void showCategories(deleteFailure));
 
   const handlers = buildCategoriesHandlers();
   applyCategoriesChrome(handlers.onBack);
@@ -893,19 +886,19 @@ async function showCategoryForm(categoryId: Uuid | null): Promise<void> {
   mountCategoryForm(root, client, draft, activeSiblings, handlers, expenseCount);
 }
 
-/** Mounts Tags (U2.4, screen 07a) — Home by default (the original fix for
- * the previously dead "Tags" row), or back to Add Expense with its draft
- * when reached via that screen's "+ Add tag" chip (U3.4), same
- * `tagsReturnTo` shape as Categories' `categoriesReturnTo`. Row and "Add
- * tag" taps navigate to 07b (U2.5). */
+/** Mounts Tags (U2.4, screen 07a; back stack U2.3) — Home by default (the
+ * original fix for the previously dead "Tags" row, same shape as
+ * Categories' `goBack`), or back to Add Expense with its draft when reached
+ * via that screen's "+ Add tag" chip (U3.4) — that call site replaces Add
+ * Expense's own entry with a fresh draft-carrying `restore` before pushing
+ * this one (see `showAddExpense`'s `onAddTag`). Row and "Add tag" taps
+ * navigate to 07b (U2.5). */
 function buildTagsHandlers(): TagsHandlers {
   return {
     onRetry: () => {
       void showTags();
     },
-    onBack: () => {
-      tagsReturnTo();
-    },
+    onBack: goBack,
     onSelectTag: (id) => {
       void showTagForm(id);
     },
@@ -924,6 +917,7 @@ async function showTags(deleteFailure: TagDeleteFailure | null = null): Promise<
     return;
   }
   setActiveScreen("tags");
+  navigate("tags", () => void showTags(deleteFailure));
 
   const handlers = buildTagsHandlers();
   applyTagsChrome(handlers.onBack);
@@ -1040,7 +1034,7 @@ async function showTagForm(tagId: Uuid | null): Promise<void> {
     },
     onSaved: (tag) => {
       // Only a *create* (`tagId === null` on entry) counts as "just
-      // created" for `tagsReturnTo`'s pre-selection — a rename leaves
+      // created" for `onAddTag`'s pre-selection — a rename leaves
       // `lastCreatedTagId` alone.
       if (tagId === null) {
         lastCreatedTagId = tag.id;
@@ -1117,13 +1111,12 @@ async function showStatistics(
 }
 
 /** Mounts Settings (U3.3, screen 08), reached from the side menu's seventh
- * row. No `*ReturnTo` closure like Categories'/Tags' (D409's own additions) —
- * every entry and exit goes through Home, per the screen doc's BackButton row
- * and Saved state: `onBack` is the stack's `goBack` (U2.2, lands on Home at
- * depth 1 the same as before), and `onSaved` calls `showHome()` directly
- * since a save isn't a back step. `showHome`'s own `refreshHome` always
- * re-fetches (never cache-first), which is what relabels every amount with
- * the new currency without reopening the app. */
+ * row — every entry and exit goes through Home, per the screen doc's
+ * BackButton row and Saved state: `onBack` is the stack's `goBack` (U2.2,
+ * lands on Home at depth 1 the same as before), and `onSaved` calls
+ * `showHome()` directly since a save isn't a back step. `showHome`'s own
+ * `refreshHome` always re-fetches (never cache-first), which is what
+ * relabels every amount with the new currency without reopening the app. */
 async function showSettings(): Promise<void> {
   const root = getRoot();
   if (!root) {
@@ -1150,30 +1143,28 @@ async function showSettings(): Promise<void> {
   mountSettings(root, state, client, handlers);
 }
 
-/** Mounts Language (U3.11, screen 09), reached only from Settings' new
- * "Language" row — never from the side menu (D706). `onBack`/`onSaved` both
- * return to Settings (screen doc: "always returns to Settings" / "the
- * screen returns to Settings"), unlike Settings' own Home-only destinations —
- * `showSettings`'s own `loadSettings` re-fetches, so a changed language's
- * new row label shows immediately, the same "always re-fetch on return"
- * shape `showHome` gives Settings' own currency change. */
+/** Mounts Language (U3.11, screen 09; back stack U2.3), reached only from
+ * Settings' new "Language" row — never from the side menu (D706). `onBack`
+ * and `onSaved` both pop this screen's own stack entry (`goBack`), landing
+ * on Settings (screen doc: "always returns to Settings" / "the screen
+ * returns to Settings") since Settings is the only screen that ever pushes
+ * this one — `showSettings`'s own `loadSettings` re-fetches on that pop, so
+ * a changed language's new row label shows immediately, the same "always
+ * re-fetch on return" shape `showHome` gives Settings' own currency change. */
 async function showLanguage(): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
   }
   setActiveScreen("language");
+  navigate("language", () => void showLanguage());
 
   const handlers: LanguageHandlers = {
     onRetry: () => {
       void showLanguage();
     },
-    onBack: () => {
-      void showSettings();
-    },
-    onSaved: () => {
-      void showSettings();
-    },
+    onBack: goBack,
+    onSaved: goBack,
   };
 
   applyLanguageChrome(handlers.onBack);
