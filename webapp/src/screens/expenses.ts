@@ -37,7 +37,7 @@ import { formatAmount } from "../lib/money";
 import { describe as describePeriod, toQuery, type PeriodQuery, type PeriodValue } from "../lib/period";
 import { haptics, mainButton, setBackButtonHandler } from "../lib/telegram";
 import { ForbiddenError } from "../api/client";
-import type { CategoryResponse, Currency, ExpenseResponse, Uuid } from "../api/types";
+import type { CategoryResponse, Currency, ExpenseResponse, TagResponse, Uuid } from "../api/types";
 
 const PAGE_SIZE = 50;
 
@@ -63,6 +63,7 @@ export interface ExpenseDayGroup {
 export interface ExpensesData {
   currency: Currency;
   categoryLabel: string | null;
+  tagLabel: string | null;
   period: PeriodValue | undefined;
   days: ExpenseDayGroup[];
   hasMore: boolean;
@@ -72,7 +73,7 @@ export type ExpensesState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "forbidden" }
-  | { status: "empty"; categoryLabel: string | null; period: PeriodValue | undefined }
+  | { status: "empty"; categoryLabel: string | null; tagLabel: string | null; period: PeriodValue | undefined }
   | ({ status: "ready" } & ExpensesData)
   | ({ status: "offline"; lastSyncedAt: string } & ExpensesData);
 
@@ -146,13 +147,18 @@ export function groupByDay(rows: ExpenseRow[]): ExpenseDayGroup[] {
 export function buildExpensesData(input: {
   expenses: ExpenseResponse[];
   categories: CategoryResponse[];
+  tags: TagResponse[];
   currency: Currency;
   categoryId?: Uuid;
+  tagId?: Uuid;
   period?: PeriodValue;
   hasMore: boolean;
 }): ExpensesData {
   const categoryLabel = input.categoryId
     ? (input.categories.find((c) => c.id === input.categoryId)?.name ?? t("expenses.unknownCategory"))
+    : null;
+  const tagLabel = input.tagId
+    ? (input.tags.find((tag) => tag.id === input.tagId)?.name ?? t("expenses.unknownTag"))
     : null;
   const colorBySlot = new Map(assignCategoryColors(input.categories).map((c) => [c.id, c.slot]));
   const categoryById = new Map(input.categories.map((c) => [c.id, c]));
@@ -160,6 +166,7 @@ export function buildExpensesData(input: {
   return {
     currency: input.currency,
     categoryLabel,
+    tagLabel,
     period: input.period,
     days: groupByDay(rows),
     hasMore: input.hasMore,
@@ -171,9 +178,11 @@ export interface ExpensesApi {
     limit: number;
     offset: number;
     categoryId?: Uuid;
+    tagId?: Uuid;
     period?: PeriodQuery;
   }): Promise<ExpenseResponse[]>;
   listCategories(): Promise<CategoryResponse[]>;
+  listTags(): Promise<TagResponse[]>;
   getMe(): Promise<{ currency: Currency }>;
 }
 
@@ -199,6 +208,7 @@ export function createMemoryCache(): ExpensesCache {
 
 export interface ExpensesFilter {
   categoryId?: Uuid;
+  tagId?: Uuid;
   period?: PeriodValue;
 }
 
@@ -220,6 +230,7 @@ export function createExpensesController(
 ): ExpensesController {
   let expenses: ExpenseResponse[] = [];
   let categories: CategoryResponse[] = [];
+  let tags: TagResponse[] = [];
   let currency: Currency = "USD";
   let offset = 0;
   let hasMore = true;
@@ -229,13 +240,15 @@ export function createExpensesController(
     const data = buildExpensesData({
       expenses,
       categories,
+      tags,
       currency,
       categoryId: filter.categoryId,
+      tagId: filter.tagId,
       period: filter.period,
       hasMore,
     });
     if (data.days.length === 0 && !hasMore) {
-      return { status: "empty", categoryLabel: data.categoryLabel, period: data.period };
+      return { status: "empty", categoryLabel: data.categoryLabel, tagLabel: data.tagLabel, period: data.period };
     }
     cache.set({ data, syncedAt: new Date().toISOString() });
     return { status: "ready", ...data };
@@ -246,6 +259,7 @@ export function createExpensesController(
       limit: PAGE_SIZE,
       offset,
       categoryId: filter.categoryId,
+      tagId: filter.tagId,
       period: periodQuery,
     });
     expenses = [...expenses, ...page];
@@ -259,9 +273,10 @@ export function createExpensesController(
       offset = 0;
       hasMore = true;
       try {
-        const [me, cats] = await Promise.all([api.getMe(), api.listCategories()]);
+        const [me, cats, tagList] = await Promise.all([api.getMe(), api.listCategories(), api.listTags()]);
         currency = me.currency;
         categories = cats;
+        tags = tagList;
         await fetchPage();
         return buildState();
       } catch (err) {
@@ -364,24 +379,42 @@ function renderForbidden(): string {
   </div>`;
 }
 
-/** Combines the two filter halves into the banner/copy text — "Transport ·
- * August" when both are in force, either alone otherwise, `null` when
- * neither is (docs/ui/screens/03-expenses.md's Copy table, `filter.*`). */
-function filterBannerText(categoryLabel: string | null, periodLabel: string | null): string | null {
+/** Combines the filter halves into the banner/copy text — "Transport ·
+ * August" when category and period are both in force, "Coffee · August"
+ * for tag and period (V8), either alone otherwise, `null` when none is
+ * (docs/ui/screens/03-expenses.md's Copy table, `filter.*`). `category_id`
+ * and `tag_id` are AND-combinable server-side (D803) but no screen sends
+ * both today, so a category filter takes banner precedence when it does. */
+function filterBannerText(categoryLabel: string | null, tagLabel: string | null, periodLabel: string | null): string | null {
   if (categoryLabel && periodLabel) {
     return fillTemplate(t("expenses.filter.both"), { category: categoryLabel, period: periodLabel });
   }
-  return categoryLabel ?? periodLabel;
+  if (categoryLabel) {
+    return categoryLabel;
+  }
+  if (tagLabel && periodLabel) {
+    return fillTemplate(t("expenses.filter.tagAndPeriod"), { tag: tagLabel, period: periodLabel });
+  }
+  if (tagLabel) {
+    return fillTemplate(t("expenses.filter.tagOnly"), { tag: tagLabel });
+  }
+  return periodLabel;
 }
 
-/** Same two halves, the empty-state phrasing (`empty.*`) — period first,
- * category second, unlike the banner's order. */
-function emptyMessage(categoryLabel: string | null, periodLabel: string | null): string {
+/** Same halves, the empty-state phrasing (`empty.*`) — period first,
+ * category/tag second, unlike the banner's order. */
+function emptyMessage(categoryLabel: string | null, tagLabel: string | null, periodLabel: string | null): string {
   if (categoryLabel && periodLabel) {
     return fillTemplate(t("expenses.empty.both"), { category: categoryLabel, period: periodLabel });
   }
   if (categoryLabel) {
     return fillTemplate(t("expenses.empty.categoryOnly"), { category: categoryLabel });
+  }
+  if (tagLabel && periodLabel) {
+    return fillTemplate(t("expenses.empty.tagPeriod"), { tag: tagLabel, period: periodLabel });
+  }
+  if (tagLabel) {
+    return fillTemplate(t("expenses.empty.tag"), { tag: tagLabel });
   }
   if (periodLabel) {
     return fillTemplate(t("expenses.empty.periodOnly"), { period: periodLabel });
@@ -389,9 +422,14 @@ function emptyMessage(categoryLabel: string | null, periodLabel: string | null):
   return t("expenses.empty.unfiltered");
 }
 
-function renderEmpty(categoryLabel: string | null, period: PeriodValue | undefined, now: Date): string {
+function renderEmpty(
+  categoryLabel: string | null,
+  tagLabel: string | null,
+  period: PeriodValue | undefined,
+  now: Date,
+): string {
   const periodLabel = period ? describePeriod(period, now) : null;
-  const message = emptyMessage(categoryLabel, periodLabel);
+  const message = emptyMessage(categoryLabel, tagLabel, periodLabel);
   return `<div class="expenses-empty" data-testid="empty">
     <p>${escapeHtml(message)}</p>
   </div>`;
@@ -399,7 +437,7 @@ function renderEmpty(categoryLabel: string | null, period: PeriodValue | undefin
 
 function renderReady(data: ExpensesData, lastSyncedAt: string | undefined, now: Date): string {
   const periodLabel = data.period ? describePeriod(data.period, now) : null;
-  const banner = filterBannerText(data.categoryLabel, periodLabel);
+  const banner = filterBannerText(data.categoryLabel, data.tagLabel, periodLabel);
   const footer = data.hasMore
     ? `<button type="button" class="load-more" data-action="load-more">${escapeHtml(t("expenses.loadMore"))}</button>`
     : `<p class="end-of-list" data-testid="end-of-list">${escapeHtml(t("expenses.endOfList"))}</p>`;
@@ -420,7 +458,7 @@ export function renderExpenses(state: ExpensesState, now: Date): string {
     case "forbidden":
       return renderForbidden();
     case "empty":
-      return renderEmpty(state.categoryLabel, state.period, now);
+      return renderEmpty(state.categoryLabel, state.tagLabel, state.period, now);
     case "ready":
       return renderReady(state, undefined, now);
     case "offline":
