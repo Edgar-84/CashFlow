@@ -361,7 +361,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       **AC:** the spec states, in the Data section, that `by-budget` is
       fetched in the same parallel load as the other three whenever the unit
       is month, so the grouping toggle still never refetches (D810).
-- [ ] **U0.4** `docs/ui/components/period-selector.md` — the restricted-units
+- [x] **U0.4** `docs/ui/components/period-selector.md` — the restricted-units
       variant. A new row in Variants ("Restricted"), the `allowedUnits` prop in
       Inputs, the visual treatment (50% opacity, `disabled`, no haptic, no
       `onUnitChange`), the accessibility contract (`aria-disabled` and a
@@ -711,10 +711,46 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   Decision-log alignment, `ui-spec` provenance markers and the Delta/
   Acceptance-criteria sections found nothing further. `scripts/verify.sh`
   unchanged and green.
-- **Next:** `/clear`, then `/unit U0.4 docs/plans/mini-app-v8.md`. M0 is
-  `ui-spec` work and must land before any code — three of the three items
-  contradict a currently-written spec line. Do **not** start M1 until U0.1,
-  U0.2, U0.3 and U0.4 are all ticked.
+- **Done (U0.4, 2026-09-05):** `docs/ui/components/period-selector.md` updated
+  with the restricted-units variant. Variants gains a "Restricted (V8)" row;
+  States gains a row distinguishing it from the existing whole-component
+  Disabled state (per-tab 50% opacity vs. whole-component); Inputs gains
+  `allowedUnits?: readonly PeriodUnit[]` (absent ⇒ all five enabled) with a
+  note that it restricts the tab row only — the nav row (arrows, label, jump
+  control) reads no restriction from it; Copy gains
+  `aria.unitUnavailable` = "{unit} — not available for budgets", sourced from
+  the tab's own `tab.*` label rather than the lowercase `unit.*` map
+  `aria.prev`/`aria.next` use; Accessibility states a restricted tab's
+  accessible name comes from that key, not the bare label. A new V8 paragraph
+  in Purpose and the file's Acceptance criteria both name
+  `05-statistics.md`'s Budgets grouping as the variant's sole consumer,
+  matching the AC. No new decisions — this unit applies
+  D807–D811 as already recorded, it doesn't make new ones. No code was
+  touched (M0 is spec-only); `scripts/verify.sh` was run as the Stop-gate and
+  passed (809 backend + 960 webapp tests, both unchanged) because nothing it
+  checks changed.
+  **Reviewer round 1** (APPROVE, one WARN and two NITs fixed before round 2):
+  the WARN — `aria.unitUnavailable`'s `{unit}` source was ambiguous between
+  the capitalized `tab.*` label and the lowercase `unit.*` map `aria.prev`/
+  `aria.next` use — resolved by naming `tab.*` explicitly in the Copy table
+  and this STATE entry. Two NITs fixed: the file didn't reconcile a
+  `disabled` tab with the existing roving-tabindex "Arrow keys move between
+  tabs" rule; and this STATE entry originally overstated an edit to the
+  existing "Used by" sentence when the V8 text is a new appended paragraph.
+  **Reviewer round 2** (APPROVE; one WARN, one NIT, both fixed): the
+  round-1 arrow-key fix was itself unclear — it hedged ("may skip... the
+  same way it already skips nothing today") without stating an actual
+  behavior. Reworded to state plainly that a native `disabled` element
+  cannot receive focus, so arrow-key traversal skips a restricted tab
+  entirely. NIT: "replacing `aria-selected`'s usual label" mischaracterized
+  a boolean ARIA state as a label source — reworded to "the tab's usual
+  accessible name". `scripts/verify.sh` re-run and green after each round
+  (809 backend + 960 webapp tests, unchanged throughout).
+- **M0 complete.** U0.1, U0.2, U0.3 and U0.4 are all ticked — every spec line
+  M1–M3 will implement against now exists and matches the target behaviour.
+- **Next:** `/clear`, then `/unit U1.1 docs/plans/mini-app-v8.md` — the first
+  M1 (code) unit, `GET /expenses?tag_id=`. See Contracts' "Backend — expense
+  tag filter (U1.1)" section for the exact signatures.
 - **Gotchas:**
   - A stale, already-merged branch literally named `U0.2` was left over from
     the V7 plan (local + `origin`) when this unit started; it was not reused

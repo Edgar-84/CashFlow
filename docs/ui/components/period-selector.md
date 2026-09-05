@@ -16,6 +16,10 @@ computes one — it emits `{unit, offset}` or `{unit: "custom", start, end}` and
 the backend resolves it in `family_tz` (webapp/CLAUDE.md's zero-business-logic
 rule; D120's bug is the reason).
 
+**V8:** screen 05's Budgets grouping is the sole consumer of the Restricted
+variant (`allowedUnits`, see Variants) — a per-tab dimming that is distinct
+from the whole-component Disabled state below.
+
 ## Reference
 - `../refs/01-home/day-tab.jpg` — Day active, `‹ Today, August 4`
 - `../refs/01-home/week-tab.jpg` — Week active, `‹ Aug 2 – Aug 8`
@@ -74,6 +78,7 @@ one tab and somewhere else on another.
 |---|---|---|
 | Full | screen 01 | Both rows, all five tabs |
 | Custom active | after a range is applied | Tab row unchanged with "Period" active; the nav row's arrows **and the jump control** are all hidden (an arbitrary range has no next, previous, or present) and the label shows the range |
+| Restricted (V8) | screen 05, Budgets grouping active | Tabs outside `allowedUnits` render at 50% opacity, `disabled` + `aria-disabled`, fire no haptic and call no `onUnitChange`; the nav row (arrows, label, jump control) is **unaffected** — only the unit tabs are restricted |
 
 ## States
 
@@ -84,6 +89,7 @@ one tab and somewhere else on another.
 | Custom | unit = custom | Arrows and jump control hidden; label shows the range; "Period" tab active |
 | Pressed | tap on tab or arrow | 0.6 opacity for the press duration |
 | Disabled | host is offline | Whole component 50% opacity, tabs inert; tapping shows the host's offline message |
+| Restricted (V8) | `allowedUnits` passed and narrower than all five | Only the tabs **outside** `allowedUnits` dim to 50% opacity and go inert (same opacity as Disabled, but per-tab, not whole-component); the nav row stays fully live — offset arrows and the jump control are unaffected |
 | Loading | a fetch is in flight | **No change** — the control stays live and interactive. Only the host's chart skeletonises. |
 
 The component is never itself in a loading state. Freezing the control someone
@@ -105,10 +111,16 @@ just tapped is what makes a period switch feel slow.
 | `aria.jump.week` | "Back to this week" | |
 | `aria.jump.month` | "Back to this month" | |
 | `aria.jump.year` | "Back to this year" | |
+| `aria.unitUnavailable` (V8) | "{unit} — not available for budgets" | on a tab outside `allowedUnits`, replacing the tab's usual accessible name (its `tab.*` label); `{unit}` is sourced from that same `tab.*` label ("Year"), **not** the lowercase `unit.*` map `aria.prev`/`aria.next` use ("week") |
 
 The jump control's accessible name is **per unit**, not a generic "Back to the
 present" — a screen reader user arrowing through months should hear the thing
 they are returning to `[inferred]`.
+
+`aria.unitUnavailable` says **why** a tab is unreachable, not just that it is
+— `aria-disabled` alone tells a screen-reader user a control is off, not the
+reason, and "not available for budgets" is the one fact that lets them stop
+trying it `[inferred]`.
 
 ### Label formats
 
@@ -157,6 +169,15 @@ whatever the host renders below it.
 - Hit targets are 44×44 minimum everywhere, including the label.
 - `prefers-reduced-motion`: the underline does not slide between tabs, it
   redraws.
+- (V8) A tab outside `allowedUnits` is `disabled` + `aria-disabled="true"` and
+  its accessible name comes from `aria.unitUnavailable`, not its usual
+  accessible name (the bare `tab.*` label) — the same "state the reason, not
+  just the fact" rule the jump control's per-unit naming already follows.
+  A native `disabled` element cannot receive focus, so the row's `disabled`
+  + `aria-disabled` pairing (the same one `›` at offset 0 already uses above)
+  means arrow-key traversal **skips it entirely** — Left/Right lands only on
+  the enabled tabs, wrapping past the restricted ones as if they weren't in
+  the tab order.
 
 ## Inputs
 Pure render function, no fetching and no state — `webapp/src/components/` rule.
@@ -176,11 +197,19 @@ interface PeriodSelectorProps {
   now: Date;                 // anchors `describe`'s label — injected so the
                               // component never reads the clock itself (D327)
   disabled?: boolean;        // offline
+  allowedUnits?: readonly PeriodUnit[];   // (V8) absent ⇒ all five enabled
   onUnitChange(unit: PeriodUnit): void;   // host resets offset to 0
   onOffsetChange(offset: number): void;   // host clamps at 0
   onOpenPicker(): void;                   // "Period" tab, or a label tap
 }
 ```
+
+`allowedUnits` restricts the **tab row only** — a tab not in the list renders
+dimmed and inert and never calls `onUnitChange`; the nav row (arrows, label,
+jump control) reads no restriction from this prop at all. The host is the one
+deciding which units are allowed (screen 05 passes `["month"]` while the
+Budgets grouping is active, D807–D811) — the component does not know why a
+unit is restricted, only that it is.
 
 The jump control needs **no callback of its own**: it calls
 `onOffsetChange(0)`. "Jump to the present" and "arrow forward to the present"
@@ -221,6 +250,20 @@ by the absence of any such export.
 - [ ] Every hit target measures at least 44×44px.
 - [ ] Renders identically in structure in light and dark, with all colour from
       `tokens.css`.
+- [ ] With `allowedUnits: ["month"]` the four other tabs render at 50%
+      opacity, `disabled`, `aria-disabled="true"`, and do not call
+      `onUnitChange` when tapped; the "Month" tab is unaffected.
+- [ ] With `allowedUnits` absent, all five tabs render exactly as the Full
+      variant — enabled, full opacity.
+- [ ] A restricted tab's accessible name reads `aria.unitUnavailable`
+      ("Year — not available for budgets"), not the bare "Year".
+- [ ] `allowedUnits` changes only the tab row: with `offset: -1` under
+      `allowedUnits: ["month"]`, both nav-row arrows and the jump control
+      behave exactly as the Default state above.
+- [ ] `../screens/05-statistics.md`'s Budgets grouping is this variant's only
+      consumer, the same way `../screens/01-home.md` and
+      `../screens/05-statistics.md`'s other groupings are the Full variant's
+      two consumers.
 
 ## Resolved
 
