@@ -450,7 +450,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       still enabling all five.
       **AC:** with `allowedUnits: ["month"]` the four other tabs are visibly
       dimmed and inert, and the component's existing tests pass untouched.
-- [ ] **U3.3** Statistics renders the Budgets grouping. `Grouping` widens, the
+- [x] **U3.3** Statistics renders the Budgets grouping. `Grouping` widens, the
       third chip appears, `loadStatistics` also calls `by-budget` when the unit
       is `month` (one `Promise.all`, D810), `buildStatisticsData` maps plans to
       `StatisticsBudgetRow` (category name + colour from the categories already
@@ -598,6 +598,17 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   an oversight in the stub rather than a deliberate cut. Same shape as D814.
   Rejected: leaving it out and freezing time at the test-runner level instead
   (a bigger, unit-wide change for a one-line constructor gap).
+- 2026-09-05: **D816** — `StatisticsBudgetRow` (Contracts) gains
+  `remainingMinor: number`, absent from the frozen stub. Found mid-U3.3: the
+  spec's `budget.exceeded` string ("Over by {amount}") needs a signed
+  over-limit amount, and the backend's `BudgetFill` already returns
+  `remaining` (negative once exceeded) — the exact field `04-budgets.md`'s own
+  `BudgetRow.remainingMinor` uses for the identical text. Same shape as D814/
+  D815: a field the anatomy needs that the original stub didn't carry.
+  Rejected: deriving it client-side as `amountMinor - spentMinor` (money-math
+  duplication the root CLAUDE.md exists to prevent — the API's own signed
+  number is the one source of truth, same reasoning `budgets.ts`'s own
+  `rowFrom` already applies).
 
 ## STATE (handoff)
 - **Done:** Planning only, 2026-09-04. The three brief items were read against
@@ -1193,3 +1204,61 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   and asserting it's never called on a restricted-tab tap.
   `scripts/verify.sh` re-run and green (821 backend + 998 webapp tests, up
   from 997 by the one new combined-state test).
+- **Done (U3.3, 2026-09-05):** `webapp/src/screens/statistics.ts` renders the
+  Budgets grouping, exactly per Contracts/`05-statistics.md`'s Budget row
+  spec. `Grouping` widened to `"category" | "tag" | "budget"`; a third chip
+  (`statistics.byBudget`) added to `renderGroupingToggle` — no `mount` changes
+  needed since it already wires any `[data-grouping]` element generically.
+  `StatisticsApi` gained `statisticsByBudget`, backed by a new
+  `ApiClient.statisticsByBudget` (`webapp/src/api/client.ts`) and a new
+  `BudgetFill` type (`webapp/src/api/types.ts`, mirrors `BudgetProgress` — same
+  shape, distinct list-endpoint response). `loadStatistics` fetches
+  `by-budget` in the **same** `Promise.all` as the other three, but only calls
+  it when `period.unit === "month"` (else substitutes `Promise.resolve([])`)
+  — satisfies D810 with no second fetch path. `buildStatisticsData` gained an
+  **optional** `budgetFills` input (absent ⇒ `[]`, same "absent means the
+  feature isn't in play" shape as `PeriodSelectorProps.allowedUnits` from
+  U3.2) so none of the ~10 pre-existing call sites in
+  `webapp/tests/statistics.test.ts` needed touching just to keep compiling;
+  maps each fill to a `StatisticsBudgetRow` in category creation order (not
+  ranked — this is a fill-status list, not a leaderboard), with the same
+  archived-category `unknownCategory`/`OTHER_COLOR_VAR` fallback
+  `budgets.ts:133` and `buildBudgetsData` already use (D808). Rendering
+  (`renderBudgetRow`/`renderBudgetRows`) reuses `04-budgets.md`'s row anatomy
+  **verbatim** — `.budget-row`/`.budget-row-head`/`.budget-bar-track`/
+  `.budget-bar-fill`/`.budget-bar-tick`, `screens/budgets.ts`'s own CSS
+  classes — no new CSS value invented, per the spec's own "reuses vocabulary,
+  not inventing a second one" framing; rows carry `data-plan-id`, not
+  `data-id`, so `mount`'s existing `[data-id]` bar-tap wiring can't
+  accidentally fire a haptic or a drill-down for a budget row (D812 — no tap
+  target). The Warning glyph is `renderWarningGlyph`, a second copy of
+  `home.ts`'s exact SVG shape (this module's own header convention: "each
+  pure module owns its own"), wrapped in the pre-existing generic
+  `.alert-line`/`.alert-line--exceeded`/`.alert-line--approaching` classes —
+  icon-only for `isOverThreshold`, icon + `budget.exceeded` text in
+  `--status-red` for `isExceeded`, no text at all for an un-flagged row (the
+  spec's own inferred Open-questions choice). Four new catalogue keys in
+  EN/RU/UK: `statistics.byBudget`, `statistics.bars.emptyBudget`,
+  `statistics.budget.of`, `statistics.budget.exceeded` (the unit's own plan
+  bullet says "five" — `periodSelector.aria.unitUnavailable` is
+  `period-selector.md`'s/U3.2's own key, same off-by-one already flagged for
+  U0.3's and U1.2's key counts). No `main.ts` wiring — passing
+  `allowedUnits: ["month"]` down and coercing the period on a Budgets-under-
+  non-month pick (D809) is U3.4's job; this unit only makes the grouping
+  render correctly once reached. One new decision, **D816** (Decision log
+  above): `StatisticsBudgetRow` gains `remainingMinor` — the frozen Contracts
+  stub had no field for `budget.exceeded`'s signed over-limit amount even
+  though the backend's `BudgetFill` already returns `remaining`, same shape as
+  D814/D815.
+  Tests added: `webapp/tests/statistics.test.ts` — `buildStatisticsData`
+  (defaults to `[]` when `budgetFills` omitted, maps two fills in category
+  order with the exceeded one flagged, archived-category fallback),
+  `loadStatistics` (fetches `by-budget` under month and asserts `budgetRows`
+  length, never calls it for any of the other four period units), and
+  `renderStatistics` (two rows reading `budget.of`'s exact filled string with
+  the exceeded one showing `budget.exceeded`'s text, `bars.empty.budget` with
+  zero plans). `tests/README.md`-equivalent for the webapp (none exists;
+  webapp tests are self-documenting via `describe`/`it` names, per
+  `webapp/CLAUDE.md`) needed no update. `scripts/verify.sh` green (821 backend
+  + 1005 webapp tests, up from 821/998 by these 7).
+  **Reviewer round 1:** pending.

@@ -17,6 +17,7 @@ import type {
   AdminAccountCreate,
   AdminAccountRow,
   AdminUserRow,
+  BudgetFill,
   BudgetPlanCreate,
   BudgetPlanResponse,
   BudgetPlanUpdate,
@@ -327,6 +328,14 @@ export class ApiClient {
 
   statisticsByTag(query: StatisticsQuery = {}): Promise<TagTotal[]> {
     return this.request<TagTotal[]>("GET", "/statistics/by-tag", { params: query as QueryParams });
+  }
+
+  // `period` is always `"month"` here — the endpoint 422s on anything else
+  // (V8, U3.1) — but the param stays a full `StatisticsQuery` like its three
+  // siblings above; the caller (`statistics.ts::loadStatistics`) only invokes
+  // this when the active unit is already month.
+  statisticsByBudget(query: StatisticsQuery = {}): Promise<BudgetFill[]> {
+    return this.request<BudgetFill[]>("GET", "/statistics/by-budget", { params: query as QueryParams });
   }
 
   // -- admin (`screens/admin.ts`, U4.7) -----------------------------------

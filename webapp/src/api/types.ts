@@ -217,6 +217,22 @@ export interface TagTotal {
   total: number;
 }
 
+/** `models.statistics.BudgetFill` — `GET /statistics/by-budget` rows (V8,
+ * U3.1). Same field shape as `BudgetProgress` (both are built from the same
+ * `calculate_progress` pure function), but this is a list-endpoint response
+ * scored against the active month, not a single plan's live progress. */
+export interface BudgetFill {
+  budget_plan_id: Uuid;
+  category_id: Uuid;
+  amount: number;
+  spent: number;
+  remaining: number;
+  fill_pct: number | null;
+  notify_threshold: number;
+  is_over_threshold: boolean;
+  is_exceeded: boolean;
+}
+
 /** `models.account.AccountResponse` — `PATCH /accounts/me` only (U3.3). No
  * `GET /accounts/me`: the account's currency for display is read off
  * `UserMeResponse.currency` instead, already returned by `GET /users/me`.
