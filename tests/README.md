@@ -704,7 +704,9 @@ Hermetic — the real app (`client`/`app` fixtures) with `PermissionRepository`/
 | `test_granted_override_flips_a_subsequent_permission_decision` | End-to-end (AC): a member's `PATCH /categories/{id}` is 403 by default; admin grants `can_update=True` via `POST /permissions`; the same `PATCH /categories/{id}` then returns 200 — proves the override row observably changes a subsequent `PermissionChecker` decision on a different resource's route |
 
 ## Service tests (`test_statistics_service.py`) → [`services/statistics_service.py`](../services/statistics_service.py)
-Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeExpensePeriodRepo`. No DB.
+Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeExpensePeriodRepo`
+(also implements `sum_by_category_month`, U3.1) and `BudgetPlanListRepositoryProtocol` with
+`FakeBudgetPlanListRepo`. No DB.
 
 | Test | Checks |
 |---|---|
@@ -734,6 +736,10 @@ Hermetic — `ExpensePeriodRepositoryProtocol` replaced with an in-memory `FakeE
 | `test_by_tag_groups_totals_by_tag` | `by_tag()` groups totals per `tag_id`, incl. an expense tagged with two tags contributing to both |
 | `test_by_tag_expense_with_no_tags_is_excluded` | An untagged expense contributes to no `TagTotal` row |
 | `test_by_tag_own_user_id_filters_to_own_expenses` | `user_id` filter applies before aggregation |
+| `test_by_budget_scores_plans_against_current_month_spend` | `by_budget()` scores each plan via `calculate_progress`; an exceeded plan's `remaining` goes negative and `is_exceeded=True` (U3.1 AC) |
+| `test_by_budget_no_plans_returns_empty_list_without_summing` | No plans → `[]`, and `sum_by_category_month` is never called (U3.1 AC) |
+| `test_by_budget_offset_minus_1_uses_last_months_window_and_current_limit` | `period=month&offset=-1` shifts the spend window to last month while the plan lookup (and its limit) is unaffected — D807's "current limit" behavior |
+| `test_by_budget_period_none_matches_month_bounds` | `period=None` (the route's default) resolves the same bounds as the current month |
 
 ## API/route tests (`test_statistics_api.py`) → [`api/statistics.py`](../api/statistics.py)
 Hermetic — the real app with `ExpenseRepository`/`UserRepository`/`PermissionRepository`
@@ -768,6 +774,11 @@ Action.READ)`-gated — statistics has no `Resource` enum entry of its own (plan
 | `test_statistics_module_imports_shared_validator` | `api/statistics.py` defines no `_validate_period` of its own — it imports `validate_period_params` from `api/period_params.py` (mini-app-v4 D403) |
 | `test_by_period_offset_without_period_message_names_offset` | The 422 for `offset` without `period` quotes "offset" (mini-app-v4 D403, `offset_param_name` default) |
 | `test_by_period_conflicting_families_message_names_offset` | The 422 for `period` + `months_back` quotes "period/offset" verbatim as before the extraction (mini-app-v4 D403) |
+| `test_by_budget_as_member` | `GET /statistics/by-budget` scores two plans against seeded sums, one exceeded (U3.1 AC) |
+| `test_by_budget_no_plans_returns_empty_list` | No budget plans on the account → `200 []`, not 404 (U3.1 AC) |
+| `test_by_budget_rejects_non_month_period` | `period=day` → 422 (U3.1 AC: only `month` is supported) |
+| `test_by_budget_offset_minus_1_scores_last_months_spend` | `period=month&offset=-1` end to end: last month's spend against the plan's current limit (U3.1 AC) |
+| `test_by_budget_own_only_override_does_not_restrict_totals` | An `own_only=True` permission override does not change the result (D813: a budget limit is account-level, not per-user) |
 
 ## DB round-trip / integration smoke (`test_db_roundtrip.py`)
 | Test | Checks | Target |

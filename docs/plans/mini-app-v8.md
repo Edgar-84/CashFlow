@@ -433,7 +433,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       `*ReturnTo` module-level variable remains in `main.ts`.
 
 ### M3 — Budgets in Statistics (item 3)
-- [ ] **U3.1** Backend: `models.statistics.BudgetFill`,
+- [x] **U3.1** Backend: `models.statistics.BudgetFill`,
       `StatisticsService.by_budget`, `GET /statistics/by-budget`. Reuses
       `budget_plan_repo.list`, `expense_repo.sum_by_category_month` (generic
       bounds despite the name) and `budget_service.calculate_progress` — the
@@ -588,6 +588,16 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   record it in the Decision log, then continue") rather than dropping the
   tick from the spec — 04-budgets' tick is exactly the anatomy this grouping
   was asked to reuse, not reinvent a poorer version of.
+- 2026-09-05: **D815** — `StatisticsService.by_budget` gains a `now:
+  datetime | None = None` keyword, absent from the frozen Contracts stub.
+  Because every sibling aggregate on this service (`by_period`/`by_category`/
+  `by_tag`) takes `now` specifically so tests can pin "the current month"
+  without mocking the clock, and `by_budget` calls the exact same
+  `resolve_period` those siblings do — omitting `now` would make it the one
+  method on the class untestable without a real wall clock, which reads as
+  an oversight in the stub rather than a deliberate cut. Same shape as D814.
+  Rejected: leaving it out and freezing time at the test-runner level instead
+  (a bigger, unit-wide change for a one-line constructor gap).
 
 ## STATE (handoff)
 - **Done:** Planning only, 2026-09-04. The three brief items were read against
@@ -1068,3 +1078,61 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   - U2.2's `replace`-vs-`push` distinction is the whole reason retries don't
     pile up in the stack. It is the first thing to check if back behaviour
     feels wrong after M2.
+- **Done (U3.1, 2026-09-05):** `GET /statistics/by-budget` implemented exactly
+  per Contracts (plus D815's `now` addition). `models/statistics.py` gained
+  `BudgetFill` (identical fields to `models.budget_plan.BudgetProgress`, so it
+  is built via `BudgetFill(**calculate_progress(...).model_dump())` rather
+  than a second copy of the arithmetic). `services/statistics_service.py`:
+  `ExpensePeriodRepositoryProtocol` widened to add `sum_by_category_month`
+  (the exact method `budget_service.get_progress` already uses); a new narrow
+  `BudgetPlanListRepositoryProtocol` (`list` only — D807 means no other
+  budget-plan method is ever needed here); `StatisticsService.__init__` gained
+  an optional keyword-only `budget_plan_repo`, defaulting to `None` so none of
+  the 27 existing single-arg call sites needed touching; `by_budget` resolves
+  `[start, end)` via the same `resolve_period` its siblings use, returns `[]`
+  immediately if the account has no plans (skipping the sum query entirely —
+  also the AC's "no plans → `[]`, not 404"), else sums via
+  `sum_by_category_month` and maps each plan through `calculate_progress`.
+  `api/statistics.py`'s new `/by-budget` route takes `period`/`offset`/
+  `start_date`/`end_date` only (no `months_back`, no `start`/`end` — narrower
+  than its three siblings, per Contracts), calls the shared
+  `validate_period_params`, then rejects any `period` other than `None`/
+  `MONTH` with 422 itself (the service is never given a chance to see `day`/
+  `week`/`year`/`custom`), and does **not** call `_own_user_id` — D813's own
+  _only exemption is structural (the route has no code path that could apply
+  it), not a conditional. `api/deps.py`'s `get_statistics_service` gained a
+  `budget_plan_repo` dependency, passed to the new constructor keyword; this
+  is a wiring change every statistics route now depends on, not just
+  by-budget (see test note below).
+  Tests added: `tests/test_statistics_service.py` (`FakeExpensePeriodRepo`
+  gained an optional `sums` kwarg and `sum_by_category_month` so the one Fake
+  used by all 30 tests in the file still satisfies the widened protocol; new
+  `FakeBudgetPlanListRepo` + `make_plan` helper; 4 new tests — scoring two
+  plans incl. one exceeded, no-plans skips the sum call, `offset=-1` shifts
+  only the spend window not the limit, `period=None` matches month bounds)
+  and `tests/test_statistics_api.py` (`override_repos` fixture gained
+  `plans`/`sums` kwargs and now also overrides `deps.get_budget_plan_repo`
+  unconditionally — required for every existing by-period/by-category/by-tag
+  test too, since `get_statistics_service`'s dependency graph changed for all
+  of them, not just the new route; 5 new tests — as-member, no-plans-is-200,
+  non-month-period-is-422, offset=-1 end to end, and an explicit D813 proof
+  that an `own_only=True` permission override does not change the result).
+  `tests/README.md` updated with all new/changed entries in the same commit
+  (tests/CLAUDE.md rule). Two decisions: **D815** (Decision log above) for
+  the `now` keyword; no decision needed for the `budget_plan_repo` being
+  optional-with-default on the constructor — that's wiring, not a Contracts
+  change, since Contracts only froze the `by_budget` method's own signature.
+  `scripts/verify.sh` green (821 backend + 991 webapp tests, up from 812/991
+  — all 9 new tests are backend; webapp count unchanged since M3's frontend
+  units (U3.2–U3.4) haven't landed yet).
+  **Reviewer round 1** (APPROVE, no BLOCKER/WARN): confirmed money math has
+  no float leakage before `fill_pct`, SQL/account-scoping is unchanged and
+  parametrized, D813's `own_only` exemption is structural (no code path
+  could apply it, not just untested), the route's 422 for non-month periods
+  is airtight against a direct client (checked before `service.by_budget` is
+  ever called), and all three AC clauses are covered at both the service and
+  API layers. Two NITs, left as-is by choice: `StatisticsService.by_budget`
+  itself has no month-only guard (only the route enforces it — fine while
+  the route is its only caller); the `assert budget_plan_repo is not None`
+  degrades to a less clear `AttributeError` under `python -O` (pre-existing
+  project-wide pattern, not unit-specific). No fixes needed.
