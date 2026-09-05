@@ -17,6 +17,10 @@ export interface PeriodSelectorProps {
    * (D327; the same reasoning `date-range-picker.ts`'s `maxDate` follows). */
   now: Date;
   disabled?: boolean; // offline
+  /** (V8) absent ⇒ all five enabled. Restricts the tab row only — the nav
+   * row (arrows, label, jump control) reads no restriction from this at all
+   * (docs/ui/components/period-selector.md's Restricted variant). */
+  allowedUnits?: readonly PeriodUnit[];
   onUnitChange(unit: PeriodUnit): void; // host resets offset to 0
   onOffsetChange(offset: number): void; // host clamps at 0
   onOpenPicker(): void; // "Period" tab, or a label tap
@@ -61,10 +65,23 @@ const UNIT_NOUN: Record<Exclude<PeriodUnit, "custom">, keyof Catalogue> = {
   year: "periodSelector.unit.year",
 };
 
-function renderTabs(value: PeriodValue, disabled: boolean): string {
+function renderTabs(value: PeriodValue, disabled: boolean, allowedUnits?: readonly PeriodUnit[]): string {
   const tabs = TABS.map((tab) => {
     const active = tab.unit === value.unit;
-    return `<button type="button" role="tab" class="period-tab${active ? " active" : ""}" aria-selected="${active}" data-unit="${tab.unit}" data-testid="period-tab-${tab.unit}"${disabled ? " disabled" : ""}><span class="period-tab-text">${escapeHtml(t(tab.label))}</span></button>`;
+    // Only surfaced while the component is otherwise live — if the whole
+    // component is already offline-disabled, that reason wins: the tab is
+    // already inert, and stacking the restricted opacity/label on top would
+    // both compound with the container's own 0.5 opacity (a visible
+    // regression) and misname the reason as "not available for budgets"
+    // instead of offline.
+    const restricted = !disabled && allowedUnits !== undefined && !allowedUnits.includes(tab.unit);
+    // Restricted state names the reason (aria.unitUnavailable), not just the
+    // fact — same "state why, not just that" rule the jump control's per-unit
+    // naming already follows.
+    const restrictedAttrs = restricted
+      ? ` aria-label="${escapeHtml(fillTemplate(t("periodSelector.aria.unitUnavailable"), { unit: t(tab.label) }))}" aria-disabled="true"`
+      : "";
+    return `<button type="button" role="tab" class="period-tab${active ? " active" : ""}" aria-selected="${active}" data-unit="${tab.unit}" data-testid="period-tab-${tab.unit}"${restrictedAttrs}${disabled || restricted ? " disabled" : ""}><span class="period-tab-text">${escapeHtml(t(tab.label))}</span></button>`;
   }).join("");
   return `<div class="period-tabs" role="tablist">${tabs}</div>`;
 }
@@ -127,7 +144,7 @@ function renderNav(value: PeriodValue, now: Date, disabled: boolean): string {
 export function renderPeriodSelector(props: PeriodSelectorProps): string {
   const disabled = props.disabled ?? false;
   return `<div class="period-selector${disabled ? " disabled" : ""}" data-testid="period-selector">
-    ${renderTabs(props.value, disabled)}
+    ${renderTabs(props.value, disabled, props.allowedUnits)}
     ${renderNav(props.value, props.now, disabled)}
   </div>`;
 }

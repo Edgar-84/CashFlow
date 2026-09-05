@@ -442,7 +442,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       month&offset=-1` returns both plans scored against **last** month's
       spend and this month's limits; `?period=day` returns 422; an account with
       no plans returns `[]`, not 404.
-- [ ] **U3.2** `period-selector` gains `allowedUnits`. Disabled tabs render at
+- [x] **U3.2** `period-selector` gains `allowedUnits`. Disabled tabs render at
       50% opacity with `disabled` + `aria-disabled`, fire no haptic and call no
       handler; arrows and the jump control are unaffected. CSS in `app.css`
       reuses the existing disabled treatment. Tests cover a restricted render,
@@ -1136,3 +1136,60 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   the route is its only caller); the `assert budget_plan_repo is not None`
   degrades to a less clear `AttributeError` under `python -O` (pre-existing
   project-wide pattern, not unit-specific). No fixes needed.
+- **Done (U3.2, 2026-09-05):** `period-selector` gains the Restricted variant
+  exactly per Contracts/`period-selector.md`. `PeriodSelectorProps` gained
+  `allowedUnits?: readonly PeriodUnit[]` (absent ⇒ all five enabled, unchanged
+  default). `renderTabs` marks a tab outside `allowedUnits` both `disabled`
+  and `aria-disabled="true"`, with its accessible name replaced by
+  `periodSelector.aria.unitUnavailable` filled from that tab's own `tab.*`
+  label (capitalized, e.g. "Year"), not the lowercase `unit.*` map
+  `aria.prev`/`aria.next` use — per the spec's explicit disambiguation. The
+  nav row (`renderNav`/arrows/label/jump) receives no `allowedUnits` at all,
+  so it is structurally unaffected, not just visually unaffected. New CSS rule
+  `.period-tab[aria-disabled="true"] { opacity: 0.5 }` — keyed off
+  `aria-disabled` rather than the bare `:disabled` pseudo-class because the
+  pre-existing whole-component offline `disabled` state also sets the native
+  `disabled` attribute on every tab (without `aria-disabled`); keying off
+  `:disabled` would have compounded that state's own `.period-selector.disabled`
+  50% opacity into 25%, a visual regression to a state this unit doesn't touch.
+  One new catalogue key, `periodSelector.aria.unitUnavailable` = "{unit} — not
+  available for budgets", added to EN/RU/UK in this same commit. No `main.ts`/
+  `statistics.ts` wiring — passing `allowedUnits: ["month"]` down from the
+  screen is U3.4's job; this unit only makes the component *capable* of it.
+  No new decisions — this unit applies the frozen Contracts stub and
+  `period-selector.md`'s Restricted variant (U0.4) as already specified, it
+  doesn't choose among alternatives.
+  Tests added: `webapp/tests/period-selector.test.ts` gained a "restricted
+  units (V8, U3.2)" describe block (4 tests: the four non-month tabs render
+  disabled/aria-disabled/dimmed while Month is unaffected; the accessible-name
+  string reads `aria.unitUnavailable` sourced from the `tab.*` label; the
+  default (prop absent) renders the tab row with no `disabled`/`aria-disabled`
+  at all — scoped to just the tab-row substring, since the pre-existing
+  offset-0 `›` arrow already carries its own unrelated `aria-disabled`;
+  `allowedUnits` leaves the nav row byte-for-byte identical at `offset: -1`).
+  A new `webapp/tests/period-selector.mount.test.ts` (`@vitest-environment
+  jsdom`, this component's first-ever mount-level test — its `mount()` click
+  wiring has otherwise been an accepted not-unit-tested gap since U1.4) covers
+  the AC's "a tap on a restricted tab is a no-op": a real `.click()` on a
+  `disabled` button fires no `click` event at all in jsdom (matching real
+  browser semantics, confirmed empirically before writing the test) — so this
+  also confirms the native `disabled` attribute alone is sufficient and no
+  extra JS-level guard is needed inside the click handler for this state,
+  unlike the offset-0 `›` arrow's own manual no-op check. `scripts/verify.sh`
+  green (821 backend + 997 webapp tests, up from 821/991 by these 6).
+  **Reviewer round 1** (APPROVE, one WARN fixed before commit, one NIT fixed):
+  the WARN — the whole-component offline `disabled` state and a narrower
+  `allowedUnits` restriction, if ever true at once, would compound: a
+  restricted tab would get both the container's 0.5 opacity and the new
+  per-tab 0.5 opacity (0.25 total), and its accessible name would read "not
+  available for budgets" instead of the actually-true "offline" reason. Fixed
+  by gating `restricted` on `!disabled` in `renderTabs` — while the whole
+  component is offline-disabled, no tab gets the restricted-specific
+  `aria-disabled`/label/opacity on top, since offline already makes every tab
+  inert and is the more relevant reason. Covered by a new test asserting the
+  combined state renders plain `disabled` tabs with no `aria-disabled` and no
+  "not available for budgets" text. The NIT — the mount test's title claimed
+  "no haptic" without asserting it — fixed by spying on `haptics.selection`
+  and asserting it's never called on a restricted-tab tap.
+  `scripts/verify.sh` re-run and green (821 backend + 998 webapp tests, up
+  from 997 by the one new combined-state test).

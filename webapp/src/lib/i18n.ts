@@ -255,6 +255,7 @@ const en = {
   "periodSelector.aria.jump.week": "Back to this week",
   "periodSelector.aria.jump.month": "Back to this month",
   "periodSelector.aria.jump.year": "Back to this year",
+  "periodSelector.aria.unitUnavailable": "{unit} — not available for budgets",
   // U3.10 (components/date-range-picker.ts). Calendar month/weekday labels
   // stay browser-locale (file's own header comment) — only this component's
   // chrome is catalogued.
@@ -542,6 +543,7 @@ const ru: Catalogue = {
   "periodSelector.aria.jump.week": "Вернуться к этой неделе",
   "periodSelector.aria.jump.month": "Вернуться к этому месяцу",
   "periodSelector.aria.jump.year": "Вернуться к этому году",
+  "periodSelector.aria.unitUnavailable": "{unit} — недоступно для бюджетов",
   "dateRangePicker.chooseStart": "Выберите начальную дату",
   "dateRangePicker.from": "с {date}",
   "dateRangePicker.fromTo": "с {from} по {to}",
@@ -804,6 +806,7 @@ const uk: Catalogue = {
   "periodSelector.aria.jump.week": "Повернутися до цього тижня",
   "periodSelector.aria.jump.month": "Повернутися до цього місяця",
   "periodSelector.aria.jump.year": "Повернутися до цього року",
+  "periodSelector.aria.unitUnavailable": "{unit} — недоступно для бюджетів",
   "dateRangePicker.chooseStart": "Виберіть початкову дату",
   "dateRangePicker.from": "з {date}",
   "dateRangePicker.fromTo": "з {from} по {to}",
