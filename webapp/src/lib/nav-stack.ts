@@ -23,7 +23,11 @@ export interface NavStack {
   pop(): NavEntry | null;
   /** Empty the stack — Home is the floor and holds no entry. */
   reset(): void;
-  /** For tests and for `main.ts`'s re-entrancy guard. */
+  /** For tests. Not currently consumed by `main.ts` — a rapid double-tap on
+   *  BackButton popping two levels while the first pop's screen is still
+   *  loading is ordinary back-stack semantics (the same behaviour a
+   *  browser's own Back button has under a double-click), not a bug this
+   *  needs to guard against (U2.2's review). */
   depth(): number;
   peek(): NavEntry | null;
 }

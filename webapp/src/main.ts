@@ -1,5 +1,6 @@
 import { ApiClient, ForbiddenError } from "./api/client";
 import { setLanguage, t } from "./lib/i18n";
+import { createNavStack, type NavEntry } from "./lib/nav-stack";
 import { applyTheme, getInitData } from "./lib/telegram";
 import {
   createMemoryCache as createAddExpenseCache,
@@ -197,6 +198,54 @@ function setActiveScreen(next: ActiveScreen): void {
   activeScreen = next;
 }
 
+/** `main.ts`'s single stack instance (U2.2, `docs/ui/navigation.md`) — owns
+ * back-navigation for the menu-reachable screens wired this unit (Expenses,
+ * Budgets, Statistics, Settings, Admin). Categories/Tags/Add-expense/Expense
+ * detail/Budget form/Language keep their pre-existing `*ReturnTo`/`onBack`
+ * closures for now (U2.3 retires those); `showHome`'s own `reset()` below
+ * clears any entry left over from either mechanism, so the two never
+ * interfere with each other. */
+const navStack = createNavStack();
+
+/** Pure push-vs-replace decision for `navigate` below — pulled out for
+ * direct test coverage under Node, same reasoning as
+ * `withCreatedTagPreselected`. `topScreen` and `screen` coincide exactly
+ * when the caller is re-rendering the screen already on top: a retry, a
+ * period/grouping change, or a child screen not yet wired into the stack
+ * (Budget form, Expense detail) returning to the list that opened it. That
+ * case must always replace, never push — the plan's Risks section: "a user
+ * retrying a failed load five times must not need five back taps". */
+export function navStackAction(topScreen: string | null, screen: string): "push" | "replace" {
+  return topScreen === screen ? "replace" : "push";
+}
+
+/** Called at the top of every wired `showX` below, right after
+ * `setActiveScreen`. Decides push vs. replace by comparing `screen` against
+ * whatever is currently on top — see `navStackAction`. */
+function navigate(screen: ActiveScreen, restore: () => void): void {
+  const entry: NavEntry = { screen, restore };
+  if (navStackAction(navStack.peek()?.screen ?? null, screen) === "push") {
+    navStack.push(entry);
+  } else {
+    navStack.replace(entry);
+  }
+}
+
+/** BackButton's handler for every screen wired into the stack: pops one
+ * entry and restores whatever is now on top. `nav-stack.ts`'s `pop` never
+ * calls `restore` itself, and never returns the entry it just removed — only
+ * the one beneath it — so this always re-renders the *previous* screen, not
+ * the one just left. At the floor (`pop` returns `null`) BackButton returns
+ * to Home, per `docs/ui/navigation.md`. */
+function goBack(): void {
+  const entry = navStack.pop();
+  if (entry) {
+    entry.restore();
+  } else {
+    void showHome();
+  }
+}
+
 /** Where Categories' BackButton goes (U3.2). Defaults to Home; Add Expense's
  * "More" cell (`showAddExpense`'s `onMore` handler, below) points it back to
  * itself instead, with the draft it was carrying, so a category created
@@ -278,6 +327,11 @@ async function showHome(): Promise<void> {
     return;
   }
   setActiveScreen("home");
+  // Home is the floor and holds no entry of its own (docs/ui/navigation.md)
+  // — every entry into Home, from any mechanism (a wired screen's `goBack`
+  // reaching the floor, or an unwired screen's own `onClose`/`onBack`
+  // closure), leaves the stack empty.
+  navStack.reset();
 
   const handlers: HomeHandlers = {
     onRetry: () => {
@@ -515,17 +569,20 @@ export async function showEditExpense(
   mountAddExpense(root, state, client, handlers, seedDraft, "edit", expense);
 }
 
-/** Mounts Expenses (U2.3, screen 03a). BackButton always returns to Home;
- * `filter` comes from the side menu's "Expenses" row (none), a ranked-row tap (that
- * category *and* the period in force — D404, the donut itself is
- * display-only and never reaches here), or Statistics' bar tap (that
- * category, no period). */
+/** Mounts Expenses (U2.3, screen 03a; back stack U2.2). BackButton returns
+ * one step (`goBack`) — to Home when opened from the side menu or Home's own
+ * ranked-row tap, to Statistics when opened from its bar tap
+ * (`docs/ui/navigation.md`'s Expenses row). `filter` comes from the side
+ * menu's "Expenses" row (none), a ranked-row tap (that category *and* the
+ * period in force — D404, the donut itself is display-only and never reaches
+ * here), or Statistics' bar tap (that category or tag, no period, D801). */
 async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
   }
   setActiveScreen("expenses");
+  navigate("expenses", () => void showExpenses(filter));
 
   const controller = createExpensesController(client, expensesCache, filter);
 
@@ -545,7 +602,7 @@ async function showExpenses(filter: ExpensesFilter = {}): Promise<void> {
     if (!root) {
       return;
     }
-    applyExpensesChrome(() => void showHome());
+    applyExpensesChrome(goBack);
     mountExpenses(root, state, handlers, new Date());
   }
 
@@ -606,24 +663,27 @@ export function budgetFormModeFromUnbudgeted(row: UnbudgetedRow, currency: Curre
   return { kind: "create", categoryId: row.categoryId, categoryLabel: row.label, colorVar: row.colorVar, currency };
 }
 
-/** Mounts Budgets (U2.4, screen 04), reached from the side menu's "Budgets" row.
- * BackButton always returns to Home, same shape as Expenses/Detail. Tapping a
- * budgeted row, an unbudgeted category, or MainButton navigates to
- * `screens/budget-form.ts` (U3.2, D506) instead of opening an inline form. */
+/** Mounts Budgets (U2.4, screen 04; back stack U2.2), reached from the side
+ * menu's "Budgets" row only, so BackButton always returns to Home
+ * (`goBack`). Tapping a budgeted row, an unbudgeted category, or MainButton
+ * navigates to `screens/budget-form.ts` (U3.2, D506) instead of opening an
+ * inline form — that screen isn't wired into the stack yet (U2.3), so its
+ * `onSaved`/`onCancelled`/`onDeleted` calling `showBudgets()` below finds
+ * "budgets" already on top and replaces it in place rather than growing the
+ * stack (`navStackAction`). */
 async function showBudgets(): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
   }
   setActiveScreen("budgets");
+  navigate("budgets", () => void showBudgets());
 
   const handlers: BudgetsHandlers = {
     onRetry: () => {
       void showBudgets();
     },
-    onBack: () => {
-      void showHome();
-    },
+    onBack: goBack,
     onOpenBudget: (row, currency) => {
       void showBudgetForm(budgetFormModeFromRow(row, currency));
     },
@@ -1016,25 +1076,36 @@ async function showStatistics(
     return;
   }
   setActiveScreen("statistics");
+  // `grouping` toggles locally inside statistics.ts's own `mount` (a pure
+  // re-render, no handler call — AC: "no refetch"), so this closure param is
+  // only ever the grouping this exact call started with. `activeGrouping` is
+  // kept in sync via `onGroupingChange` below, and is what every self-call
+  // (retry, unit/offset/custom-range change) and the `navigate`d `restore`
+  // closure carry forward — otherwise a `goBack` from Expenses, or simply
+  // changing the period after toggling groupings, would silently revert to
+  // the grouping this call started with instead of the one on screen.
+  let activeGrouping = grouping;
+  navigate("statistics", () => void showStatistics(period, activeGrouping));
 
   const handlers: StatisticsHandlers = {
     onRetry: () => {
-      void showStatistics(period, grouping);
+      void showStatistics(period, activeGrouping);
     },
-    onBack: () => {
-      void showHome();
-    },
+    onBack: goBack,
     onBarTap: (id, tapGrouping) => {
       void showExpenses(tapGrouping === "tag" ? { tagId: id } : { categoryId: id });
     },
+    onGroupingChange: (next) => {
+      activeGrouping = next;
+    },
     onUnitChange: (unit) => {
-      void showStatistics({ unit, offset: 0 }, grouping);
+      void showStatistics({ unit, offset: 0 }, activeGrouping);
     },
     onOffsetChange: (offset) => {
-      void showStatistics({ ...period, offset: clampOffset(offset) }, grouping);
+      void showStatistics({ ...period, offset: clampOffset(offset) }, activeGrouping);
     },
     onApplyCustomRange: (range) => {
-      void showStatistics({ unit: "custom", offset: 0, start: range.start, end: range.end }, grouping);
+      void showStatistics({ unit: "custom", offset: 0, start: range.start, end: range.end }, activeGrouping);
     },
   };
 
@@ -1047,25 +1118,25 @@ async function showStatistics(
 
 /** Mounts Settings (U3.3, screen 08), reached from the side menu's seventh
  * row. No `*ReturnTo` closure like Categories'/Tags' (D409's own additions) —
- * every entry and exit goes through Home, per the screen doc's BackButton
- * row and Saved state, so `onSaved` and `onBack` both just call `showHome()`;
- * `showHome`'s own `refreshHome` always re-fetches (never cache-first), which
- * is what relabels every amount with the new currency without reopening the
- * app. */
+ * every entry and exit goes through Home, per the screen doc's BackButton row
+ * and Saved state: `onBack` is the stack's `goBack` (U2.2, lands on Home at
+ * depth 1 the same as before), and `onSaved` calls `showHome()` directly
+ * since a save isn't a back step. `showHome`'s own `refreshHome` always
+ * re-fetches (never cache-first), which is what relabels every amount with
+ * the new currency without reopening the app. */
 async function showSettings(): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
   }
   setActiveScreen("settings");
+  navigate("settings", () => void showSettings());
 
   const handlers: SettingsHandlers = {
     onRetry: () => {
       void showSettings();
     },
-    onBack: () => {
-      void showHome();
-    },
+    onBack: goBack,
     onSaved: () => {
       void showHome();
     },
@@ -1112,32 +1183,33 @@ async function showLanguage(): Promise<void> {
   mountLanguage(root, state, client, handlers);
 }
 
-/** Mounts Admin (screen 10), reached only from the side menu's eighth row —
- * `isSystemAdmin`-gated there, so this route is unreachable from the UI for
- * any other role. There is no separate client-side role check here: the real
- * gate is server-side (`GET /admin/accounts`/`GET /admin/users`'s own
- * `require_system_admin`), and `loadAdmin` already turns that 403 into its
- * `forbidden` state for any caller who somehow lands on this function anyway.
- * `onBack` always returns to Home, in both List and Create mode
- * (`admin.ts`'s own `mount` owns the mode-dependent discard-confirm before
- * calling it — see its `requestCloseCreate`). No cache: `10-admin.md`'s
- * States table is explicit this screen never persists cross-account data
- * locally, so `showAdmin` always refetches, same as `showSettings`/
- * `showLanguage`. */
+/** Mounts Admin (screen 10; back stack U2.2), reached only from the side
+ * menu's eighth row — `isSystemAdmin`-gated there, so this route is
+ * unreachable from the UI for any other role. There is no separate
+ * client-side role check here: the real gate is server-side
+ * (`GET /admin/accounts`/`GET /admin/users`'s own `require_system_admin`),
+ * and `loadAdmin` already turns that 403 into its `forbidden` state for any
+ * caller who somehow lands on this function anyway. `handlers.onBack` (this
+ * unit's `goBack`) is List mode's one step back, to Home — `admin.ts`'s own
+ * `mount` owns the mode-dependent discard-confirm before calling it, and
+ * Create mode's one step back is List mode, not Home
+ * (`docs/ui/screens/10-admin.md`, its own `requestCloseCreate`). No cache:
+ * `10-admin.md`'s States table is explicit this screen never persists
+ * cross-account data locally, so `showAdmin` always refetches, same as
+ * `showSettings`/`showLanguage`. */
 async function showAdmin(): Promise<void> {
   const root = getRoot();
   if (!root) {
     return;
   }
   setActiveScreen("admin");
+  navigate("admin", () => void showAdmin());
 
   const handlers: AdminHandlers = {
     onRetry: () => {
       void showAdmin();
     },
-    onBack: () => {
-      void showHome();
-    },
+    onBack: goBack,
   };
 
   applyAdminChrome(handlers.onBack);

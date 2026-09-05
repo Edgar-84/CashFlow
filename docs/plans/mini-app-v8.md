@@ -404,7 +404,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       empty stack behaving as `push`.
       **AC:** `verify.sh` green with the module exercised only by its own tests;
       `main.ts` is untouched by this unit and app behaviour is unchanged.
-- [ ] **U2.2** Wire the stack into `main.ts` for the menu-reachable screens.
+- [x] **U2.2** Wire the stack into `main.ts` for the menu-reachable screens.
       A module-level `navStack`, a `navigate(screen, restore)` helper called at
       the top of each `showX`, a `goBack()` that pops and restores, `showHome`
       calling `reset()`, and every `onBack: () => void showHome()` in
@@ -852,9 +852,125 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   changes (that's U2.2). `scripts/verify.sh` green (812 backend + 980 webapp
   tests, up from 972 by the 8 new tests).
   **Reviewer round 1:** pending.
-- **Next:** `/clear`, then `/unit U2.2 docs/plans/mini-app-v8.md` — wire the
-  stack into `main.ts` for the menu-reachable screens. This is one of the two
-  riskiest units in the plan (see Risks); a reviewer subagent pass is
+- **Done (U2.2, 2026-09-05):** `webapp/src/main.ts` wired to `navStack`
+  (created in U2.1, unused until now) for the five menu-reachable screens the
+  unit names — Expenses, Budgets, Statistics, Settings, Admin. A module-level
+  `navigate(screen, restore)` is called at the top of each of their `showX`
+  functions, right after `setActiveScreen`; it pushes a new entry unless
+  `screen` already matches `navStack.peek()`, in which case it replaces the
+  top entry in place. This single rule — pulled out as the pure, directly
+  tested `navStackAction(topScreen, screen)` — turned out to subsume the
+  "retries and period/grouping re-renders use replace" requirement without
+  a separate mode flag threaded through every call site: a retry or a
+  period/unit/offset/custom-range change re-invokes the same `showX`, which
+  finds its own screen already on top and replaces; and a child screen not
+  yet wired into the stack (Budget form, Expense detail) calling back into
+  `showBudgets()`/`showExpenses(filter)` on save/cancel/delete/back finds
+  that same screen still on top (untouched by the child) and replaces too,
+  so **no double-push happens even though those child screens aren't wired
+  until U2.3** — the original worry that motivated re-reading the Risks
+  section mid-unit. `goBack()` pops one entry and calls the revealed entry's
+  `restore()` (never the popped one's — `pop`'s own contract), or calls
+  `showHome()` at the floor. `showHome()` calls `navStack.reset()` on every
+  entry (from either mechanism — a wired screen's `goBack` reaching the
+  floor, or an unwired screen's own `onClose`/`onBack` closure), so the old
+  `*ReturnTo` mechanism and the new stack never see each other's stale
+  entries. `onBack: () => void showHome()` was replaced by `goBack` in
+  `showExpenses`/`showBudgets`/`showStatistics`/`showSettings`/`showAdmin`;
+  Categories/Tags/Add-expense/Expense-detail/Budget-form/Language keep their
+  pre-existing closures untouched (U2.3's job). `webapp/src/screens/admin.ts`:
+  `updateChrome`'s BackButton handler changed from the hardcoded
+  `requestCloseCreate(true)` to `requestCloseCreate(mode === "list")`, so
+  Create mode's one step back is List mode (matching Cancel) instead of Home,
+  per `10-admin.md`'s corrected spec — the exact gap U0.2's reviewer flagged
+  and this unit's own bullet named explicitly. No new decisions — this unit
+  applies D804/D805 as already recorded (the stack's shape), it doesn't
+  choose among alternatives; `navStackAction`'s auto-detect-by-comparing-top
+  design is an implementation detail of "how `navigate` decides push vs.
+  replace," not a behavioral choice the Contracts or Decision log constrain.
+  Tests added: `webapp/tests/main.test.ts`'s `navStackAction` (3 tests) — the
+  fresh-navigation push case, the empty-stack (Home floor) push case, and the
+  same-screen replace case, since this decision is the plan's own named risk
+  ("replace... is the whole defence" against back requiring one tap per
+  retry). `scripts/verify.sh` green (812 backend + 985 webapp tests — see
+  round 1 below for how the webapp count got there).
+  **Reviewer round 1** (REQUEST_CHANGES, all fixed before round 2):
+  - **BLOCKER, fixed:** Statistics' grouping toggle is a pure local re-render
+    inside `statistics.ts`'s own `mount` (never a handler call, by design —
+    "no refetch"), so `main.ts`'s `grouping` closure param never learned
+    about a toggle. `goBack` restoring Statistics after a tag-bar drill-down
+    therefore silently reverted to whatever grouping the screen was
+    *originally* entered with, not the one the user was actually looking at
+    — directly contradicting this unit's own AC ("back lands on Statistics
+    with its period **and grouping** intact") and `nav-stack.ts`'s own doc
+    comment on `replace` (which names "a grouping toggle" as a case it's
+    meant to cover). Fixed by adding `StatisticsHandlers.onGroupingChange`
+    (`statistics.ts`), fired by the toggle's click handler alongside its
+    existing local re-render, and a `let activeGrouping` in `showStatistics`
+    (`main.ts`) that it updates — `navigate`'s `restore` closure and every
+    sibling self-call (`onRetry`/`onUnitChange`/`onOffsetChange`/
+    `onApplyCustomRange`) now read `activeGrouping` instead of the original
+    `grouping` param. This turned out to fix a **second, pre-existing**
+    instance of the identical bug found while tracing the first: before this
+    fix, toggling grouping and then merely changing the *period* (no Back
+    involved) also silently reverted the grouping, since `onUnitChange` etc.
+    already read the same stale `grouping` closure — not introduced by this
+    unit, but the same root cause, so fixed in the same change rather than
+    left half-fixed. Covered by a new `webapp/tests/main.nav.test.ts`
+    (jsdom, 2 tests, see below) exercising exactly this path end to end.
+  - **WARN, addressed by explanation (not fixed):** `nav-stack.ts`'s
+    `depth()` doc comment names "main.ts's re-entrancy guard" as a consumer,
+    but `depth()` is never called from `main.ts`, and a rapid double-tap on
+    BackButton during a slow load pops two stack levels (e.g. Expenses ->
+    Statistics-still-loading -> a second tap -> Home, skipping Statistics).
+    Concluded this is standard back-stack semantics, not a bug: two real,
+    separate taps popping two levels is the same behaviour a browser's own
+    Back button has under a double-click during a slow page load, and
+    disabling BackButton mid-load to prevent it would trade a rare
+    double-tap surprise for a worse one — blocking a legitimate second Back
+    tap while an intermediate screen is stuck loading, with no way for the
+    user to escape it faster. `setBackButtonHandler`'s unwire-then-rewire
+    contract also rules out the literal failure mode `depth()`'s comment
+    would guard against (one physical tap firing a stale handler twice) —
+    that vector doesn't exist in this codebase's event wiring. Left
+    unchanged; `depth()` stays available (per its own contract) if a
+    concrete need for it surfaces later.
+  - **WARN, fixed:** no integration-level test exercised `goBack`/`navigate`
+    through real `showX` calls — the U1.3 "not meaningfully unit-testable
+    under Node" precedent cited for that gap doesn't actually hold here,
+    since this unit's real risk (and named AC) is a multi-hop
+    state-preservation property a jsdom test can and did catch (the BLOCKER
+    above). Added `webapp/tests/main.nav.test.ts` (`@vitest-environment
+    jsdom`, same shape as the existing `main.boot.test.ts`): mocks each
+    screen's data layer (`createHomeController`/`loadStatistics`/
+    `createExpensesController`) and drives real DOM through `boot()`, real
+    `mount`/`applyXChrome` functions and a fake Telegram `WebApp` whose
+    captured `BackButton.onClick` argument stands in for a device back-tap.
+    Two tests, matching this unit's own two named AC scenarios: Home ->
+    Statistics -> Back -> Home, and Statistics (toggled to tag grouping) ->
+    tag-bar tap -> Expenses -> Back -> Statistics, still grouped by tag with
+    its period intact and with `loadStatistics` refetched only on the Back
+    (not on the toggle). Verified this second test actually fails without
+    the BLOCKER fix above (confirmed by temporarily reverting it) before
+    counting it as real coverage. `scripts/verify.sh` re-run and green (812
+    backend + 985 webapp tests, up from 980 by the 3 `navStackAction` tests
+    plus these 2).
+  **Reviewer round 2** (APPROVE, one NIT fixed before commit): independently
+  re-verified all three round-1 fixes by re-tracing the code and re-running
+  the revert experiment itself — confirmed genuine, not incidental. Fresh
+  pass over the rest of the diff (all five wired screens' push/replace
+  semantics, `admin.ts`'s mode-dependent BackButton fix) found nothing
+  further. One NIT, fixed: `nav-stack.ts`'s `depth()` doc comment still named
+  "main.ts's re-entrancy guard" — a guard round 1 concluded isn't needed —
+  reworded to state plainly that `depth()` isn't currently consumed by
+  `main.ts` and why. `scripts/verify.sh` re-run and green, unchanged (812
+  backend + 985 webapp tests).
+- **Next:** `/clear`, then `/unit U2.3 docs/plans/mini-app-v8.md` — retire the
+  second mechanism (`showExpenseDetail`'s `onBack` param, `categoriesReturnTo`,
+  `tagsReturnTo`, `showBudgetForm`'s return-to-Budgets closures,
+  `showLanguage`'s `onBack: showSettings`), converting them all to stack
+  pops and deleting the module-level `let` closures. This is the second of
+  the two riskiest units in the plan (see Risks); a reviewer subagent pass is
   required before commit.
 - **Gotchas:**
   - A stale, already-merged branch literally named `U0.2` was left over from

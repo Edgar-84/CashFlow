@@ -426,6 +426,13 @@ export interface StatisticsHandlers {
   onRetry: () => void;
   onBack: () => void;
   onBarTap: (id: Uuid, grouping: Grouping) => void;
+  // Fired alongside the toggle's own local re-render below, never instead of
+  // it (AC: "no refetch") — lets the host (main.ts's nav-stack entry) keep
+  // its own copy of `grouping` in sync with what's actually on screen, so a
+  // later period change or `goBack` restore doesn't silently revert a
+  // grouping this function's own closure never learned about otherwise
+  // (U2.2 finding).
+  onGroupingChange: (grouping: Grouping) => void;
   onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
   onOffsetChange: (offset: number) => void; // host clamps at 0
   onApplyCustomRange: (range: { start: string; end: string }) => void; // date-range picker's Apply — host sets the period and refetches; Cancel/BackButton close the picker without calling this
@@ -530,8 +537,10 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
       return;
     }
 
-    // Grouping toggle: pure local re-render, no handler/API call — AC's
-    // "re-renders without refetching the period".
+    // Grouping toggle: re-renders locally, no refetch (AC's "re-renders
+    // without refetching the period") — `onGroupingChange` is a side
+    // channel telling the host which grouping is now on screen, not a
+    // re-render trigger of its own.
     root.querySelectorAll<HTMLElement>("[data-grouping]").forEach((el) => {
       el.addEventListener("click", () => {
         const next = el.dataset.grouping as Grouping;
@@ -539,6 +548,7 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
           return;
         }
         haptics.selection();
+        handlers.onGroupingChange(next);
         render({ ...current, grouping: next });
       });
     });
