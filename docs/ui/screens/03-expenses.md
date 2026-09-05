@@ -27,6 +27,13 @@ has something to read.
   2. Day grouping keys off **`spent_at`**, not `created_at`.
   3. The row's colour dot is specified rather than incidental: it is present
      whenever the category has a colour, and never taller than the row's title.
+- **Changing (V8):** the screen is also reachable **with a tag as well as a
+  category**, applied by the API the same way `category_id` already is (D802)
+  — never a client-side filter of one fetched page. `category_id` and
+  `tag_id` are AND-combined when both are present (D803), though no UI sends
+  both today, so this spec defines copy only for tag-alone and
+  tag-plus-period; the filter banner and empty state below gain that tag half
+  beside the existing category half.
 - **Explicitly not taking:** swipe-to-delete and the 5s undo toast named in the
   UX brief. Neither was built, and V4 moves deletion to a confirm popup on 03b
   (`03b-expense-detail.md`); a swipe gesture inside a Telegram webview competes
@@ -112,10 +119,15 @@ There is no swipe gesture on this screen, and no long-press.
 | `filter.both` | "Transport · August" | **(V4)** category name, `·`, the period label from `lib/period.ts::describe` |
 | `filter.categoryOnly` | "Transport" | when no period is in force |
 | `filter.periodOnly` | "August" | when only a period is in force |
+| `filter.tagOnly` | "Coffee" | **(V8)** tag name alone; mirrors `filter.categoryOnly` |
+| `filter.tagAndPeriod` | "Coffee · August" | **(V8)** tag name, `·`, the period label; mirrors `filter.both` |
 | `empty.both` | "Nothing in August for Transport." | **(V4)** names both halves |
 | `empty.categoryOnly` | "Nothing here yet for Transport." | existing string `[repo]` |
 | `empty.periodOnly` | "Nothing in August." | **(V4)** |
+| `empty.tag` | "Nothing tagged Coffee." | **(V8)** |
+| `empty.tagPeriod` | "Nothing in August tagged Coffee." | **(V8)** |
 | `empty.unfiltered` | "No expenses yet." | existing `[repo]` |
+| `unknownTag` | "Unknown tag" | **(V8)** a tag deleted between the tap that filtered to it and this screen's load; mirrors the archived-category fallback (Edge cases) but as a name, not a dot colour |
 | `error.load` | "Couldn't load expenses." | |
 | `error.retry` | "Try again" | existing |
 | `forbidden` | "You don't have permission to view expenses." | existing `[repo]` |
@@ -131,9 +143,17 @@ never name the same period two different ways.
 
 | Call | Params | Notes |
 |---|---|---|
-| `GET /expenses` | `limit`, `offset`, **`category_id`**, **`period` + `offset_periods`** \| **`start_date`/`end_date`** | the two bold groups are V4 |
+| `GET /expenses` | `limit`, `offset`, **`category_id`**, `tag_id` **(V8)**, **`period` + `offset_periods`** \| **`start_date`/`end_date`** | the bold groups are V4; `tag_id` is V8 |
 | `GET /categories` | — | names + colours for the dots |
+| `GET /tags` | — | names, for the tag half of the filter banner and empty state **(V8)** |
 | `GET /users/me` | — | currency, `family_tz` day grouping |
+
+### Backend deltas this screen needs (V8)
+1. **`GET /expenses` gains a `tag_id` filter**, server-side, for the identical
+   reason `category_id` is server-side (see the V4 note below): a client-side
+   filter of one fetched page makes pagination and the filter disagree.
+   `tag_id` AND-combines with `category_id` when both are present (D803),
+   though no screen sends both today.
 
 ### Backend deltas this screen needs (V4)
 
@@ -185,6 +205,9 @@ never name the same period two different ways.
   the count after filtering.
 - **A period filter plus "Load more"** — every page carries the same period; a
   later page must not silently drop it.
+- **A tag deleted between the tap that filtered to it and this screen's load
+  (V8)** — the banner and empty state fall back to `unknownTag` ("Unknown
+  tag") rather than throwing, mirroring the archived-category fallback above.
 
 ## Acceptance criteria
 - [ ] Arriving from Home's Day tab on yesterday with one 5.00 Transport expense
@@ -203,6 +226,13 @@ never name the same period two different ways.
 - [ ] Tapping a row opens screen 03b for that expense.
 - [ ] BackButton returns to Home with Home's period unchanged.
 - [ ] Renders correctly in light and dark from `tokens.css` only.
+- [ ] Arriving filtered to a tag with a period also in force shows the banner
+      "{tag} · {period}" (`filter.tagAndPeriod`), and at zero rows the empty
+      string names both halves ("Nothing in {period} tagged {tag}.").
+- [ ] Arriving filtered to a tag with no period shows the banner as just the
+      tag name (`filter.tagOnly`), and at zero rows "Nothing tagged {tag}."
+- [ ] A tag deleted between the tap and this screen's load renders "Unknown
+      tag" in the banner and empty state rather than throwing.
 
 ## Open questions
 - [?] **Does the "Expenses" side-menu row carry a period?** It opens this screen
