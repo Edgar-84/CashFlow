@@ -214,6 +214,15 @@ describe("ApiClient — query params", () => {
     expect(url).toBe("https://api.test/expenses?limit=50&offset=0&category_id=cat-1");
   });
 
+  it("listExpenses serializes tagId as tag_id, alongside categoryId (D803, both AND-combinable)", async () => {
+    const { client, fetchFn } = makeClient(jsonResponse([]));
+
+    await client.listExpenses({ limit: 50, offset: 0, categoryId: "cat-1", tagId: "tag-1" });
+
+    const { url } = lastCall(fetchFn);
+    expect(url).toBe("https://api.test/expenses?limit=50&offset=0&category_id=cat-1&tag_id=tag-1");
+  });
+
   it("listExpenses sends the period's offset as period_offset — offset already paginates (D402)", async () => {
     const { client, fetchFn } = makeClient(jsonResponse([]));
 

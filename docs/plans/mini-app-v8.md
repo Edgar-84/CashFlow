@@ -381,7 +381,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       **AC:** `GET /expenses?tag_id=<id>&limit=1` returns the newest expense
       carrying that tag, and no untagged expense appears in any page of a
       tag-filtered list.
-- [ ] **U1.2** Expenses screen accepts a tag filter. `ExpensesFilter.tagId`,
+- [x] **U1.2** Expenses screen accepts a tag filter. `ExpensesFilter.tagId`,
       `ApiClient.listExpenses({ tagId })`, `loadExpenses` also fetching
       `GET /tags`, `buildExpensesData` labelling the banner and the empty
       state from it, and the six catalogue keys in EN/RU/UK.
@@ -773,9 +773,54 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   integration tests additionally verified green via
   `bash scripts/integration_docker.sh -k test_expense_repo` (36 passed).
   **Reviewer round 1:** pending.
-- **Next:** `/clear`, then `/unit U1.2 docs/plans/mini-app-v8.md` — the
-  Expenses screen's tag filter (frontend). See Contracts' "Frontend —
-  expenses filter (U1.2)" section for the exact signatures.
+- **Done (U1.2, 2026-09-05):** Expenses screen's tag filter (frontend)
+  implemented exactly per Contracts. `webapp/src/screens/expenses.ts`:
+  `ExpensesFilter.tagId`, `ExpensesApi.listTags()` (new, mirrors
+  `listCategories()`), `buildExpensesData` gained `tags: TagResponse[]` and
+  `tagId?: Uuid` on input and `tagLabel: string | null` on output (unknown/
+  deleted tag id falls back to `expenses.unknownTag`, same pattern as
+  `categoryLabel`'s `unknownCategory` fallback); `createExpensesController`
+  fetches `GET /tags` in the same `Promise.all` as `getMe`/`listCategories`
+  on `load()`, and threads `tagId` through every `listExpenses` call
+  (`fetchPage`), so it travels on `loadMore()` pages too. `filterBannerText`/
+  `emptyMessage` gained a tag arm mirroring the category arm — since D803
+  permits `category_id`+`tag_id` together but no screen sends both, the
+  banner gives category precedence when (hypothetically) both are set,
+  matching the existing precedent of not inventing a combined string the
+  Copy table doesn't define. `webapp/src/api/client.ts`'s `listExpenses`
+  gained `tagId` → `tag_id` query param, AND-combined with `category_id`
+  exactly like the backend (D803). Five new catalogue keys in EN/RU/UK
+  (`expenses.filter.tagOnly`, `expenses.filter.tagAndPeriod`,
+  `expenses.empty.tag`, `expenses.empty.tagPeriod`, `expenses.unknownTag`) —
+  the unit's own plan bullet says "six catalogue keys" but the Contracts list
+  includes `expenses.filter.categoryAndPeriod` as "(existing `filter.both`,
+  unchanged)", i.e. not a new key; same kind of off-by-one the U0.3 STATE
+  entry already flagged for its own key count, applying existing decisions
+  rather than making a new one. No `main.ts` changes — `showExpenses`
+  already accepts `filter: ExpensesFilter` opaquely and forwards it
+  unchanged, so `tagId` flows through with no wiring; the actual tag-bar tap
+  is U1.3's job. Tests added: `webapp/tests/expenses.test.ts` (tag-label
+  resolution and unknown-tag fallback in `buildExpensesData`, `listTags`
+  fetched alongside categories and `tagId` sent on every page including
+  `loadMore`, category+tag AND-combine pass-through, tag-only and
+  tag+period empty/banner rendering, unknown-tag banner fallback) and
+  `webapp/tests/client.test.ts` (`tagId` serializes as `tag_id` alongside
+  `category_id`). No new decisions — this unit applies D801–D803 as already
+  recorded. `scripts/verify.sh` green (812 backend + 971 webapp tests).
+  **Reviewer round 1** (APPROVE, one NIT fixed before commit): the
+  category-wins-over-tag banner/empty-state precedence (when both are
+  somehow set) had no test pinning it down — only the API-call AND-combine
+  was tested, not the render-layer precedence. Added one test exercising
+  both `categoryId` and `tagId` together, asserting the banner and empty
+  state both read "Transport" (the category) and never mention "Coffee"
+  (the tag). `scripts/verify.sh` re-run and green (812 backend + 972 webapp
+  tests).
+- **Next:** `/clear`, then `/unit U1.3 docs/plans/mini-app-v8.md` — the
+  Statistics tag bar becomes a real drill-down into Expenses. See
+  Contracts' "Frontend — expenses filter (U1.2)" section (already built)
+  and the M1 unit list's U1.3 bullet for the exact wiring
+  (`mount`'s bar handler stops branching on `grouping === "category"`,
+  `main.ts`'s `onBarTap` widens to `(id, grouping)`).
 - **Gotchas:**
   - A stale, already-merged branch literally named `U0.2` was left over from
     the V7 plan (local + `origin`) when this unit started; it was not reused

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError, RetryableError } from "../src/api/client";
-import type { CategoryResponse, ExpenseResponse } from "../src/api/types";
+import type { CategoryResponse, ExpenseResponse, TagResponse } from "../src/api/types";
 import {
   applyExpensesChrome,
   buildExpensesData,
@@ -24,6 +24,12 @@ const CATEGORIES: CategoryResponse[] = [
   category("cat-groceries", "Groceries", "2026-01-01T00:00:00Z"),
   category("cat-transport", "Transport", "2026-01-02T00:00:00Z"),
 ];
+
+function tag(id: string, name: string): TagResponse {
+  return { id, name, account_id: "acc-1", created_at: "2026-01-01T00:00:00Z" };
+}
+
+const TAGS: TagResponse[] = [tag("tag-coffee", "Coffee"), tag("tag-vacation", "Vacation")];
 
 function expense(overrides: Partial<ExpenseResponse> = {}): ExpenseResponse {
   return {
@@ -120,6 +126,7 @@ describe("buildExpensesData", () => {
     const data = buildExpensesData({
       expenses: EXPENSES,
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       hasMore: false,
     });
@@ -132,6 +139,7 @@ describe("buildExpensesData", () => {
     const data = buildExpensesData({
       expenses: EXPENSES,
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       categoryId: "cat-transport",
       hasMore: false,
@@ -144,6 +152,7 @@ describe("buildExpensesData", () => {
     const data = buildExpensesData({
       expenses: [],
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       categoryId: "cat-gone",
       hasMore: false,
@@ -157,6 +166,7 @@ describe("buildExpensesData", () => {
     const data = buildExpensesData({
       expenses: [],
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       period,
       hasMore: false,
@@ -168,11 +178,38 @@ describe("buildExpensesData", () => {
     const data = buildExpensesData({
       expenses: [EXPENSES[0]],
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       hasMore: false,
     });
     expect(data.days[0].rows[0].colorVar).toBe("var(--category-slot-1)");
     expect(data.days[0].rows[0].categoryLabel).toBe("Groceries");
+  });
+
+  it("labels the tag filter from the tag name (V8)", () => {
+    const data = buildExpensesData({
+      expenses: EXPENSES,
+      categories: CATEGORIES,
+      tags: TAGS,
+      currency: "EUR",
+      tagId: "tag-coffee",
+      hasMore: false,
+    });
+    expect(data.tagLabel).toBe("Coffee");
+    expect(data.categoryLabel).toBeNull();
+  });
+
+  it("falls back to 'Unknown tag' when the filtered tag id is unknown (e.g. deleted between the tap and the load)", () => {
+    const data = buildExpensesData({
+      expenses: [],
+      categories: CATEGORIES,
+      tags: TAGS,
+      currency: "EUR",
+      tagId: "tag-gone",
+      hasMore: false,
+    });
+    expect(data.tagLabel).toBe("Unknown tag");
+    expect(data.days).toHaveLength(0);
   });
 });
 
@@ -180,6 +217,7 @@ function fakeApi(overrides: Partial<ExpensesApi> = {}): ExpensesApi {
   return {
     getMe: vi.fn().mockResolvedValue({ currency: "EUR" }),
     listCategories: vi.fn().mockResolvedValue(CATEGORIES),
+    listTags: vi.fn().mockResolvedValue(TAGS),
     listExpenses: vi.fn().mockResolvedValue([]),
     ...overrides,
   };
@@ -254,6 +292,40 @@ describe("createExpensesController", () => {
     });
   });
 
+  it("fetches GET /tags alongside categories and sends tagId on every page (V8)", async () => {
+    const listExpenses = vi
+      .fn()
+      .mockResolvedValueOnce(pageOf(50))
+      .mockResolvedValueOnce(pageOf(1, { startIndex: 50 }));
+    const listTags = vi.fn().mockResolvedValue(TAGS);
+    const api = fakeApi({ listExpenses, listTags });
+    const controller = createExpensesController(api, createMemoryCache(), { tagId: "tag-coffee" });
+
+    await controller.load();
+    expect(listTags).toHaveBeenCalledOnce();
+    expect(listExpenses).toHaveBeenNthCalledWith(1, { limit: 50, offset: 0, tagId: "tag-coffee" });
+
+    await controller.loadMore();
+    expect(listExpenses).toHaveBeenNthCalledWith(2, { limit: 50, offset: 50, tagId: "tag-coffee" });
+  });
+
+  it("AND-combines categoryId and tagId when both are in force (D803)", async () => {
+    const listExpenses = vi.fn().mockResolvedValue(pageOf(1));
+    const api = fakeApi({ listExpenses });
+    const controller = createExpensesController(api, createMemoryCache(), {
+      categoryId: "cat-transport",
+      tagId: "tag-coffee",
+    });
+
+    await controller.load();
+    expect(listExpenses).toHaveBeenNthCalledWith(1, {
+      limit: 50,
+      offset: 0,
+      categoryId: "cat-transport",
+      tagId: "tag-coffee",
+    });
+  });
+
   it("shows an end-of-list marker once a short page confirms there is no more", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue(pageOf(1)) });
     const controller = createExpensesController(api, createMemoryCache(), {});
@@ -268,7 +340,14 @@ describe("createExpensesController", () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
     const controller = createExpensesController(api, createMemoryCache(), { categoryId: "cat-transport" });
     const state = await controller.load();
-    expect(state).toEqual({ status: "empty", categoryLabel: "Transport", period: undefined });
+    expect(state).toEqual({ status: "empty", categoryLabel: "Transport", tagLabel: null, period: undefined });
+  });
+
+  it("resolves to empty (naming the tag) when a tag-filtered page has nothing and there is no more (V8)", async () => {
+    const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
+    const controller = createExpensesController(api, createMemoryCache(), { tagId: "tag-coffee" });
+    const state = await controller.load();
+    expect(state).toEqual({ status: "empty", categoryLabel: null, tagLabel: "Coffee", period: undefined });
   });
 
   it("resolves empty carrying the period value, for the render layer to name it", async () => {
@@ -276,14 +355,14 @@ describe("createExpensesController", () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
     const controller = createExpensesController(api, createMemoryCache(), { period });
     const state = await controller.load();
-    expect(state).toEqual({ status: "empty", categoryLabel: null, period });
+    expect(state).toEqual({ status: "empty", categoryLabel: null, tagLabel: null, period });
   });
 
   it("resolves plain empty (no filter mentioned) when the whole account has nothing", async () => {
     const api = fakeApi({ listExpenses: vi.fn().mockResolvedValue([]) });
     const controller = createExpensesController(api, createMemoryCache(), {});
     const state = await controller.load();
-    expect(state).toEqual({ status: "empty", categoryLabel: null, period: undefined });
+    expect(state).toEqual({ status: "empty", categoryLabel: null, tagLabel: null, period: undefined });
   });
 
   it("renders normally (no error state) when own_only silently returns a short page", async () => {
@@ -363,13 +442,13 @@ describe("renderExpenses", () => {
   });
 
   it("names the category alone in the empty state", () => {
-    const html = renderExpenses({ status: "empty", categoryLabel: "Transport", period: undefined }, NOW);
+    const html = renderExpenses({ status: "empty", categoryLabel: "Transport", tagLabel: null, period: undefined }, NOW);
     expect(html).toContain("Nothing here yet for Transport.");
   });
 
   it("names the period alone in the empty state", () => {
     const html = renderExpenses(
-      { status: "empty", categoryLabel: null, period: { unit: "month", offset: 0 } },
+      { status: "empty", categoryLabel: null, tagLabel: null, period: { unit: "month", offset: 0 } },
       NOW,
     );
     expect(html).toContain("Nothing in August.");
@@ -377,15 +456,28 @@ describe("renderExpenses", () => {
 
   it("names both halves in the empty state — period then category (V4, D404)", () => {
     const html = renderExpenses(
-      { status: "empty", categoryLabel: "Transport", period: { unit: "month", offset: 0 } },
+      { status: "empty", categoryLabel: "Transport", tagLabel: null, period: { unit: "month", offset: 0 } },
       NOW,
     );
     expect(html).toContain("Nothing in August for Transport.");
   });
 
   it("renders a generic empty message with no filter", () => {
-    const html = renderExpenses({ status: "empty", categoryLabel: null, period: undefined }, NOW);
+    const html = renderExpenses({ status: "empty", categoryLabel: null, tagLabel: null, period: undefined }, NOW);
     expect(html).toContain("No expenses yet.");
+  });
+
+  it("names the tag alone in the empty state (V8)", () => {
+    const html = renderExpenses({ status: "empty", categoryLabel: null, tagLabel: "Coffee", period: undefined }, NOW);
+    expect(html).toContain("Nothing tagged Coffee.");
+  });
+
+  it("names both halves in the empty state for a tag filter — period then tag (V8)", () => {
+    const html = renderExpenses(
+      { status: "empty", categoryLabel: null, tagLabel: "Coffee", period: { unit: "month", offset: 0 } },
+      NOW,
+    );
+    expect(html).toContain("Nothing in August tagged Coffee.");
   });
 
   it("renders day groups with subtotals, rows, and an end-of-list marker", () => {
@@ -394,6 +486,7 @@ describe("renderExpenses", () => {
         expense({ id: "e1", amount: 1000, created_at: "2026-07-29T10:00:00Z", tags: [{ id: "t1", name: "vacation", account_id: "acc-1", created_at: "2026-01-01T00:00:00Z" }] }),
       ],
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       hasMore: false,
     });
@@ -412,6 +505,7 @@ describe("renderExpenses", () => {
     const data = buildExpensesData({
       expenses: pageOf(1),
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       hasMore: true,
     });
@@ -424,6 +518,7 @@ describe("renderExpenses", () => {
     const data = buildExpensesData({
       expenses: pageOf(1),
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       hasMore: false,
     });
@@ -436,6 +531,7 @@ describe("renderExpenses", () => {
     const data = buildExpensesData({
       expenses: EXPENSES_FOR_FILTER_TEST,
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       categoryId: "cat-transport",
       hasMore: false,
@@ -449,6 +545,7 @@ describe("renderExpenses", () => {
     const data = buildExpensesData({
       expenses: EXPENSES_FOR_FILTER_TEST,
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       categoryId: "cat-transport",
       period: { unit: "month", offset: 0 },
@@ -463,6 +560,7 @@ describe("renderExpenses", () => {
     const data = buildExpensesData({
       expenses: EXPENSES_FOR_FILTER_TEST,
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       period: { unit: "month", offset: 0 },
       hasMore: false,
@@ -476,11 +574,76 @@ describe("renderExpenses", () => {
     const data = buildExpensesData({
       expenses: EXPENSES_FOR_FILTER_TEST,
       categories: CATEGORIES,
+      tags: TAGS,
       currency: "EUR",
       hasMore: false,
     });
     const html = renderExpenses({ status: "ready", ...data }, NOW);
     expect(html).not.toContain('data-testid="filter-banner"');
+  });
+
+  it("shows the filter banner naming the tag alone when only a tag filter is active (V8)", () => {
+    const data = buildExpensesData({
+      expenses: EXPENSES_FOR_FILTER_TEST,
+      categories: CATEGORIES,
+      tags: TAGS,
+      currency: "EUR",
+      tagId: "tag-coffee",
+      hasMore: false,
+    });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
+    expect(html).toContain('data-testid="filter-banner"');
+    expect(html).toContain(">Coffee<");
+  });
+
+  it("shows the filter banner naming both halves for a tag filter — 'Coffee · August' (V8)", () => {
+    const data = buildExpensesData({
+      expenses: EXPENSES_FOR_FILTER_TEST,
+      categories: CATEGORIES,
+      tags: TAGS,
+      currency: "EUR",
+      tagId: "tag-coffee",
+      period: { unit: "month", offset: 0 },
+      hasMore: false,
+    });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
+    expect(html).toContain('data-testid="filter-banner"');
+    expect(html).toContain(">Coffee · August<");
+  });
+
+  it("falls back to 'Unknown tag' in the banner when the filtered tag was deleted mid-flight (V8)", () => {
+    const data = buildExpensesData({
+      expenses: EXPENSES_FOR_FILTER_TEST,
+      categories: CATEGORIES,
+      tags: TAGS,
+      currency: "EUR",
+      tagId: "tag-gone",
+      hasMore: false,
+    });
+    const html = renderExpenses({ status: "ready", ...data }, NOW);
+    expect(html).toContain(">Unknown tag<");
+  });
+
+  it("gives the category precedence over the tag in the banner and empty state when both are somehow set (D803: AND-combinable server-side, but no screen sends both today)", () => {
+    const data = buildExpensesData({
+      expenses: EXPENSES_FOR_FILTER_TEST,
+      categories: CATEGORIES,
+      tags: TAGS,
+      currency: "EUR",
+      categoryId: "cat-transport",
+      tagId: "tag-coffee",
+      hasMore: false,
+    });
+    const readyHtml = renderExpenses({ status: "ready", ...data }, NOW);
+    expect(readyHtml).toContain(">Transport<");
+    expect(readyHtml).not.toContain("Coffee");
+
+    const emptyHtml = renderExpenses(
+      { status: "empty", categoryLabel: data.categoryLabel, tagLabel: data.tagLabel, period: undefined },
+      NOW,
+    );
+    expect(emptyHtml).toContain("Nothing here yet for Transport.");
+    expect(emptyHtml).not.toContain("Coffee");
   });
 });
 
@@ -492,10 +655,16 @@ describe("renders real RU content, not an EN fallback", () => {
   it("translates the forbidden, empty and end-of-list copy", () => {
     setLanguage("ru");
     expect(renderExpenses({ status: "forbidden" }, NOW)).toContain("У вас нет прав на просмотр расходов.");
-    expect(renderExpenses({ status: "empty", categoryLabel: null, period: undefined }, NOW)).toContain(
+    expect(renderExpenses({ status: "empty", categoryLabel: null, tagLabel: null, period: undefined }, NOW)).toContain(
       "Расходов пока нет.",
     );
-    const data = buildExpensesData({ expenses: pageOf(1), categories: CATEGORIES, currency: "EUR", hasMore: false });
+    const data = buildExpensesData({
+      expenses: pageOf(1),
+      categories: CATEGORIES,
+      tags: TAGS,
+      currency: "EUR",
+      hasMore: false,
+    });
     expect(renderExpenses({ status: "ready", ...data }, NOW)).toContain("Вы дошли до конца списка.");
   });
 });
