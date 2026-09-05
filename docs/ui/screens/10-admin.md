@@ -134,11 +134,14 @@ system admin ever opens).
     Cancel has no native equivalent, so pairing a native MainButton with an
     in-screen Cancel would split one choice across two places. The primary
     action is the in-screen "Create account" button (region 8).
-- **BackButton:** shown in both modes; returns to **screen 01** (this screen
+- **BackButton:** shown in both modes; returns one step
+  (`../navigation.md`). List mode's one step is **screen 01** — this screen
   is reached only from the side menu, Home-only, like every other menu
-  destination). In Create mode, a dirty draft (any field differs from its
-  empty/default value) asks first via Telegram's own popup — the same
-  `confirmDiscard` flow Add Expense and the category/budget forms use.
+  destination. Create mode's one step is **back to List mode**, since
+  Create is pushed onto List, not onto Home; a dirty draft (any field
+  differs from its empty/default value) asks first via Telegram's own
+  popup — the same `confirmDiscard` flow Add Expense and the
+  category/budget forms use.
 - **Haptics:**
   - `medium` impact the instant a block/unblock popup is **confirmed** (not
     on the tap that opens it) — matches `06c`'s rule exactly; the visible
@@ -179,7 +182,7 @@ The five-state framework applies per mode.
 | Element | Action | Result |
 |---|---|---|
 | Side menu "Admin" row | tap | selection haptic; navigates here (system admin only — see `side-menu.md`) |
-| BackButton | tap | List mode: returns to Home. Create mode: dirty → discard popup; clean → returns to Home |
+| BackButton | tap | List mode: one step back — Home, its only opener. Create mode: dirty → discard popup; clean → one step back — List mode (`../navigation.md`) |
 | Account/user "Block"/"Unblock" trigger, enabled | tap | opens Telegram's `showConfirm` naming the target and the action (see Copy) |
 | Account/user "Block"/"Unblock" trigger, disabled | tap | nothing — a real `disabled` control; the reason is in its accessible description |
 | Confirm popup | cancel | closes; no request sent |

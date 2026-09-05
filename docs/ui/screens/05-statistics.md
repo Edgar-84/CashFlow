@@ -95,7 +95,8 @@ below.
 - **MainButton:** hidden. This screen names no primary action —
   `applyStatisticsChrome` hides it unconditionally, same choice
   `expenses.ts::applyExpensesChrome` makes for its own screen.
-- **BackButton:** shown; navigates to Home. While the date-range picker is
+- **BackButton:** shown; returns one step, to Home — the only screen that
+  opens this one (`../navigation.md`). While the date-range picker is
   open it closes the picker instead, the same override
   `../components/date-range-picker.md` and `01-home.md` both specify.
 - **Haptics:** `selection` on a period unit tab, an offset arrow, the
@@ -136,7 +137,7 @@ Five mandatory states plus this screen's own:
 | Ranked bar, category grouping | tap | selection haptic; navigates to Expenses filtered to **that category only**. **Unlike Home's V4 ranked-row tap, the period is not carried** — a pre-existing divergence this delta does not touch (see Open questions) |
 | Ranked bar, tag grouping | tap | selection haptic; navigates to Expenses filtered to **that tag only**. Mirrors the category tap: the period is not carried (D801) |
 | Retry button (error state) | tap | re-runs the load at the current unit/offset (or custom range) |
-| BackButton | — | returns to Home; closes the date-range picker instead, if it is open |
+| BackButton | — | one step back — Home, its only opener (`../navigation.md`); closes the date-range picker instead, if it is open |
 
 ## Copy
 Period-selector strings (tab labels, `aria.prev`/`aria.next`/etc.) are

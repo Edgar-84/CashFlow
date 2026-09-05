@@ -66,10 +66,11 @@ component; region 8 reuses `.detail-edit-actions`.
   ships with a word, not just a colour.
 - **MainButton:** **hidden** on this screen (see Delta). The screen's primary
   action is the in-screen "Save".
-- **BackButton:** always shown; returns to `04-budgets.md`. On a dirty draft it
-  confirms first with Telegram's own popup — the same `confirmDiscard` the Add
-  expense and Category form screens already use. A clean draft returns
-  immediately. Back is exactly equivalent to Cancel.
+- **BackButton:** always shown; returns one step, to `04-budgets.md` — its
+  only opener (`../navigation.md`). On a dirty draft it confirms first with
+  Telegram's own popup — the same `confirmDiscard` the Add expense and
+  Category form screens already use. A clean draft returns immediately. Back
+  is exactly equivalent to Cancel.
 - **Haptics:** `success` after a successful save or delete; `impact` on
   confirming a delete; nothing while typing.
 - **Viewport:** the amount input is focused on open in **create** mode only, so

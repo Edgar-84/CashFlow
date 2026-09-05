@@ -69,9 +69,10 @@ None. Rows reuse `app.css`'s existing list-row rules.
     currency. Hidden entirely for a non-admin (see States).
   - On tap: Telegram's confirm popup first — this changes what every amount in
     the account, for every member, is labelled — then `PATCH`.
-- **BackButton:** shown; returns to **screen 01**. With an unsaved selection it
-  asks first, via Telegram's popup, using the same discard flow the composer
-  uses.
+- **BackButton:** shown; returns one step, to **screen 01** — the only
+  screen that opens this one (`../navigation.md`). With an unsaved selection
+  it asks first, via Telegram's popup, using the same discard flow the
+  composer uses.
 - **Haptics:** `selection` on a currency row tap;
   `notificationOccurred('success')` after the PATCH resolves, `('error')` on
   failure.
@@ -105,7 +106,7 @@ open Categories read-only rather than the row being hidden).
 | MainButton | tap | confirm popup |
 | Popup "Change currency" | tap | `PATCH`; on success back to Home |
 | Popup "Cancel" | tap | nothing; the selection stays where the user put it, unsaved |
-| BackButton | tap | unsaved selection → discard popup; otherwise Home |
+| BackButton | tap | unsaved selection → discard popup; otherwise one step back — Home, its only opener (`../navigation.md`) |
 | Language row **(V7)** | tap | selection haptic; navigates to `09-language.md` for every role — no confirm, nothing to discard here |
 
 ## Copy
@@ -246,8 +247,9 @@ here, and in the plan's Risks, so the choice to defer it is deliberate.
       currency is selected.
 - [ ] Tapping "Save currency" opens Telegram's popup naming the target currency;
       cancelling it fires no request.
-- [ ] Confirming it returns to Home, where the donut's total and every amount
-      now render with the new code — without closing and reopening the app.
+- [ ] Confirming it returns to Home (this screen's only opener,
+      `../navigation.md`), where the donut's total and every amount now
+      render with the new code — without closing and reopening the app.
 - [ ] After the change, an expense of 5000 minor units still reads 50.00 — the
       number did not move.
 - [ ] For a non-admin the rows are inert, MainButton is absent, and the

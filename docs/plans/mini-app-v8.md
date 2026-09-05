@@ -330,7 +330,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       **AC:** neither file contains a sentence claiming a tag bar tap does
       nothing; `03-expenses.md`'s Copy table lists every tag-filtered string
       the contract above names.
-- [ ] **U0.2** `docs/ui/navigation.md` — **new** — plus the BackButton row in
+- [x] **U0.2** `docs/ui/navigation.md` — **new** — plus the BackButton row in
       every screen doc it contradicts. The new file owns: the stack model
       (Home is the floor, a menu row is a push onto Home, a sub-screen is a
       push onto its opener), what `replace` means (a retry/period/grouping
@@ -411,7 +411,13 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       tried). **Reviewer subagent before commit.**
       **AC:** Home → menu → Statistics → back lands on Home (unchanged), and
       Statistics → tag bar → Expenses → back lands on **Statistics with its
-      period and grouping intact**, not Home.
+      period and grouping intact**, not Home. Also covers
+      `admin.ts`'s `requestCloseCreate`, which today hardcodes Home as
+      BackButton's target in **both** List and Create mode (comment: "the
+      destination is Home in both modes") — per U0.2's corrected
+      `10-admin.md`, Create mode's one step back is List mode, not Home, so
+      `exitToHome` becomes mode-dependent here too, the same shape as every
+      other `showX` in this unit.
 - [ ] **U2.3** Retire the second mechanism. `showExpenseDetail`'s `onBack`
       parameter, `categoriesReturnTo`, `tagsReturnTo`, `showBudgetForm`'s
       return-to-Budgets closures and `showLanguage`'s `onBack: showSettings`
@@ -598,11 +604,64 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   applies D801/D802/D803, it doesn't make new ones. No code was touched
   (M0 is spec-only); `scripts/verify.sh` was run as the Stop-gate and passed
   because nothing it checks changed.
-- **Next:** `/clear`, then `/unit U0.2 docs/plans/mini-app-v8.md`. M0 is
+- **Done (U0.2, 2026-09-05):** `docs/ui/navigation.md` created — the stack
+  model (Home as floor, menu rows push onto Home, sub-screens push onto their
+  opener), `push` vs `replace`, the floor behaviour, `09-language.md` named as
+  the reference implementation, and a per-screen opener/target table. Then the
+  BackButton row (Telegram section, Interactions table, and any affected
+  Acceptance criteria) was corrected in all twelve screen docs the unit names:
+  `03-expenses.md`, `03b-expense-detail.md`, `04-budgets.md`,
+  `04b-budget-form.md`, `05-statistics.md`, `06-categories.md`,
+  `06b-category-form.md`, `06c-category-delete.md`, `07-tags.md`,
+  `07b-tag-form.md`, `08-settings.md`, `10-admin.md`. Two real (not just
+  cosmetic) corrections came out of this: `03-expenses.md` and `05-statistics.md`
+  already document a category-bar tap from Statistics into Expenses
+  (pre-existing, not a V8 addition), and Expenses' BackButton was still
+  hardcoded to Home for that path — now documented as returning to whichever
+  of Home or Statistics opened it. `06-categories.md`/`07-tags.md` still said
+  "always navigates to Home" even though `main.ts` already returns to the
+  expense composer via `categoriesReturnTo`/`tagsReturnTo` when opened from
+  there — the docs were stale relative to the code; now corrected to match.
+  Also found and fixed a **self-inconsistency inside `10-admin.md`**
+  (pre-existing, unrelated to any V8 item): its Telegram/Interactions
+  sections said Create mode's BackButton returns straight to Home, while its
+  own Create-mode "Cancel" row said Cancel — "identical to BackButton" —
+  returns to List mode. Resolved in favour of List mode (Create is pushed
+  onto List, not onto Home), consistent with the new stack model; no new
+  decision id needed, this applies D804 rather than choosing among
+  alternatives. No new decisions otherwise — this unit applies D804/D805/D806,
+  it doesn't make new ones. No code was touched (M0 is spec-only);
+  `scripts/verify.sh` was run as the Stop-gate and passed (960 webapp tests,
+  unchanged) because nothing it checks changed.
+  **Reviewer round 1** (APPROVE with one WARN, fixed before commit): the
+  `10-admin.md` fix above now diverges from shipped `webapp/src/screens/admin.ts`
+  (`requestCloseCreate` hardcodes Home as BackButton's target in both List and
+  Create mode today), and no unit yet committed to closing that gap when M2
+  lands — U2.2's own bullet above now names `admin.ts`'s `requestCloseCreate`
+  explicitly so it isn't missed. Two NITs also addressed/noted: tightened
+  `06-categories.md`'s AC wording to be self-contained; `docs/design/mini-app-ux.md`
+  still says bare "BackButton → Home" for Expenses/Statistics — pre-existing,
+  out of this unit's file list, left as a follow-up.
+  **Reviewer round 2** (APPROVE with one WARN, three NITs, fixed before
+  commit): `navigation.md`'s stack-model bullet and per-screen table didn't
+  mention Admin's own List↔Create push (the same nuance `10-admin.md` already
+  documents) — added a Create-mode row to the table and a clause to the
+  stack-model bullet. Two phrasing NITs fixed: `06-categories.md`/`07-tags.md`'s
+  "Home is the fix for..." lines reworded to "The Home-opened path is the fix
+  for..." now that BackButton can also target the expense composer;
+  `07-tags.md`'s AC wording ("opened that way") aligned with
+  `06-categories.md`'s ("opened from that tile"). `scripts/verify.sh` re-run
+  and green after each round.
+- **Next:** `/clear`, then `/unit U0.3 docs/plans/mini-app-v8.md`. M0 is
   `ui-spec` work and must land before any code — three of the three items
-  contradict a currently-written spec line. Do **not** start M1 until U0.1
-  and U0.2 are ticked.
+  contradict a currently-written spec line. Do **not** start M1 until U0.1,
+  U0.2, U0.3 and U0.4 are all ticked.
 - **Gotchas:**
+  - A stale, already-merged branch literally named `U0.2` was left over from
+    the V7 plan (local + `origin`) when this unit started; it was not reused
+    — this unit's work landed on `U0.2_navigation_stack_spec` instead. Worth
+    deleting that stale branch (local + remote) next time it's convenient;
+    it is not touched by this plan.
   - U0.1 and U0.3 both edit `docs/ui/screens/05-statistics.md`, in different
     sections, and must run in that order.
   - No migration in V8. If a unit reaches for Alembic, a decision was missed —

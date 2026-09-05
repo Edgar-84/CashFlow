@@ -111,10 +111,14 @@ single-selecting, so it is not `radiogroup` — see Accessibility).
 - **MainButton:** **hidden.** The "Add category" affordance lives in the
   grid itself (region 3); a MainButton would be a second, redundant entry
   point to the same not-yet-built action.
-- **BackButton:** shown; always navigates to Home. This is the fix for the
-  reported dead-tile bug — the Home "Categories" tile currently no-ops
-  (`webapp/src/main.ts`'s `onTileTap`, "Categories/Tags land in a later
-  milestone" comment); this unit removes that no-op for `categories` only.
+- **BackButton:** shown; returns one step, to whichever screen opened this
+  one — Home's side menu, or the expense composer (Add expense / Edit
+  expense) when reached via its "More" cell, which the return restores with
+  the in-progress draft intact and the category cleared (`../navigation.md`,
+  D805). The Home-opened path is the fix for the reported dead-tile bug —
+  the Home "Categories" tile currently no-ops (`webapp/src/main.ts`'s
+  `onTileTap`, "Categories/Tags land in a later milestone" comment); this
+  unit removes that no-op for `categories` only.
 - **Haptics:** `selection` on the Home "Categories" tile tap (matches every
   other tile, `home.ts`); `selection` on the archived-section expand/collapse
   toggle. No haptic on the cell-tap stubs — they do nothing yet.
@@ -136,7 +140,7 @@ single-selecting, so it is not `radiogroup` — see Accessibility).
 | Element | Action | Result |
 |---|---|---|
 | Home "Categories" tile | tap | selection haptic; navigates here |
-| BackButton | tap | navigates to Home |
+| BackButton | tap | one step back — Home, or the expense composer with its draft intact, whichever opened this screen (`../navigation.md`) |
 | Active category cell | tap | **Stub in this unit**: `// TODO` no-op, same convention as `main.ts`'s current Categories/Tags tile handling. U2.2 wires this to open the edit/recolour/delete-menu screen (06b). |
 | Archived category row | tap | same stub as above |
 | "Add category" cell | tap | **Stub in this unit**: `// TODO` no-op. U2.2 wires this to open the create form (06b). |
@@ -198,7 +202,9 @@ single-selecting, so it is not `radiogroup` — see Accessibility).
 
 ## Acceptance criteria
 - [ ] The Home "Categories" tile navigates to this screen; BackButton
-      returns to Home (closes the reported dead-tile bug).
+      returns to Home when opened from that tile (closes the reported
+      dead-tile bug), or to the expense composer with its draft intact when opened
+      from its "More" cell (`../navigation.md`).
 - [ ] Active categories render as a 4-column grid of 64px filled colour
       circles, each with its name centred underneath. No count or amount is
       shown anywhere on this screen (D703).

@@ -107,8 +107,9 @@ picker the new one inherits verbatim.
   becomes the new "original"). An empty/whitespace-only name never enables
   Save even if the slot changed — the inline error (see Copy) covers that
   case instead of a disabled-but-silent button.
-- **BackButton:** always shown; navigates to `06-categories.md`. On a dirty
-  draft, Telegram's own popup confirms before discarding — the same pattern
+- **BackButton:** always shown; returns one step, to `06-categories.md` —
+  its only opener (`../navigation.md`). On a dirty draft, Telegram's own
+  popup confirms before discarding — the same pattern
   `add-expense.ts::wireBackButton` already implements for that screen's
   draft.
 - **Haptics:** `success` after a successful Save; no haptic on tapping a

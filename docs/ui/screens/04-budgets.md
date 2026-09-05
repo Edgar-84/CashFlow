@@ -84,7 +84,8 @@ the dot + name identity pairing with every other screen.
   **navigates to `04b-budget-form.md` in create mode** instead of opening an
   inline form. It is re-applied after every mutation, because creating or
   deleting a plan changes what "next" means.
-- **BackButton:** always shown; returns to `01-home.md`.
+- **BackButton:** always shown; returns one step, to `01-home.md` — the only
+  screen that opens this one (`../navigation.md`).
 - **Haptics:** `selection` on tapping a row or an invitation.
 - **Viewport:** no keyboard on this screen any more — the amount field moved to
   04b. This is a second, quieter benefit of the split: the list no longer has
@@ -109,7 +110,7 @@ the dot + name identity pairing with every other screen.
 | Budgeted row | tap | `selection` haptic; **navigates to `04b-budget-form.md` in edit mode** for that plan |
 | Invitation row | tap | `selection` haptic; **navigates to `04b-budget-form.md` in create mode** for that category |
 | MainButton | tap | navigates to `04b-budget-form.md` in create mode for the first unbudgeted category |
-| BackButton | tap | returns to `01-home.md` |
+| BackButton | tap | one step back — `01-home.md`, its only opener (`../navigation.md`) |
 | "Try again" | tap | re-runs the load |
 
 Returning from 04b after a successful save or delete **re-runs the load** so

@@ -105,9 +105,10 @@ colour-agnostic markup/typography, not a `../components/` entry either.
   Disabled again immediately after a successful Save. An empty/whitespace-only
   name never enables Save; the inline error (region 2) covers that case
   instead of a disabled-but-silent button — identical rule to 06b.
-- **BackButton:** always shown; navigates to `07-tags.md`. On a dirty draft,
-  Telegram's own popup confirms before discarding, same
-  `wireCategoryFormBackButton`-shaped guard 06b implements.
+- **BackButton:** always shown; returns one step, to `07-tags.md` — its only
+  opener (`../navigation.md`). On a dirty draft, Telegram's own popup
+  confirms before discarding, same `wireCategoryFormBackButton`-shaped guard
+  06b implements.
 - **Haptics:** `success` after a successful Save; `medium` impact the instant
   the delete/hide popup is **confirmed** (not on the tap that opens it, not
   again on the network response — the optimistic change already happened by
