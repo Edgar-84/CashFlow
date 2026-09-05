@@ -27,10 +27,12 @@
  * total — "bars sorted descending with the leader at full width" (AC) is a
  * ranked-bar chart, not a share-of-total chart like the donut.
  *
- * Bar tap drill-down (design doc §5's `S -->|bar tap| EF`) is wired only for
- * category bars — `GET /expenses` has no tag filter (Contracts, U2.3's own
- * scope note), so a tag bar tap is tappable-but-no-op, same "no target
- * screen/contract yet" precedent U2.1 set for its own tiles.
+ * Bar tap drill-down (design doc §5's `S -->|bar tap| EF`) fires for both
+ * category and tag bars (V8, U1.3) — `GET /expenses` gained a `tag_id` filter
+ * (D802), so `onBarTap` now reports which grouping produced the id and the
+ * host routes a tag tap to `showExpenses({ tagId })` the same way a category
+ * tap routes to `showExpenses({ categoryId })`. Neither tap carries the
+ * period (D801, pre-existing for category, mirrored for tag).
  */
 
 import { assignCategoryColors, categorySlotCssVar, OTHER_COLOR_VAR } from "../lib/category-colors";
@@ -423,7 +425,7 @@ export function renderStatistics(state: StatisticsState, now: Date): string {
 export interface StatisticsHandlers {
   onRetry: () => void;
   onBack: () => void;
-  onBarTap: (categoryId: Uuid) => void;
+  onBarTap: (id: Uuid, grouping: Grouping) => void;
   onUnitChange: (unit: PeriodUnit) => void; // host resets offset to 0
   onOffsetChange: (offset: number) => void; // host clamps at 0
   onApplyCustomRange: (range: { start: string; end: string }) => void; // date-range picker's Apply — host sets the period and refetches; Cancel/BackButton close the picker without calling this
@@ -541,16 +543,12 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
       });
     });
 
-    if (current.grouping === "category") {
-      root.querySelectorAll<HTMLElement>("[data-id]").forEach((el) => {
-        el.addEventListener("click", () => {
-          haptics.selection();
-          handlers.onBarTap(el.dataset.id as Uuid);
-        });
+    root.querySelectorAll<HTMLElement>("[data-id]").forEach((el) => {
+      el.addEventListener("click", () => {
+        haptics.selection();
+        handlers.onBarTap(el.dataset.id as Uuid, current.grouping);
       });
-    }
-    // Tag bars have no drill-down target yet (file header) — tappable-but-
-    // no-op is deferred to `renderBars`' cursor styling only.
+    });
   }
 
   render(state);

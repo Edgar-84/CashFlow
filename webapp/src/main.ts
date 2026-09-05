@@ -999,9 +999,10 @@ async function showTagForm(tagId: Uuid | null): Promise<void> {
  * "Statistics" row. `period`/`grouping` are carried in the closure across
  * retries, same shape as `showExpenses`'s `filter` closure — a grouping
  * toggle re-renders without a fetch (that happens entirely inside
- * `screens/statistics.ts::mount`). A category-bar tap drills into Expenses
- * filtered to that category (design doc §5's `S -->|bar tap| EF`), reusing
- * the same `showExpenses` Home's donut-segment tap already routes through.
+ * `screens/statistics.ts::mount`). A category- or tag-bar tap (V8, U1.3)
+ * drills into Expenses filtered to that category or tag (design doc §5's
+ * `S -->|bar tap| EF`), reusing the same `showExpenses` Home's
+ * donut-segment tap already routes through.
  * The period-selector region (U2.2) recurses into a fresh `showStatistics`
  * call with the new period, same shape `onRetry` already used — a unit tap
  * resets offset to 0, an offset tap clamps at 0 (`clampOffset`, no future
@@ -1023,8 +1024,8 @@ async function showStatistics(
     onBack: () => {
       void showHome();
     },
-    onBarTap: (categoryId) => {
-      void showExpenses({ categoryId });
+    onBarTap: (id, tapGrouping) => {
+      void showExpenses(tapGrouping === "tag" ? { tagId: id } : { categoryId: id });
     },
     onUnitChange: (unit) => {
       void showStatistics({ unit, offset: 0 }, grouping);
