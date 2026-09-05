@@ -4,6 +4,7 @@ import {
   budgetFormModeFromRow,
   budgetFormModeFromUnbudgeted,
   budgetToastMessage,
+  navStackAction,
   withArchivedCategory,
   withCreatedTagPreselected,
 } from "../src/main";
@@ -15,6 +16,26 @@ import type { CategoryResponse, ExpenseResponse } from "../src/api/types";
 describe("boot", () => {
   it("resolves without throwing when no DOM is present (vitest's node environment)", async () => {
     await expect(boot()).resolves.toBeUndefined();
+  });
+});
+
+// -- navStackAction (U2.2, back stack wiring, D804) — the push/replace
+//    decision `navigate` uses at the top of every wired `showX`. This is the
+//    plan's own named risk ("replace... is the whole defence" against back
+//    requiring one tap per retry), so it gets direct coverage rather than
+//    relying on the untested DOM-mount call sites that use it. -------------
+
+describe("navStackAction", () => {
+  it("pushes when the top of the stack is a different screen (a fresh navigation)", () => {
+    expect(navStackAction("statistics", "expenses")).toBe("push");
+  });
+
+  it("pushes when the stack is empty (entering from Home, the floor)", () => {
+    expect(navStackAction(null, "statistics")).toBe("push");
+  });
+
+  it("replaces when the top of the stack is already this screen (a retry, a period/grouping change, or a child screen — Budget form, Expense detail — returning to the list that opened it)", () => {
+    expect(navStackAction("budgets", "budgets")).toBe("replace");
   });
 });
 

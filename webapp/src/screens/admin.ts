@@ -681,11 +681,12 @@ export function mount(root: HTMLElement, state: AdminState, api: AdminApi, handl
   /** Re-applied on every `render()` (cheap: `setBackButtonHandler`/
    * `mainButton.onClick` both unwire-then-rewire per their own contract) so
    * chrome always matches the current mode without separate bookkeeping.
-   * BackButton's destination is Home in **both** modes (screen doc's
-   * Interactions table); only whether a discard popup interrupts first
-   * depends on mode. */
+   * BackButton's destination is mode-dependent (`docs/ui/screens/10-admin.md`,
+   * V8/U2.2): List mode's one step back is Home (`exitToHome`); Create
+   * mode's is List mode, the same target Cancel already used — Create is
+   * pushed onto List, not onto Home. */
   function updateChrome(): void {
-    setBackButtonHandler(() => void requestCloseCreate(true));
+    setBackButtonHandler(() => void requestCloseCreate(mode === "list"));
     if (mode === "create") {
       mainButton.hide();
     } else {
@@ -706,9 +707,10 @@ export function mount(root: HTMLElement, state: AdminState, api: AdminApi, handl
     root.querySelector<HTMLInputElement>('[data-testid="admin-create-name"]')?.focus();
   }
 
-  /** Shared by BackButton (`exitToHome: true`, always) and Cancel
-   * (`exitToHome: false` — "back to List mode", screen doc's Interactions
-   * table). Both apply the same dirty-check mechanism first. */
+  /** Shared by BackButton (`exitToHome: mode === "list"` — List mode exits
+   * to Home, Create mode exits to List mode, same as Cancel) and Cancel
+   * (`exitToHome: false`, always — screen doc's Interactions table). Both
+   * apply the same dirty-check mechanism first. */
   async function requestCloseCreate(exitToHome: boolean): Promise<void> {
     if (!createController) {
       if (exitToHome) {
