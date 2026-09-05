@@ -37,6 +37,7 @@ class ExpenseRepositoryProtocol(Protocol):
         offset: int = 0,
         account_id: UUID,
         category_id: UUID | None = None,
+        tag_id: UUID | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
         tz: str = "UTC",
@@ -299,6 +300,7 @@ class ExpenseService:
         limit: int = 50,
         offset: int = 0,
         category_id: UUID | None = None,
+        tag_id: UUID | None = None,
         bounds: tuple[datetime, datetime] | None = None,
     ) -> list[ExpenseResponse]:
         start, end = bounds if bounds is not None else (None, None)
@@ -307,6 +309,7 @@ class ExpenseService:
             limit=limit,
             offset=offset,
             category_id=category_id,
+            tag_id=tag_id,
             start=start,
             end=end,
             tz=self._family_tz,

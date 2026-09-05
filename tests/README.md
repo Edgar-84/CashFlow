@@ -142,6 +142,11 @@ mode called out in `docs/plans/mini-app-v2.md` Risks (U1.5).
 | `test_list_filters_by_category_id` | `list(category_id=...)` narrows to that category (mini-app-v4 U0.1) |
 | `test_list_filters_by_spent_at_window` | `list(start=, end=)` narrows to a half-open `spent_at` window (U0.1) |
 | `test_list_combines_category_and_period_filters` | `category_id` and `start`/`end` combine — only rows matching both are returned (U0.1) |
+| `test_list_filters_by_tag_id` | `list(tag_id=...)` narrows to expenses carrying that tag (U1.1) |
+| `test_list_combines_tag_id_and_category_id` | `tag_id` and `category_id` AND-combine — only rows matching both are returned (U1.1, D803) |
+| `test_list_combines_tag_id_and_period_filters` | `tag_id` and `start`/`end` combine — only rows matching both are returned (U1.1) |
+| `test_list_filters_by_tag_id_survives_pagination` | `list(tag_id=, limit=1)` still surfaces a tagged expense that would otherwise sit past the default page — the `EXISTS` filter runs before `LIMIT`/`OFFSET` (U1.1 AC, D802) |
+| `test_list_unknown_tag_id_returns_empty_list` | `list(tag_id=<unknown>)` returns `[]`, not an error (U1.1 AC) |
 | `test_list_filters_by_spent_at_not_created_at` | `list()` filters by `spent_at`, not `created_at` — an expense spent 3 August but created 7 August is inside a 3 August window and outside a 7 August one (U0.1, D314) |
 | `test_list_filters_by_local_spent_at_not_utc_calendar_date` | `list(tz="Europe/Belgrade")` compares `spent_at` against the LOCAL calendar date implied by `start`/`end`, same D323 boundary regression as `get_by_period` (U0.1) |
 | `test_list_paginates_the_filtered_set_not_the_unfiltered_one` | `list(category_id=, limit=, offset=)` pages the filtered set, not the whole account's expenses (U0.1 AC) |
@@ -362,8 +367,9 @@ The service has no notion of permissions/`own_only` — that's enforced by the r
 | `test_list_scopes_by_account` | `list()` excludes another account's expenses |
 | `test_list_defaults_to_limit_50_offset_0` | Omitting `limit`/`offset` still returns every row of a small set (U0.3 AC) |
 | `test_list_passes_limit_and_offset_through_to_repo` | `list(limit=, offset=)` is threaded to the repo call unchanged (U0.3) |
-| `test_list_no_period_params_is_byte_for_byte_unchanged` | `list()` with no `category_id`/`bounds` reaches the repo with `category_id=None`, `start=None`, `end=None` (D402) |
+| `test_list_no_period_params_is_byte_for_byte_unchanged` | `list()` with no `category_id`/`tag_id`/`bounds` reaches the repo with `category_id=None`, `tag_id=None`, `start=None`, `end=None` (D402) |
 | `test_list_passes_category_id_through_to_repo` | `list(category_id=)` narrows to that category |
+| `test_list_passes_tag_id_through_to_repo` | `list(tag_id=)` narrows to expenses carrying that tag and threads `tag_id` to the repo call (U1.1) |
 | `test_list_passes_bounds_through_to_repo` | `list(bounds=(start, end))` narrows to that `spent_at` window and threads `start`/`end` to the repo call |
 | `test_list_uses_family_tz_for_repo_call` | `list()` always passes the service's own `family_tz` to the repo, not a hardcoded `"UTC"` |
 | `test_family_tz_property_exposes_constructor_value` | The `family_tz` property exposes the constructor value — the route (D402/D415) reads it via `service.family_tz`, not a second settings lookup |
@@ -468,8 +474,10 @@ first time — plan Decision log handoff note).
 | `test_list_expenses_pages_without_overlap` | `GET /expenses?limit=&offset=` — two consecutive pages of a 5-row set are disjoint and each has the requested size (U0.3 AC) |
 | `test_list_expenses_default_limit_unchanged_for_existing_callers` | Omitting `limit`/`offset` still returns every row of a small set — default call unchanged (U0.3 AC) |
 | `test_list_expenses_limit_over_200_is_422` | `GET /expenses?limit=201` → 422 (U0.3 AC) |
-| `test_list_expenses_no_new_params_is_byte_for_byte_unchanged` | No `category_id`/`period`/etc. → the repo call carries `category_id=None`, `start=None`, `end=None` — today's shape unchanged (D402) |
+| `test_list_expenses_no_new_params_is_byte_for_byte_unchanged` | No `category_id`/`tag_id`/`period`/etc. → the repo call carries `category_id=None`, `tag_id=None`, `start=None`, `end=None` — today's shape unchanged (D402) |
 | `test_list_expenses_category_id_filters_across_pages` | `GET /expenses?category_id=` with the matching expense past the default `limit=50` page still comes back — the repo filters before it paginates, closing the client-side filter's "only within the first page" bug (D402/U0.3 AC) |
+| `test_list_expenses_tag_id_filters_across_pages` | `GET /expenses?tag_id=` with the matching expense past the default `limit=50` page still comes back, same server-side-filter guarantee as `category_id` (U1.1 AC) |
+| `test_list_expenses_category_id_and_tag_id_and_combined` | `GET /expenses?category_id=&tag_id=` AND-combines both filters — only the expense matching both is returned, and both are threaded to the repo call (U1.1, D803) |
 | `test_list_expenses_period_day_offset_minus_one_returns_yesterday` | `period=day&period_offset=-1` returns exactly yesterday's expenses |
 | `test_list_expenses_period_month_offset_zero_matches_this_month` | `period=month&period_offset=0` returns exactly this month's expenses |
 | `test_list_expenses_period_custom_with_both_dates_works` | `period=custom` with `start_date`/`end_date` returns exactly the expenses inside that window |

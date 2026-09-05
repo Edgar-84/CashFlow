@@ -251,6 +251,7 @@ async def test_list_expenses_no_new_params_is_byte_for_byte_unchanged(
     assert response.status_code == 200
     assert {e["id"] for e in response.json()} == {str(e.id) for e in expenses}
     assert repo.list_calls[-1]["category_id"] is None
+    assert repo.list_calls[-1]["tag_id"] is None
     assert repo.list_calls[-1]["start"] is None
     assert repo.list_calls[-1]["end"] is None
 
@@ -280,6 +281,61 @@ async def test_list_expenses_category_id_filters_across_pages(
 
     assert response.status_code == 200
     assert [e["id"] for e in response.json()] == [str(target_expense.id)]
+
+
+async def test_list_expenses_tag_id_filters_across_pages(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    # Same bug class as category_id (U0.3 AC), now for the U1.1 tag filter:
+    # a tagged expense past the default page must still surface.
+    target_tag = uuid4()
+    other_expenses = [make_expense(account_id=account_id, user_id=member.id) for _ in range(50)]
+    target_expense = make_expense(account_id=account_id, user_id=member.id, tag_ids=[target_tag])
+    override_repos([*other_expenses, target_expense])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"tag_id": str(target_tag)},
+    )
+
+    assert response.status_code == 200
+    assert [e["id"] for e in response.json()] == [str(target_expense.id)]
+
+
+async def test_list_expenses_category_id_and_tag_id_and_combined(
+    client: AsyncClient,
+    override_repos: OverrideRepos,
+    member: UserResponse,
+    account_id: UUID,
+) -> None:
+    # D803: category_id and tag_id are AND-combined, both may be sent.
+    target_category = uuid4()
+    target_tag = uuid4()
+    matching = make_expense(
+        account_id=account_id, user_id=member.id, category_id=target_category, tag_ids=[target_tag]
+    )
+    # Right category, wrong tag.
+    right_category_only = make_expense(
+        account_id=account_id, user_id=member.id, category_id=target_category
+    )
+    # Right tag, wrong category.
+    right_tag_only = make_expense(account_id=account_id, user_id=member.id, tag_ids=[target_tag])
+    repo = override_repos([matching, right_category_only, right_tag_only])
+
+    response = await client.get(
+        "/expenses",
+        headers=auth_headers(member.tg_id),
+        params={"category_id": str(target_category), "tag_id": str(target_tag)},
+    )
+
+    assert response.status_code == 200
+    assert [e["id"] for e in response.json()] == [str(matching.id)]
+    assert repo.list_calls[-1]["category_id"] == target_category
+    assert repo.list_calls[-1]["tag_id"] == target_tag
 
 
 async def test_list_expenses_period_day_offset_minus_one_returns_yesterday(

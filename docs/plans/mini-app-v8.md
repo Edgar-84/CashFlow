@@ -371,7 +371,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       variant's only consumer, the same way it names its two existing ones.
 
 ### M1 — Tag drill-down (item 1)
-- [ ] **U1.1** Backend: `GET /expenses?tag_id=`. `expense_repo.list` gains the
+- [x] **U1.1** Backend: `GET /expenses?tag_id=`. `expense_repo.list` gains the
       `EXISTS` clause, `ExpenseRepositoryProtocol` and `ExpenseService.list`
       gain the keyword, the route gains the query param. Tests: the filter
       returns only tagged expenses, combines with `category_id` and with the
@@ -748,9 +748,34 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   (809 backend + 960 webapp tests, unchanged throughout).
 - **M0 complete.** U0.1, U0.2, U0.3 and U0.4 are all ticked — every spec line
   M1–M3 will implement against now exists and matches the target behaviour.
-- **Next:** `/clear`, then `/unit U1.1 docs/plans/mini-app-v8.md` — the first
-  M1 (code) unit, `GET /expenses?tag_id=`. See Contracts' "Backend — expense
-  tag filter (U1.1)" section for the exact signatures.
+- **Done (U1.1, 2026-09-05):** `GET /expenses?tag_id=` implemented exactly per
+  Contracts. `repositories/expense_repo.py`'s `list` gained `tag_id: UUID |
+  None = None` and an `EXISTS (SELECT 1 FROM expense_tags …)` clause slotted
+  into the existing `conditions`/`params` builder (no change to
+  `_SELECT_WITH_AUTHOR`); `services/expense_service.py`'s
+  `ExpenseRepositoryProtocol.list` and `ExpenseService.list` both gained the
+  same keyword and thread it straight through; `api/expenses.py`'s
+  `list_expenses` gained the `tag_id` query param. `category_id` and `tag_id`
+  are AND-combined per D803 — no guard against sending both. Tests added at
+  all three layers: `tests/test_expense_repo.py` (5 new integration tests —
+  tag-only filter, tag+category AND-combine, tag+period combine, pagination
+  survival mirroring `category_id`'s U0.3 precedent, unknown `tag_id` → `[]`),
+  `tests/test_expense_service.py` (`FakeExpenseRepo.list` gained `tag_id`
+  filtering and its call-log dict gained the key; the byte-for-byte
+  no-params test asserts `tag_id=None` too; new
+  `test_list_passes_tag_id_through_to_repo`), `tests/test_expenses_api.py`
+  (new `test_list_expenses_tag_id_filters_across_pages` and
+  `test_list_expenses_category_id_and_tag_id_and_combined`, and the
+  byte-for-byte no-params test asserts `tag_id=None`). `tests/README.md`
+  updated with all new test entries in the same commit (tests/CLAUDE.md
+  rule). No new decisions — this unit applies D801–D803 as already recorded.
+  `scripts/verify.sh` green (812 unit + 960 webapp tests); the 5 new
+  integration tests additionally verified green via
+  `bash scripts/integration_docker.sh -k test_expense_repo` (36 passed).
+  **Reviewer round 1:** pending.
+- **Next:** `/clear`, then `/unit U1.2 docs/plans/mini-app-v8.md` — the
+  Expenses screen's tag filter (frontend). See Contracts' "Frontend —
+  expenses filter (U1.2)" section for the exact signatures.
 - **Gotchas:**
   - A stale, already-merged branch literally named `U0.2` was left over from
     the V7 plan (local + `origin`) when this unit started; it was not reused

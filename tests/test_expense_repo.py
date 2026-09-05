@@ -746,6 +746,155 @@ async def test_list_combines_category_and_period_filters(db_conn: asyncpg.Connec
 
 @pytest.mark.integration
 @pytest.mark.asyncio(loop_scope="session")
+async def test_list_filters_by_tag_id(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    tag_id = await make_tag(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    tagged = await repo.create(
+        {
+            "amount": 500,
+            "category_id": category_id,
+            "user_id": user.id,
+            "account_id": account_id,
+            "tag_ids": [tag_id],
+        }
+    )
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=category_id)
+
+    results = await repo.list(account_id=account_id, tag_id=tag_id)
+
+    assert [e.id for e in results] == [tagged.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_combines_tag_id_and_category_id(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    transport = await make_category(db_conn, account_id=account_id, name="Transport")
+    food = await make_category(db_conn, account_id=account_id, name="Food")
+    user = await make_user(db_conn, account_id=account_id)
+    tag_id = await make_tag(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    matching = await repo.create(
+        {
+            "amount": 500,
+            "category_id": transport,
+            "user_id": user.id,
+            "account_id": account_id,
+            "tag_ids": [tag_id],
+        }
+    )
+    # Right tag, wrong category.
+    await repo.create(
+        {
+            "amount": 500,
+            "category_id": food,
+            "user_id": user.id,
+            "account_id": account_id,
+            "tag_ids": [tag_id],
+        }
+    )
+    # Right category, no tag.
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=transport)
+
+    results = await repo.list(account_id=account_id, category_id=transport, tag_id=tag_id)
+
+    assert [e.id for e in results] == [matching.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_combines_tag_id_and_period_filters(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    tag_id = await make_tag(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    july_start = datetime(2026, 7, 1, tzinfo=UTC)
+    august_start = datetime(2026, 8, 1, tzinfo=UTC)
+    matching = await repo.create(
+        {
+            "amount": 500,
+            "category_id": category_id,
+            "user_id": user.id,
+            "account_id": account_id,
+            "tag_ids": [tag_id],
+            "spent_at": date(2026, 7, 15),
+        }
+    )
+    # Right tag, wrong period.
+    await repo.create(
+        {
+            "amount": 500,
+            "category_id": category_id,
+            "user_id": user.id,
+            "account_id": account_id,
+            "tag_ids": [tag_id],
+            "spent_at": date(2026, 8, 16),
+        }
+    )
+
+    results = await repo.list(
+        account_id=account_id, tag_id=tag_id, start=july_start, end=august_start
+    )
+
+    assert [e.id for e in results] == [matching.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_filters_by_tag_id_survives_pagination(db_conn: asyncpg.Connection) -> None:
+    # The same bug class category_id's filter already guards against
+    # (test_list_expenses_category_id_filters_across_pages, U0.3 AC): a
+    # tagged expense sitting past the default page must still surface when
+    # filtering by tag_id, because the tag filter runs in the DB before
+    # limit/offset, not after (D802).
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    tag_id = await make_tag(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    for day in range(1, 6):
+        await make_expense(
+            db_conn,
+            account_id=account_id,
+            user_id=user.id,
+            category_id=category_id,
+            created_at=datetime(2026, 7, day, tzinfo=UTC),
+        )
+    tagged = await repo.create(
+        {
+            "amount": 500,
+            "category_id": category_id,
+            "user_id": user.id,
+            "account_id": account_id,
+            "tag_ids": [tag_id],
+        }
+    )
+
+    page1 = await repo.list(account_id=account_id, tag_id=tag_id, limit=1, offset=0)
+
+    assert [e.id for e in page1] == [tagged.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
+async def test_list_unknown_tag_id_returns_empty_list(db_conn: asyncpg.Connection) -> None:
+    account_id = await make_account(db_conn)
+    category_id = await make_category(db_conn, account_id=account_id)
+    user = await make_user(db_conn, account_id=account_id)
+    repo = ExpenseRepository(db_conn)
+    await make_expense(db_conn, account_id=account_id, user_id=user.id, category_id=category_id)
+
+    results = await repo.list(account_id=account_id, tag_id=uuid4())
+
+    assert results == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio(loop_scope="session")
 async def test_list_filters_by_spent_at_not_created_at(db_conn: asyncpg.Connection) -> None:
     """D314: an expense with spent_at 3 August and created_at 7 August is
     inside a 3 August window and outside a 7 August one."""

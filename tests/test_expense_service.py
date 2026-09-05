@@ -32,6 +32,7 @@ class FakeExpenseRepo:
         offset: int = 0,
         account_id: UUID,
         category_id: UUID | None = None,
+        tag_id: UUID | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
         tz: str = "UTC",
@@ -42,6 +43,7 @@ class FakeExpenseRepo:
                 "offset": offset,
                 "account_id": account_id,
                 "category_id": category_id,
+                "tag_id": tag_id,
                 "start": start,
                 "end": end,
                 "tz": tz,
@@ -50,6 +52,8 @@ class FakeExpenseRepo:
         matches = [e for e in self._expenses.values() if e.account_id == account_id]
         if category_id is not None:
             matches = [e for e in matches if e.category_id == category_id]
+        if tag_id is not None:
+            matches = [e for e in matches if any(t.id == tag_id for t in e.tags)]
         if start is not None and end is not None:
             # Mirrors the real repo's half-open `spent_at` window at the date
             # granularity — the tz-aware `AT TIME ZONE` conversion itself is
@@ -243,6 +247,7 @@ def make_expense(
     amount: int = 1000,
     comment: str | None = None,
     spent_at: date | None = None,
+    tag_ids: list[UUID] | None = None,
 ) -> ExpenseResponse:
     return ExpenseResponse(
         id=uuid4(),
@@ -254,6 +259,7 @@ def make_expense(
         account_id=account_id,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
+        tags=[_fake_tag(tag_id, account_id) for tag_id in (tag_ids or [])],
     )
 
 
@@ -317,6 +323,7 @@ async def test_list_no_period_params_is_byte_for_byte_unchanged() -> None:
         "offset": 1,
         "account_id": account_id,
         "category_id": None,
+        "tag_id": None,
         "start": None,
         "end": None,
         "tz": "UTC",
@@ -334,6 +341,20 @@ async def test_list_passes_category_id_through_to_repo() -> None:
     result = await service.list(account_id, category_id=category_id)
 
     assert [e.id for e in result] == [mine.id]
+
+
+async def test_list_passes_tag_id_through_to_repo() -> None:
+    account_id = uuid4()
+    tag_id = uuid4()
+    tagged = make_expense(account_id=account_id, tag_ids=[tag_id])
+    untagged = make_expense(account_id=account_id)
+    repo = FakeExpenseRepo([tagged, untagged])
+    service = make_service(repo)
+
+    result = await service.list(account_id, tag_id=tag_id)
+
+    assert [e.id for e in result] == [tagged.id]
+    assert repo.list_calls[-1]["tag_id"] == tag_id
 
 
 async def test_list_passes_bounds_through_to_repo() -> None:
