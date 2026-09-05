@@ -421,7 +421,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       `10-admin.md`, Create mode's one step back is List mode, not Home, so
       `exitToHome` becomes mode-dependent here too, the same shape as every
       other `showX` in this unit.
-- [ ] **U2.3** Retire the second mechanism. `showExpenseDetail`'s `onBack`
+- [x] **U2.3** Retire the second mechanism. `showExpenseDetail`'s `onBack`
       parameter, `categoriesReturnTo`, `tagsReturnTo`, `showBudgetForm`'s
       return-to-Budgets closures and `showLanguage`'s `onBack: showSettings`
       all become stack pops; the module-level `let` closures are deleted. The
@@ -965,13 +965,87 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   reworded to state plainly that `depth()` isn't currently consumed by
   `main.ts` and why. `scripts/verify.sh` re-run and green, unchanged (812
   backend + 985 webapp tests).
-- **Next:** `/clear`, then `/unit U2.3 docs/plans/mini-app-v8.md` — retire the
-  second mechanism (`showExpenseDetail`'s `onBack` param, `categoriesReturnTo`,
-  `tagsReturnTo`, `showBudgetForm`'s return-to-Budgets closures,
-  `showLanguage`'s `onBack: showSettings`), converting them all to stack
-  pops and deleting the module-level `let` closures. This is the second of
-  the two riskiest units in the plan (see Risks); a reviewer subagent pass is
-  required before commit.
+- **Done (U2.3, 2026-09-05):** `webapp/src/main.ts`'s second back-navigation
+  mechanism retired, all five named pieces converted to stack pops:
+  `showExpenseDetail`'s `onBack` parameter dropped (it now pushes its own
+  `"expense-detail"` entry and uses `goBack`); `showEditExpense`'s `onBack`
+  parameter dropped the same way (pushes `"add-expense"`, `onClose`/
+  `onSuccess` now `goBack`); `categoriesReturnTo`/`tagsReturnTo` module-level
+  `let`s deleted — `showCategories`/`showTags` now push their own entry and
+  `onBack` is bare `goBack`; `showBudgetForm` now pushes `"budget-form"` and
+  `onSaved`/`onCancelled`/`onDeleted` are `goBack` (previously all three
+  called `showBudgets()` directly — behaviourally identical today since
+  Budgets is always what's underneath, but now uniform with every other
+  sub-screen instead of an ad-hoc special case); `showLanguage` now pushes
+  `"language"` and `onBack`/`onSaved` are `goBack` instead of a hardcoded
+  `showSettings()` call. The Add-Expense-mid-draft return (D805) that used to
+  read a `*ReturnTo` closure now works by **replacing** Add Expense's own
+  stack entry with a fresh `restore` closing over the *live* draft
+  (`navigate("add-expense", ...)`, same screen name ⇒ `replace` per
+  `navStackAction`) immediately before pushing Categories/Tags — Categories'/
+  Tags' `goBack` then pops back to that updated entry, not the stale one
+  `showAddExpense`/`showEditExpense` started with. `withCreatedTagPreselected`
+  and `lastCreatedTagId` are unchanged (not `*ReturnTo` mechanisms, not named
+  by this unit). No new decisions — this unit applies D804/D805 as already
+  recorded, it doesn't choose among alternatives.
+  One AC-wording note, not a behaviour change: the unit's own AC bullet says
+  a category created from Add Expense's "More" cell returns "with the draft
+  intact and the new category selected", but the shipped (pre-V8) behaviour
+  deliberately **clears** `categoryId` on that return — the "More" handler's
+  own comment states why ("the whole point of returning is to pick one, not
+  to silently keep whatever was selected before"). Changing that would be new,
+  unrequested scope (root CLAUDE.md), so this unit preserves it byte-for-byte
+  and the new test below asserts the clear, not a select; read "selected" as
+  "selectable" (the category is now in the list to pick). Tags' analogous
+  return *does* auto-preselect (pre-existing, `lastCreatedTagId`), which the
+  AC's wording likely conflated the two flows into.
+  Tests added: `webapp/tests/main.nav.test.ts` gained four real-DOM
+  integration tests (its established U2.2 pattern — `boot()`, real `mount`s,
+  a fake Telegram `WebApp`, only each screen's data loader mocked): Add
+  Expense -> More -> create a category -> Back -> Add Expense (draft intact,
+  `categoryId` cleared); Add Expense -> "+ Add tag" -> create a tag -> Back
+  -> Add Expense (draft intact, new tag pre-selected); Expenses -> row tap ->
+  Detail -> Edit -> Back -> Detail, not Home (the retired `showExpenseDetail`/
+  `showEditExpense` `onBack` parameter); Settings -> Language -> Back ->
+  Settings, re-fetched (the retired `showLanguage` `onBack: showSettings`).
+  The first two additionally exercise `ApiClient.prototype.createCategory`/
+  `createTag` via `vi.spyOn` (the real `ApiClient` class, not a module mock)
+  so the create-form's actual save path runs end to end; `afterEach` switched
+  from `vi.clearAllMocks()` to `vi.restoreAllMocks()` so those two spies don't
+  leak a resolved value into later tests (every test already re-sets whatever
+  loader mock it needs before use, so this is a safe swap). `scripts/verify.sh`
+  green (812 backend + 989 webapp tests, up from 985 by these 4).
+  **Reviewer round 1** (APPROVE, two WARNs, both fixed before commit): (1)
+  `navStackAction`'s own doc comment still named "Budget form, Expense
+  detail" as examples of a "child screen not yet wired into the stack" —
+  stale, since this unit is exactly what wired both of them; reworded to name
+  Category form/Tag form (the two that are still genuinely unwired) instead.
+  (2) Two of the newly-stack-wired paths had no DOM-level test: `showBudgetForm`'s
+  `onCancelled`/`onSaved`/`onDeleted` → `goBack` → Budgets (previously an
+  unconditional `showBudgets()` call, now depends on `goBack` popping exactly
+  one level and finding Budgets beneath it), and `showExpenseDetail` dropping
+  its `onBack` parameter → Expenses with its filter preserved (the two
+  existing tests only ever popped one level, Edit→Detail or a tag-bar's
+  Expenses→Statistics, never Detail's own filtered-Expenses parent). Both
+  added: "Budgets -> a budgeted row -> Budget form -> Cancel -> Budgets"
+  (untouched draft ⇒ not dirty ⇒ `onCancelled` fires with no discard-confirm
+  popup in the way) and a three-deep "Statistics -> category bar -> Expenses
+  -> row tap -> Detail -> Back -> Expenses -> Back -> Statistics" test
+  asserting the category filter banner survives Detail's own Back before
+  Statistics is reached. `scripts/verify.sh` re-run and green (812 backend +
+  991 webapp tests, up from 989 by these 2).
+  **Reviewer round 2** (APPROVE, no BLOCKER/WARN): independently re-verified
+  both round-1 fixes are accurate (grepped that Category form/Tag form really
+  are the only two screens left unwired onto `navStack`; traced both new
+  tests' fixtures and assertions line-by-line against the real screen
+  modules and confirmed they'd actually fail if the underlying `goBack`/
+  stack-entry wiring broke, not just checking DOM presence) and did a fresh
+  pass over the rest of the diff, finding nothing further. One NIT, left
+  as-is by choice: the unit's own AC bullet still literally says "the new
+  category selected," which the STATE note above already discloses as
+  describing the shipped, unchanged, deliberate-clearing behavior rather
+  than an auto-select — optional wording polish, not a regression.
+  `scripts/verify.sh` unchanged and green.
 - **Gotchas:**
   - A stale, already-merged branch literally named `U0.2` was left over from
     the V7 plan (local + `origin`) when this unit started; it was not reused
