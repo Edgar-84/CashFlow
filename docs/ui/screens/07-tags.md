@@ -88,8 +88,12 @@ grid has.
 - **MainButton:** **hidden.** The "Add tag" affordance lives in the list itself
   (region 3), same reasoning as 06a — a MainButton would be a second, redundant
   entry point to a not-yet-built action.
-- **BackButton:** shown; always navigates to Home. This is what finally makes
-  the Home "Tags" tile do something — `main.ts`'s `onTileTap` currently no-ops
+- **BackButton:** shown; returns one step, to whichever screen opened this
+  one — Home's side menu, or the expense composer (Add expense / Edit
+  expense) when reached via its "+ Add tag" cell, which the return restores
+  with the in-progress draft intact and the new tag pre-selected
+  (`../navigation.md`, D805). The Home-opened path is what finally makes the
+  Home "Tags" tile do something — `main.ts`'s `onTileTap` currently no-ops
   for `tags` (`"Tags lands in a later unit (U2.4)"`); this unit removes that
   no-op.
 - **Haptics:** `selection` on the Home "Tags" tile tap (matches every other
@@ -114,7 +118,7 @@ grid has.
 | Element | Action | Result |
 |---|---|---|
 | Home "Tags" tile | tap | selection haptic; navigates here |
-| BackButton | tap | navigates to Home |
+| BackButton | tap | one step back — Home, or the expense composer with its draft intact, whichever opened this screen (`../navigation.md`) |
 | Active tag row | tap | **Stub in this unit**: `// TODO` no-op, same convention as 06a's active-cell stub. U2.5 wires this to open the rename/delete-or-hide surface ("07b"). |
 | Archived tag row | tap | same stub as above |
 | "Add tag" row | tap | **Stub in this unit**: `// TODO` no-op. U2.5 wires this to open the create form. |
@@ -177,7 +181,9 @@ grid has.
 
 ## Acceptance criteria
 - [ ] The Home "Tags" tile navigates to this screen; BackButton returns to
-      Home (the previously dead tile, closed).
+      Home when opened from that tile (the previously dead tile, closed), or
+      to the expense composer with its draft intact when opened from its
+      "+ Add tag" cell (`../navigation.md`).
 - [ ] Active tags render as a list of rows, each showing its name only. No
       count or amount is shown anywhere on this screen (D703).
 - [ ] `GET /tags` still sends `include_usage=true` even though `expense_count`

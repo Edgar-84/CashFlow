@@ -55,8 +55,9 @@ None. Local markup, as the shipped screen has it.
 - **MainButton:** **not used.** The two actions are in-screen because there are
   two of them and one is destructive — MainButton can only be one action, and it
   must never be the destructive one. Screen 02b, one hop away, does use it.
-- **BackButton:** shown; returns to `03-expenses.md` **with the filter it was
-  opened from intact** `[repo]`.
+- **BackButton:** shown; returns one step, to `03-expenses.md` **with the
+  filter it was opened from intact** `[repo]` — the general rule
+  (`../navigation.md`), and this screen's only opener.
 - **Haptics:** `selection` on Edit; `notificationOccurred('success')` after a
   delete resolves, `('error')` on failure. No haptic on opening the confirm
   popup — Telegram's own popup is the feedback.

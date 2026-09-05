@@ -83,8 +83,10 @@ None. Every element is local to this screen — the dot, day card and rows are
   to read and tap into. Nothing occupies the bottom of the screen; the page's
   96px reserve stays empty so MainButton is not competed with on the screen the
   user lands on after tapping into it (02b uses it).
-- **BackButton:** shown; returns to **screen 01**, whatever filter is in force.
-  A filtered list is one hop from Home, not a stack.
+- **BackButton:** shown; returns one step, to whichever screen opened this
+  one — **screen 01** for a Home-initiated filter, or **screen 05** for a
+  category- or tag-bar tap from Statistics — with that screen's own state
+  (period, grouping) intact (`../navigation.md`).
 - **Haptics:** `selection` on a row tap. None on "Load more" — it is a
   continuation, not a choice.
 - **Viewport:** no keyboard on this screen. Long lists scroll normally.
@@ -108,7 +110,7 @@ None. Every element is local to this screen — the dot, day card and rows are
 |---|---|---|
 | Expense row | tap | selection haptic; navigates to `03b-expense-detail.md` for that expense |
 | "Load more" | tap | fetches the next page **with the same filter**, appends, keeps scroll position |
-| BackButton | tap | screen 01 |
+| BackButton | tap | one step back — screen 01 or screen 05, whichever opened this list (`../navigation.md`) |
 
 There is no swipe gesture on this screen, and no long-press.
 
@@ -224,7 +226,9 @@ never name the same period two different ways.
 - [ ] "Load more" fetches the next page with the same category and period, and
       never returns rows outside the filter.
 - [ ] Tapping a row opens screen 03b for that expense.
-- [ ] BackButton returns to Home with Home's period unchanged.
+- [ ] BackButton returns one step, to whichever screen opened this list —
+      when that is Home's own bar tap, BackButton returns to Home with
+      Home's period unchanged (`../navigation.md`).
 - [ ] Renders correctly in light and dark from `tokens.css` only.
 - [ ] Arriving filtered to a tag with a period also in force shows the banner
       "{tag} · {period}" (`filter.tagAndPeriod`), and at zero rows the empty

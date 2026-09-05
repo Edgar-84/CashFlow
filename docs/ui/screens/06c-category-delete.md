@@ -93,10 +93,11 @@ last-remaining-category check — no new data fetch.
   governed only by the name/colour draft. This action does not use
   MainButton; it is a plain in-page tap, deliberately not competing with Save
   for the one primary-action slot.
-- **BackButton:** unchanged from `06b-category-form.md`. Tapping "Delete
-  category" and then cancelling the popup does not itself count as making the
-  draft dirty (it touches neither `name` nor `colorSlot`) — `BackButton`'s
-  dirty-check is unaffected by this action either way.
+- **BackButton:** unchanged from `06b-category-form.md` — returns one step,
+  to `06-categories.md` (`../navigation.md`). Tapping "Delete category" and
+  then cancelling the popup does not itself count as making the draft dirty
+  (it touches neither `name` nor `colorSlot`) — `BackButton`'s dirty-check is
+  unaffected by this action either way.
 - **Haptics:** `medium` impact the instant the popup is **confirmed** (not on
   the tap that opens the popup, and not again on the network response — the
   visible change already happened by the time any response arrives, since
