@@ -1349,6 +1349,16 @@ body {
   color: var(--ink);
 }
 
+/* Restricted variant (V8, docs/ui/components/period-selector.md): per-tab,
+   not the whole-component .period-selector.disabled above — reuses the same
+   50% opacity rather than inventing one. Keyed off aria-disabled (only ever
+   set on a restricted tab, never on the whole-disabled offline state) so it
+   never compounds with the container's own 0.5 opacity. */
+.period-tab[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .period-tab-text {
   padding-bottom: 2px;
   border-bottom: 2px solid transparent;

@@ -144,6 +144,51 @@ describe("renderPeriodSelector — disabled (offline)", () => {
   });
 });
 
+describe("renderPeriodSelector — restricted units (V8, U3.2)", () => {
+  it("with allowedUnits: ['month'] the four other tabs render disabled, aria-disabled and dimmed; Month is unaffected", () => {
+    const html = renderPeriodSelector(props({ unit: "month", offset: 0 }, { allowedUnits: ["month"] }));
+    for (const unit of ["day", "week", "year", "custom"]) {
+      const tab = new RegExp(`data-unit="${unit}"[^>]*data-testid="period-tab-${unit}"`);
+      expect(html).toMatch(tab);
+      expect(html).toMatch(new RegExp(`data-testid="period-tab-${unit}"[^>]*aria-disabled="true"`));
+      expect(html).toMatch(new RegExp(`data-testid="period-tab-${unit}"[^>]*disabled>`));
+    }
+    expect(html).not.toMatch(/data-testid="period-tab-month"[^>]*disabled>/);
+    expect(html).not.toContain('data-testid="period-tab-month" aria-disabled');
+  });
+
+  it("a restricted tab's accessible name reads aria.unitUnavailable, not the bare label", () => {
+    const html = renderPeriodSelector(props({ unit: "month", offset: 0 }, { allowedUnits: ["month"] }));
+    expect(html).toContain(`aria-label="${t("periodSelector.tab.year")} — not available for budgets"`);
+  });
+
+  it("with allowedUnits absent, all five tabs render exactly as the Full variant", () => {
+    const html = renderPeriodSelector(props({ unit: "month", offset: 0 }));
+    const tabsHtml = html.slice(html.indexOf('class="period-tabs"'), html.indexOf('class="period-nav"'));
+    expect(tabsHtml).not.toContain("aria-disabled");
+    expect(tabsHtml).not.toContain("disabled");
+  });
+
+  it("allowedUnits changes only the tab row: the nav row is unaffected at offset -1", () => {
+    const withRestriction = renderPeriodSelector(props({ unit: "month", offset: -1 }, { allowedUnits: ["month"] }));
+    const withoutRestriction = renderPeriodSelector(props({ unit: "month", offset: -1 }));
+    const navOnly = (html: string): string => html.slice(html.indexOf('<div class="period-nav">'));
+    expect(navOnly(withRestriction)).toBe(navOnly(withoutRestriction));
+  });
+
+  it("offline (disabled) wins over a restriction: no aria-disabled, no unitUnavailable label, no compounded opacity", () => {
+    const html = renderPeriodSelector(
+      props({ unit: "month", offset: 0 }, { disabled: true, allowedUnits: ["month"] }),
+    );
+    const tabsHtml = html.slice(html.indexOf('class="period-tabs"'), html.indexOf('class="period-nav"'));
+    expect(tabsHtml).not.toContain("aria-disabled");
+    expect(tabsHtml).not.toContain("not available for budgets");
+    // Every tab is still plainly disabled (the offline state), just not
+    // double-marked as restricted on top of it.
+    expect((tabsHtml.match(/ disabled>/g) ?? []).length).toBe(5);
+  });
+});
+
 // -- i18n (U3.10) --------------------------------------------------------
 
 describe("renders in Russian", () => {
