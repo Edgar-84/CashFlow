@@ -398,7 +398,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       it had before this unit.
 
 ### M2 — One-step Back (item 2)
-- [ ] **U2.1** `webapp/src/lib/nav-stack.ts` + `webapp/tests/nav-stack.test.ts`
+- [x] **U2.1** `webapp/src/lib/nav-stack.ts` + `webapp/tests/nav-stack.test.ts`
       — the pure module from Contracts, **not wired to anything**. Push/replace/
       pop/reset/depth/peek, `pop` at the floor returning `null`, `replace` on an
       empty stack behaving as `push`.
@@ -837,9 +837,25 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   (the tested, pure layer) are untouched. `scripts/verify.sh` green (812
   backend + 972 webapp tests, both counts unchanged from U1.2).
   **Reviewer round 1:** pending.
-- **Next:** `/clear`, then `/unit U2.1 docs/plans/mini-app-v8.md` — M1 (tag
-  drill-down) is complete; M2 (one-step Back) starts with the pure
-  `nav-stack.ts` module from Contracts, not wired to anything yet.
+- **Done (U2.1, 2026-09-05):** `webapp/src/lib/nav-stack.ts` created exactly
+  per Contracts — `NavEntry`/`NavStack`/`createNavStack`, pure (no DOM, no
+  Telegram, no fetching), not imported by `main.ts` or anything else yet.
+  `push` grows the stack; `replace` swaps the top entry, or behaves as `push`
+  on an empty stack (per the unit's own AC); `pop` drops the top entry and
+  returns the one beneath it, or `null` at the floor, and never calls
+  `restore`; `reset` empties the stack; `depth`/`peek` are read-only. Tests
+  added: `webapp/tests/nav-stack.test.ts` (8 tests) covering every method,
+  the floor-`pop`-returns-null case (including a second `pop` after already
+  at the floor), `replace` on empty behaving as `push`, and that `pop` never
+  invokes the popped entry's `restore`. No new decisions — this unit builds
+  the Contracts module as specified, it doesn't make any. No `main.ts`
+  changes (that's U2.2). `scripts/verify.sh` green (812 backend + 980 webapp
+  tests, up from 972 by the 8 new tests).
+  **Reviewer round 1:** pending.
+- **Next:** `/clear`, then `/unit U2.2 docs/plans/mini-app-v8.md` — wire the
+  stack into `main.ts` for the menu-reachable screens. This is one of the two
+  riskiest units in the plan (see Risks); a reviewer subagent pass is
+  required before commit.
 - **Gotchas:**
   - A stale, already-merged branch literally named `U0.2` was left over from
     the V7 plan (local + `origin`) when this unit started; it was not reused
