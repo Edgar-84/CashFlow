@@ -154,12 +154,15 @@ const HOME_READY = {
   accountName: "Test Family",
 };
 
-function statisticsReady(grouping: "category" | "tag") {
+function statisticsReady(
+  grouping: "category" | "tag" | "budget",
+  period: { unit: "day" | "week" | "month" | "year" | "custom"; offset: number } = { unit: "month", offset: 0 },
+) {
   return {
     status: "ready" as const,
     totalMinor: 5000,
     currency: "EUR" as const,
-    period: { unit: "month" as const, offset: 0 },
+    period,
     grouping,
     segments: [],
     categoryBars: [
@@ -170,6 +173,7 @@ function statisticsReady(grouping: "category" | "tag") {
       { id: "tag-1", label: "Coffee", colorVar: null, minor: 3000, widthPct: 100 },
       { id: "tag-2", label: "Vacation", colorVar: null, minor: 2000, widthPct: 67 },
     ],
+    budgetRows: [],
   };
 }
 
@@ -632,5 +636,66 @@ describe("back stack (U2.3): Statistics -> category bar -> Expenses -> row tap -
     await flush();
     expect(document.querySelector('[data-testid="grouping-toggle"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="filter-banner"]')).toBeNull();
+  });
+});
+
+describe("Statistics (U3.4): picking Budgets under Year coerces to Month and dims the other tabs", () => {
+  it("re-renders on the current month with the four other tabs dimmed, then re-enables all five on switching back to category", async () => {
+    const webApp = fakeWebApp();
+    await openHome(webApp);
+
+    // Resolves per the actual period/grouping showStatistics passes through,
+    // same reasoning as the tag-grouping test above — a fixed
+    // mockResolvedValue would mask whether the D809 coercion actually reached
+    // loadStatistics.
+    loadStatisticsMock.mockImplementation(
+      (
+        _client: unknown,
+        _cache: unknown,
+        period: { unit: "day" | "week" | "month" | "year" | "custom"; offset: number },
+        grouping: "category" | "tag" | "budget",
+      ) => Promise.resolve(statisticsReady(grouping, period)),
+    );
+    tapMenuItem("statistics");
+    await flush();
+
+    document.querySelector<HTMLElement>('[data-testid="period-tab-year"]')?.click();
+    await flush();
+    expect(loadStatisticsMock).toHaveBeenCalledTimes(2);
+
+    // Picking Budgets while Year is active must coerce the period to the
+    // current month and refetch — the one case where this toggle loads
+    // (D809) rather than re-rendering locally.
+    document.querySelector<HTMLElement>('[data-testid="grouping-budget"]')?.click();
+    // Synchronous assertion, before flush(): `showStatistics` mounts its own
+    // "loading" state ahead of its first `await`, and statistics.ts's own
+    // click handler must not clobber that back with a stale local re-render
+    // (the still-Year `current.period`, budgetRows still `[]`) — the exact
+    // self-contradictory "active AND disabled" Year tab a WARN in this
+    // unit's review caught. Asserting here, not just after flush(), is what
+    // would catch a regression of that fix.
+    expect(loadStatisticsMock).toHaveBeenCalledTimes(3);
+    expect(document.querySelector('[data-testid="loading"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="grouping-toggle"]')).toBeNull();
+    await flush();
+    expect(loadStatisticsMock).toHaveBeenCalledTimes(3);
+    const [, , coercedPeriod, coercedGrouping] = loadStatisticsMock.mock.calls[2];
+    expect(coercedPeriod).toEqual({ unit: "month", offset: 0 });
+    expect(coercedGrouping).toBe("budget");
+
+    expect(document.querySelector('[data-testid="period-tab-month"]')?.getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelector('[data-testid="period-tab-year"]')?.hasAttribute("disabled")).toBe(true);
+    expect(document.querySelector('[data-testid="period-tab-year"]')?.getAttribute("aria-disabled")).toBe("true");
+    expect(document.querySelector('[data-testid="period-tab-day"]')?.hasAttribute("disabled")).toBe(true);
+    expect(document.querySelector('[data-testid="period-tab-week"]')?.hasAttribute("disabled")).toBe(true);
+    expect(document.querySelector('[data-testid="period-tab-custom"]')?.hasAttribute("disabled")).toBe(true);
+
+    // Switching back to "By category" re-enables every tab, triggers no
+    // refetch (the grouping toggle's own no-refetch invariant), and keeps
+    // the month the Budgets coercion landed on.
+    document.querySelector<HTMLElement>('[data-testid="grouping-category"]')?.click();
+    expect(loadStatisticsMock).toHaveBeenCalledTimes(3);
+    expect(document.querySelector('[data-testid="period-tab-year"]')?.hasAttribute("disabled")).toBe(false);
+    expect(document.querySelector('[data-testid="period-tab-month"]')?.getAttribute("aria-selected")).toBe("true");
   });
 });

@@ -1091,6 +1091,19 @@ async function showStatistics(
     },
     onGroupingChange: (next) => {
       activeGrouping = next;
+      // D809: Budgets only ever reads against a single month, so picking it
+      // while any other unit is active coerces the period instead of leaving
+      // an unreachable grouping behind a disabled tab row — the one case
+      // where this toggle triggers a refetch (statistics.ts's own header
+      // comment). This fires *before* screens/statistics.ts's own local
+      // re-render (still queued in the same click handler); `showStatistics`
+      // mounts its "loading" state synchronously ahead of its first `await`,
+      // so that local re-render — skipped by statistics.ts's own click
+      // handler for exactly this branch — would otherwise clobber it right
+      // back with the stale, pre-coercion period.
+      if (next === "budget" && period.unit !== "month") {
+        void showStatistics({ unit: "month", offset: 0 }, next);
+      }
     },
     onUnitChange: (unit) => {
       void showStatistics({ unit, offset: 0 }, activeGrouping);

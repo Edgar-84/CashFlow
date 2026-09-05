@@ -461,7 +461,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       rows reading "spent of limit" with the over-budget one marked; with no
       plans it shows "No budgets set."; the category and tag groupings still
       swap with no network call.
-- [ ] **U3.4** `main.ts` wires the restriction. `showStatistics` passes
+- [x] **U3.4** `main.ts` wires the restriction. `showStatistics` passes
       `allowedUnits: ["month"]` down when the grouping is `budget`, and
       coerces the period to `{ unit: "month", offset: 0 }` when the user picks
       the Budgets chip under any other unit (D809). Docs: `webapp/CLAUDE.md`
@@ -1262,3 +1262,84 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   `webapp/CLAUDE.md`) needed no update. `scripts/verify.sh` green (821 backend
   + 1005 webapp tests, up from 821/998 by these 7).
   **Reviewer round 1:** pending.
+- **Done (U3.4, 2026-09-05):** `main.ts` wires the Budgets restriction —
+  the last unit in this plan, M3 and V8 both complete. Two call sites, exactly
+  the two named by this unit's own bullet:
+  `webapp/src/screens/statistics.ts`'s `mount()` — the only call site of
+  `mountPeriodSelector` for this screen — now passes
+  `allowedUnits: current.grouping === "budget" ? BUDGET_ALLOWED_UNITS : undefined`
+  (`BUDGET_ALLOWED_UNITS = ["month"]`, a new module constant), which is what
+  actually reaches the period-selector's Restricted variant (U3.2) built but
+  never wired until now; `webapp/src/main.ts`'s `showStatistics`'s
+  `onGroupingChange` handler gained the D809 coercion — `next === "budget" &&
+  period.unit !== "month"` now calls `void showStatistics({ unit: "month",
+  offset: 0 }, next)`, a full refetch (the one case this toggle ever
+  triggers one, per `statistics.ts`'s own header comment). No signature or
+  Contracts change: `PeriodSelectorProps.allowedUnits` (U3.2) and
+  `StatisticsHandlers.onGroupingChange` (U2.2) already existed with exactly
+  the shape this unit needed; this unit is pure wiring between two already-
+  frozen surfaces, not a new one. No new decisions — this unit applies D809
+  as already recorded, it doesn't choose among alternatives.
+  One doc note: the unit's own bullet also lists `webapp/CLAUDE.md` under
+  "Docs" alongside this plan's STATE. Read against the actual file, nothing
+  in it names version-specific behaviour to reconcile (it never mentions V7/
+  V8, `period-selector`, `Grouping` or `Budgets` at all — M2's router rewrite
+  and M3's own U3.1–U3.3 didn't touch it either), so no edit was made there;
+  recorded here rather than forced, same shape as the "five keys"/"six
+  catalogue keys" off-by-ones already flagged for U0.3/U1.2/U1.3's own plan
+  bullets.
+  Tests added: `webapp/tests/main.nav.test.ts` — `statisticsReady`'s
+  `grouping` parameter widened to accept `"budget"` and gained an optional
+  `period` parameter (default month/offset 0, backward-compatible with every
+  existing call site) plus a `budgetRows: []` field so a `"budget"`-grouped
+  fixture doesn't crash `renderReady`'s budget-rows branch. One new
+  integration test, matching this unit's own AC verbatim: Statistics -> Year
+  tab -> Budgets chip -> asserts the third `loadStatistics` call received
+  `{ unit: "month", offset: 0 }` and `grouping: "budget"`, the Month tab reads
+  `aria-selected="true"`, and Day/Week/Year/Period all render `disabled` +
+  `aria-disabled="true"`; then -> "By category" chip -> asserts no fourth
+  `loadStatistics` call (the toggle's own no-refetch invariant, unaffected by
+  D809 outside the Budgets arm) and every tab re-enabled with Month still in
+  force. `scripts/verify.sh` green (821 backend + 1006 webapp tests, up from
+  821/1005 by this one test).
+  **Reviewer round 1** (REQUEST_CHANGES, both WARNs fixed before commit): the
+  first cut's `onGroupingChange` (main.ts) fired the D809 refetch *before*
+  `statistics.ts`'s own click handler ran its local, refetch-free re-render
+  (`render({ ...current, grouping: next })`) — and since `showStatistics`
+  mounts its "loading" state synchronously ahead of its first `await`, that
+  local re-render then ran anyway and clobbered the loading DOM right back
+  with the stale, pre-coercion period (e.g. Year) and an empty `budgetRows`
+  (D810 never fetches it for a non-month unit) — a real, always-reproducible
+  self-contradictory tab (`active` **and** `disabled`/`aria-disabled` at
+  once) and a false "No budgets set." flash for the duration of the refetch.
+  Fixed by skipping that local re-render in exactly this one branch
+  (`next === "budget" && current.period.unit !== "month"`) in
+  `statistics.ts`'s click handler, letting the coerced fetch's own loading
+  state own the DOM until it resolves. Second WARN, a stale comment: the
+  original `onGroupingChange` comment said the local re-render "already
+  happened by the time this fires" — backwards, since this handler fires
+  first in the same click handler; reworded on both sides (`main.ts` and
+  `statistics.ts`) to state the true ordering. Verified the fix is real, not
+  incidental, by reverting only the new `if` guard and re-running
+  `main.nav.test.ts`: the test's two synchronous assertions (added for
+  exactly this) failed — `loadStatisticsMock` call count and DOM check
+  both caught it before the pre-existing end-state assertions would have
+  masked it behind `flush()`. `scripts/verify.sh` re-run and green, unchanged
+  (821 backend + 1006 webapp tests — the fix and its comment are not new
+  tests, the existing new test now also covers the intermediate frame).
+  **Reviewer round 2** (APPROVE, no BLOCKER/WARN): independently re-verified
+  the round-1 fix by re-tracing the click-handler ordering and by its own
+  revert-the-guard experiment (confirmed the new synchronous assertions fail
+  without it, restored the guard afterward, tree left clean); confirmed the
+  guard is scoped to exactly the Budgets-under-non-month arm with no
+  regression to the no-refetch invariant for category↔tag or Budgets-under-
+  month; confirmed both comments now state the true ordering; found no scope
+  creep in the diff. One NIT, left as-is by choice: this STATE entry reads as
+  dense/long — consistent with this plan's existing STATE-entry style
+  throughout, not a real issue. `scripts/verify.sh` unchanged and green (821
+  backend + 1006 webapp tests).
+- **V8 complete.** All three brief items (tag drill-down, one-step Back,
+  Budgets in Statistics) are implemented; every M0–M3 unit is ticked.
+  U1.1/U1.3/U2.1's own "Reviewer round 1: pending" notes above predate this
+  session and are historical gaps in those units' own STATE bookkeeping, not
+  reopened by this unit.
