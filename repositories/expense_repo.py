@@ -154,6 +154,7 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         offset: int = 0,
         account_id: UUID,
         category_id: UUID | None = None,
+        tag_id: UUID | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
         tz: str = "UTC",
@@ -166,6 +167,12 @@ class ExpenseRepository(BaseRepository[ExpenseResponse]):
         if category_id is not None:
             params.append(category_id)
             conditions.append(f"expenses.category_id = ${len(params)}")
+        if tag_id is not None:
+            params.append(tag_id)
+            conditions.append(
+                "EXISTS (SELECT 1 FROM expense_tags WHERE expense_tags.expense_id = "
+                f"expenses.id AND expense_tags.tag_id = ${len(params)})"
+            )
         if start is not None and end is not None:
             # Same (start AT TIME ZONE tz)::date window as get_by_period —
             # spent_at is a bare DATE, so the UTC instants must be localized

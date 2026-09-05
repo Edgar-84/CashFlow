@@ -22,6 +22,7 @@ async def list_expenses(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     category_id: UUID | None = None,
+    tag_id: UUID | None = None,
     period: PeriodUnit | None = None,
     period_offset: Annotated[int, Query(le=0)] = 0,
     start_date: date | None = None,
@@ -43,7 +44,12 @@ async def list_expenses(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
     expenses = await service.list(
-        user.account_id, limit=limit, offset=offset, category_id=category_id, bounds=bounds
+        user.account_id,
+        limit=limit,
+        offset=offset,
+        category_id=category_id,
+        tag_id=tag_id,
+        bounds=bounds,
     )
     # Default matrix leaves expense read unqualified (D26), but an override
     # permission row can still set own_only=True for read — step 6 has no
