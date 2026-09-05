@@ -388,7 +388,7 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
       **AC:** with `{ tagId }` in force the banner reads the tag name, the
       empty state names the tag ("Nothing tagged Coffee."), and a tag deleted
       between the tap and the load renders "Unknown tag" rather than throwing.
-- [ ] **U1.3** Statistics' tag bar becomes tappable for real. `mount`'s bar
+- [x] **U1.3** Statistics' tag bar becomes tappable for real. `mount`'s bar
       handler stops branching on `grouping === "category"`, fires the
       `selection` haptic for both, and reports the tag id; `main.ts`'s
       `onBarTap` widens to `(id, grouping)` and routes to
@@ -815,12 +815,31 @@ New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
   state both read "Transport" (the category) and never mention "Coffee"
   (the tag). `scripts/verify.sh` re-run and green (812 backend + 972 webapp
   tests).
-- **Next:** `/clear`, then `/unit U1.3 docs/plans/mini-app-v8.md` — the
-  Statistics tag bar becomes a real drill-down into Expenses. See
-  Contracts' "Frontend — expenses filter (U1.2)" section (already built)
-  and the M1 unit list's U1.3 bullet for the exact wiring
-  (`mount`'s bar handler stops branching on `grouping === "category"`,
-  `main.ts`'s `onBarTap` widens to `(id, grouping)`).
+- **Done (U1.3, 2026-09-05):** Statistics' tag bar is now a real drill-down,
+  exactly per the M1 unit bullet. `webapp/src/screens/statistics.ts`:
+  `StatisticsHandlers.onBarTap` widened to `(id: Uuid, grouping: Grouping) =>
+  void`; `mount`'s bar-click wiring no longer branches on
+  `current.grouping === "category"` — it attaches to every `[data-id]` bar row
+  regardless of grouping, fires the same `selection` haptic for both, and
+  passes `current.grouping` through to the handler. The stale header comment
+  documenting the tag bar as "tappable-but-no-op" was corrected to describe
+  the new dual-grouping drill-down. `webapp/src/main.ts`: `showStatistics`'s
+  `onBarTap` handler widened to accept `(id, tapGrouping)` and routes to
+  `showExpenses({ tagId: id })` when `tapGrouping === "tag"`, else
+  `showExpenses({ categoryId: id })` — byte-for-byte the same category path as
+  before. One stale doc comment above `showStatistics` corrected to mention
+  both bar types. No new decisions — this unit applies D801 (no period
+  carried) as already recorded, it doesn't make new ones. No test changes:
+  `mount` for this screen has been an accepted "not meaningfully unit-testable
+  under Node" gap since its original U2.5 implementation (no test ever covered
+  `onBarTap` wiring, category or tag), and this unit's change is pure wiring
+  inside that same untested function — `buildStatisticsData`/`renderStatistics`
+  (the tested, pure layer) are untouched. `scripts/verify.sh` green (812
+  backend + 972 webapp tests, both counts unchanged from U1.2).
+  **Reviewer round 1:** pending.
+- **Next:** `/clear`, then `/unit U2.1 docs/plans/mini-app-v8.md` — M1 (tag
+  drill-down) is complete; M2 (one-step Back) starts with the pure
+  `nav-stack.ts` module from Contracts, not wired to anything yet.
 - **Gotchas:**
   - A stale, already-merged branch literally named `U0.2` was left over from
     the V7 plan (local + `origin`) when this unit started; it was not reused
