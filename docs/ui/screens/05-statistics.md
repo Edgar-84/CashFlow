@@ -22,8 +22,7 @@ reference. Written from the live implementation, then the V7 delta applied:
   colour column to draw a donut from), the ranked-bar list below it as this
   screen's legend, the "By category"/"By tag" grouping toggle that re-renders
   without a second fetch, the offline/error/403/empty states, the bar tap
-  drilling into Expenses filtered by category (tag bars have no drill-down
-  target yet — `GET /expenses` has no tag filter).
+  drilling into Expenses filtered by category.
 - **Changing (V7, D704):** the three `months_back` preset chips ("This
   month" / "Last month" / "Last 3 months") are replaced by
   `../components/period-selector.md` — the same five-tab, offset-arrow,
@@ -48,6 +47,13 @@ reference. Written from the live implementation, then the V7 delta applied:
   category-only filtering (Home's V4 ranked-row tap also carries the period;
   this screen's bar tap does not — a pre-existing divergence, not touched by
   this delta, see Interactions and Open questions).
+- **Changing (V8):** the tag bar becomes tappable for real. `GET /expenses`
+  gains a `tag_id` filter (D802 — server-side, not a client-side filter of one
+  fetched page), so tapping a tag bar drills into Expenses filtered by that
+  tag, firing the same `selection` haptic the category tap already fires. The
+  tag tap carries **only the tag, not the period** (D801), exactly mirroring
+  the category tap's existing period-dropping behaviour above — see
+  Interactions.
 
 ## Layout
 Top to bottom, one scroll container, `12px` gap between every top-level region
@@ -95,8 +101,8 @@ below.
 - **Haptics:** `selection` on a period unit tab, an offset arrow, the
   jump-to-present control (all three per
   `../components/period-selector.md`'s own contract), the grouping toggle, and
-  a category-bar tap. No haptic on a tag-bar tap (it does nothing) or on the
-  disabled `›` at offset 0.
+  a bar tap in **either** grouping (V8 — the tag tap now fires it too, same
+  as the category tap). No haptic on the disabled `›` at offset 0.
 - **Viewport:** no keyboard reachable from this screen; nothing else to note.
 
 ## States
@@ -128,7 +134,7 @@ Five mandatory states plus this screen's own:
 | Grouping toggle | tap | selection haptic; swaps `state.grouping` and re-renders **locally, with no refetch** — both groupings' totals are already in memory from the one load (unchanged by this delta) |
 | Donut | tap | nothing — display-only, matching Home's V4 rule |
 | Ranked bar, category grouping | tap | selection haptic; navigates to Expenses filtered to **that category only**. **Unlike Home's V4 ranked-row tap, the period is not carried** — a pre-existing divergence this delta does not touch (see Open questions) |
-| Ranked bar, tag grouping | tap | nothing — tappable but no-op; `GET /expenses` has no tag filter yet |
+| Ranked bar, tag grouping | tap | selection haptic; navigates to Expenses filtered to **that tag only**. Mirrors the category tap: the period is not carried (D801) |
 | Retry button (error state) | tap | re-runs the load at the current unit/offset (or custom range) |
 | BackButton | — | returns to Home; closes the date-range picker instead, if it is open |
 
@@ -207,10 +213,10 @@ screen simply stops being one of its callers.
 - **Backward navigation is unbounded**, same as the period selector's own
   contract — arrowing into a period before the account existed is a
   legitimately empty state, not an error.
-- **A category-bar tap on a period whose expenses aren't on `GET /expenses`'s
-  newest page** — a real gap (the call carries no period filter here), the
-  same limitation Home had before its own V4 fix. Out of scope for this unit;
-  see Interactions and Open questions.
+- **A category- or tag-bar tap (V8 for tag) on a period whose expenses aren't
+  on `GET /expenses`'s newest page** — a real gap (the call carries no period
+  filter from either bar type), the same limitation Home had before its own
+  V4 fix. Out of scope for this unit; see Interactions and Open questions.
 - **Cross-year custom range** — the date-range picker's own summary/label
   formatting handles this; nothing here recomputes it.
 
@@ -228,6 +234,11 @@ screen simply stops being one of its callers.
       explicitly as a divergence from Home's V4 rule.
 - [ ] The single-bar suppression rule (region 5 renders nothing at exactly
       one bar) is stated as this screen's own rule, distinct from Home's.
+- [ ] Neither this file nor `03-expenses.md` contains a sentence claiming a
+      tag-bar tap does nothing.
+- [ ] Tapping a tag bar fires the `selection` haptic and navigates to Expenses
+      filtered to that tag, carrying no period — the same period-dropping
+      rule the category tap already has (D801).
 
 ## Open questions
 - [?] **Bare layout vs. a `.chart-card` wrapper for region 2+3**, matching

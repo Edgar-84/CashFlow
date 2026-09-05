@@ -1,0 +1,621 @@
+# Plan: V8 — tag drill-down, one-step Back, and a Budgets view in Statistics
+
+Ninth plan file, after `docs/plans/expense-tracker-mvp.md` (V1 MVP, D1–D45),
+`docs/plans/family-features-v1_1.md` (D100–D124),
+`docs/plans/bot-allowlist-db.md` (D300s), `docs/plans/mini-app-v2.md`
+(D200–D211), `docs/plans/mini-app-v3.md` (D300–D3xx),
+`docs/plans/mini-app-v4.md` (D400–D420), `docs/plans/mini-app-v5.md`
+(D500–D512), `docs/plans/mini-app-v6.md` (D600–D609) and
+`docs/plans/mini-app-v7.md` (language, admin panel, D700–D7xx) — all done.
+Decision ids here start at **D800**.
+
+**Scope is Mini App + backend.** Item 1 needs a new `GET /expenses` filter and
+item 3 needs a new statistics endpoint, so `repositories/`, `services/` and
+`api/` are all in play. Nothing here touches `bot/`, `models/` beyond two
+additive aggregate schemas, or `migrations/` — **no migration is needed in
+V8** (see D807: no budget-limit history table).
+
+Workflow per unit: `/clear` → `/unit <id> docs/plans/mini-app-v8.md` →
+Stop-gate (`bash scripts/verify.sh`) → [reviewer subagent for M2 units] →
+human commits.
+
+## Goal
+Three items from the user's V8 brief (2026-09-04):
+
+1. **A tag bar in Statistics drills into its expenses**, exactly the way a
+   category bar already does. Today the tag bar is tappable and does nothing
+   because `GET /expenses` has no tag filter (D801, D802).
+2. **BackButton goes back one step, not to Home.** Sub-screens reached from a
+   menu destination (Settings → Language is right today; Statistics →
+   Expenses → Detail, Budgets → Budget form, Categories → Category form are
+   inconsistent) must return to the screen that opened them (D804, D805).
+3. **Statistics gets a third grouping, "Budgets"**, beside "By category" and
+   "By tag", showing how each budget was filled in the chosen month and
+   whether it was exceeded. Under that grouping only the **Month** period tab
+   is enabled; Day/Week/Year/Period are disabled and dimmed (D807–D811).
+
+## Review of the brief — what changed after reading the code
+Written during planning so no unit re-derives it.
+
+- **Item 1's backend half is small but real.** `GET /statistics/by-period`
+  *already* accepts `tag_id` (`api/statistics.py`), but `GET /expenses`
+  accepts only `category_id` (`api/expenses.py:24`,
+  `services/expense_service.py:295`, `repositories/expense_repo.py:150`'s
+  `list`). The tag filter must be **server-side**, not a client-side filter
+  of one fetched page — the exact reasoning `docs/ui/screens/03-expenses.md`'s
+  Data note §1 already gives for `category_id` ("server-side filtering is what
+  makes pagination and the filter agree"). A `WHERE EXISTS (SELECT 1 FROM
+  expense_tags …)` clause slots into the existing `conditions`/`params`
+  builder in `expense_repo.list` without touching its `_SELECT_WITH_AUTHOR`.
+- **Item 1's frontend half needs tag names on the Expenses screen.**
+  `buildExpensesData` labels the filter banner from `categories`
+  (`expenses.ts:154`); a tag-filtered list needs `GET /tags` too, plus
+  `filter.tagOnly` / a tag arm of `filter.both`, plus `empty.*` copy — in all
+  three catalogues (`webapp/src/lib/i18n.ts`, EN/RU/UK, `i18n.test.ts`
+  enforces key parity).
+- **`05-statistics.md` already documents the gap** it is about to close:
+  "tag bars have no drill-down target yet — `GET /expenses` has no tag
+  filter", "Ranked bar, tag grouping | tap | nothing", and "No haptic on a
+  tag-bar tap (it does nothing)". Three spec lines invert in U0.1.
+- **Item 2 is a router change, not a screen change.** `main.ts:168` says it
+  outright: "Not a generic router; there is no navigation history here, only
+  'what's on screen right now'." Every `showX` hard-codes
+  `onBack: () => void showHome()` (`showExpenses`:548, `showBudgets`:624,
+  `showStatistics`:1023, `showSettings`:1065, `showAdmin`:1137), while three
+  places already hand-roll the correct behaviour with closures —
+  `showExpenseDetail(id, onBack)`, `categoriesReturnTo`, `tagsReturnTo`, and
+  `showLanguage`'s `onBack: () => void showSettings()`. So the codebase
+  already has two mechanisms; V8 makes it one (D804).
+- **`docs/ui/` has no navigation file at all** — only `design-system.md`,
+  `screens/` and `components/`. Back behaviour is currently specified one row
+  at a time ("**BackButton:** shown; returns to Home") in ten screen docs.
+  Item 2 changes that behaviour, so per the root CLAUDE.md rule it needs a
+  spec in the same change: a new `docs/ui/navigation.md` plus a correction to
+  each screen doc's BackButton row (D806).
+- **Item 3 has no historical budget data to read.** `budget_plans` holds one
+  current row per (account, category) with no period column beyond
+  `period = "monthly"` and no history; `BudgetService.get_progress` hardcodes
+  `month_bounds(now)` (`services/budget_service.py:143`). "How budgets were
+  filled in the past" can therefore only mean *this month's limit applied to
+  that month's spend* (D807) — a real limitation that must be stated in the
+  spec, not silently shipped.
+- **The arithmetic already exists and is generic.** `calculate_progress` is a
+  pure function taking `spent`/`limit`, and `expense_repo.sum_by_category_month`
+  takes explicit `start`/`end`/`tz` despite its name — so a "by budget" reader
+  for an arbitrary month needs one repo `list` call, one existing sum call and
+  the existing pure calc. No new SQL beyond what `sum_by_category_month`
+  already does.
+- **The grouping toggle's "never refetches" invariant is load-bearing.**
+  `05-statistics.md`: "swaps `state.grouping` and re-renders **locally, with
+  no refetch** — both groupings' totals are already in memory from the one
+  load". D810 keeps it true by fetching `by-budget` in the same parallel load
+  whenever the active unit is `month`.
+- **`period-selector.ts` has one all-or-nothing `disabled` prop** (offline).
+  Item 3 needs per-tab disabling, which is a new component variant and
+  therefore a `components/period-selector.md` change (U0.4), not an ad-hoc
+  attribute set from the screen.
+
+## Non-goals
+- **No budget-limit history table.** A budget's limit is not snapshotted per
+  month in V8; see D807 and the Risks section.
+- **No drill-down from a budget bar** into that category's expenses (D812).
+  The brief asks for the Budgets view, not a fourth navigation edge.
+- **No period carried by a bar tap.** The category bar's long-standing
+  "filters by category only, drops the period" behaviour
+  (`05-statistics.md`, Interactions) is **not** fixed here; the new tag tap
+  mirrors it exactly (D801). Changing both is its own unit in a later plan.
+- **No bot changes.** `bot/keyboards.py` keeps `months_back` (D708) and gains
+  no tag filter and no budgets view.
+- **No browser-side history integration** (`history.pushState`, the hardware
+  back button on Android). The stack is Telegram's `BackButton` only (D805).
+- **No swipe-back gesture.**
+- **No change to `GET /statistics/by-category` / `by-tag`.**
+
+## Constraints
+- Money stays `int` minor units end to end, including every intermediate in
+  the budget-fill calc (root CLAUDE.md). `fill_pct` is the one float, and it
+  is derived last, exactly as `calculate_progress` already does it.
+- Every new visible string lands in **all three catalogues** (EN/RU/UK) in the
+  same unit that introduces it — `webapp/tests/i18n.test.ts` fails on a key
+  present in one catalogue and missing from another.
+- Every new colour/size/spacing value comes from `docs/ui/design-system.md` or
+  extends it first (root CLAUDE.md). The dimmed-tab treatment reuses the
+  existing disabled-row rule (50% opacity) rather than inventing an opacity.
+- Layering holds: route → service → repository. The new `EXISTS` clause lives
+  in `expense_repo`, the new fill assembly in `statistics_service`.
+- `scripts/verify.sh` green after every unit; the webapp suite (960 tests at
+  the end of V7) never goes red between units.
+- Specs before code: **M0 lands before M1–M3** (see Ordering).
+
+## Ordering (a hard constraint, not a preference)
+```
+M0 (specs)  →  M1 (tag drill-down)  →  M2 (back stack)  →  M3 (budgets view)
+                     │                                          │
+                     └── U0.1 ──┐                    U0.3, U0.4 ─┘
+                     U0.2 ──────┴── M2
+```
+- **M0 first, always.** Three of the three items change documented interaction
+  behaviour, and two of them ("tap does nothing", "returns to Home") are
+  written down as deliberate current behaviour. Code must not contradict a
+  spec that still says the opposite.
+- **U0.1 before U0.3** — both edit `docs/ui/screens/05-statistics.md`, in
+  different sections. Doing them in this order keeps each unit's revert clean.
+- **M1 before M2.** M1 adds one more `showExpenses` call site; doing it after
+  the stack refactor would mean writing that call site twice.
+- **M2 before M3.** M3 adds a third grouping and a period coercion to
+  `showStatistics`; the stack refactor rewrites that same function's handler
+  block. Merging in the other order is a guaranteed conflict.
+
+## Contracts (U0 / U1.1 / U3.1)
+Immutable for the units that consume them. A limitation found mid-unit →
+stop, record it in the Decision log, then continue.
+
+### Backend — expense tag filter (U1.1)
+```python
+# repositories/expense_repo.py
+async def list(  # type: ignore[override]
+    self,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    account_id: UUID,
+    category_id: UUID | None = None,
+    tag_id: UUID | None = None,          # NEW
+    start: datetime | None = None,
+    end: datetime | None = None,
+    tz: str = "UTC",
+) -> list[ExpenseResponse]: ...
+
+# services/expense_service.py — ExpenseRepositoryProtocol.list gains the same
+# keyword, and:
+async def list(
+    self,
+    account_id: UUID,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    category_id: UUID | None = None,
+    tag_id: UUID | None = None,          # NEW
+    bounds: tuple[datetime, datetime] | None = None,
+) -> list[ExpenseResponse]: ...
+```
+SQL shape (slots into the existing `conditions`/`params` builder, no change to
+`_SELECT_WITH_AUTHOR`):
+```sql
+AND EXISTS (SELECT 1 FROM expense_tags
+             WHERE expense_tags.expense_id = expenses.id
+               AND expense_tags.tag_id = $n)
+```
+`GET /expenses` gains `tag_id: UUID | None = None`. `category_id` and `tag_id`
+are **AND-combined and both permitted together** (D803). The `own_only`
+post-filter in the route is unchanged and still runs after the DB page.
+
+### Frontend — expenses filter (U1.2)
+```ts
+// webapp/src/screens/expenses.ts
+export interface ExpensesFilter {
+  categoryId?: Uuid;
+  tagId?: Uuid;                 // NEW
+  period?: PeriodValue;
+}
+// buildExpensesData input gains `tags: TagResponse[]` and `tagId?: Uuid`,
+// and its output gains `tagLabel: string | null` beside `categoryLabel`.
+
+// webapp/src/api/client.ts
+listExpenses(opts: {
+  limit?: number; offset?: number;
+  categoryId?: Uuid; tagId?: Uuid;      // NEW
+  period?: PeriodQuery;
+} = {}): Promise<ExpenseResponse[]>
+```
+New catalogue keys (EN shown; RU + UK in the same unit):
+`expenses.filter.tagOnly` = `"{tag}"`,
+`expenses.filter.categoryAndPeriod` (existing `filter.both`, unchanged),
+`expenses.filter.tagAndPeriod` = `"{tag} · {period}"`,
+`expenses.empty.tag` = `"Nothing tagged {tag}."`,
+`expenses.empty.tagPeriod` = `"Nothing in {period} tagged {tag}."`,
+`expenses.unknownTag` = `"Unknown tag"`.
+
+### Frontend — navigation stack (U2.1)
+```ts
+// webapp/src/lib/nav-stack.ts — pure, no DOM, no Telegram, no fetching.
+export interface NavEntry {
+  /** Which screen this entry re-mounts. Debug/testing identity only —
+   *  never compared for equality by the stack itself. */
+  screen: string;
+  /** Re-mounts that screen exactly as it was entered. Called by `pop`'s
+   *  caller, never by the stack. */
+  restore: () => void;
+}
+
+export interface NavStack {
+  /** Push a new entry on top. */
+  push(entry: NavEntry): void;
+  /** Replace the top entry (a same-screen re-render: a retry, a period
+   *  change, a grouping toggle) — never grows the stack. */
+  replace(entry: NavEntry): void;
+  /** Drop the top entry and return the one beneath it, or `null` at the
+   *  floor (Home). Does NOT call `restore`. */
+  pop(): NavEntry | null;
+  /** Empty the stack — Home is the floor and holds no entry. */
+  reset(): void;
+  /** For tests and for `main.ts`'s re-entrancy guard. */
+  depth(): number;
+  peek(): NavEntry | null;
+}
+
+export function createNavStack(): NavStack;
+```
+`main.ts` owns the single instance and one `goBack()` that pops and calls the
+revealed entry's `restore`, or `showHome()` at depth 0.
+
+### Backend — budget fill (U3.1)
+```python
+# models/statistics.py — additive aggregate, same precedent as CategoryTotal
+class BudgetFill(BaseModel):
+    budget_plan_id: UUID
+    category_id: UUID
+    amount: int          # the plan's CURRENT limit, minor units (D807)
+    spent: int           # minor units, that month
+    remaining: int       # amount - spent; negative once exceeded
+    fill_pct: float | None
+    notify_threshold: int
+    is_over_threshold: bool
+    is_exceeded: bool
+
+# services/statistics_service.py
+async def by_budget(
+    self,
+    account_id: UUID,
+    *,
+    period: PeriodUnit | None = None,
+    offset: int = 0,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> list[BudgetFill]: ...
+```
+Route: `GET /statistics/by-budget`, same
+`PermissionChecker(Resource.EXPENSES, Action.READ)` gate and the same
+`validate_period_params` call as its three siblings. **It rejects any unit
+other than `month`** with 422 (`period` absent → the current month, matching
+the siblings' default). No `months_back` arm — that legacy parameter is not
+extended to a new endpoint (D704's direction of travel).
+
+`own_only` is **not** applied here (D813): a budget is an account-level limit,
+not a per-user one, and a per-user slice of the spend against a whole-account
+limit is a number that means nothing. The endpoint returns the account's
+figures to any caller allowed to read expenses at all.
+
+### Frontend — budgets grouping (U3.2 / U3.3)
+```ts
+// webapp/src/components/period-selector.ts
+export interface PeriodSelectorProps {
+  value: PeriodValue;
+  now: Date;
+  disabled?: boolean;                 // offline — unchanged, all tabs
+  allowedUnits?: readonly PeriodUnit[];  // NEW; absent ⇒ all five
+  onUnitChange(unit: PeriodUnit): void;
+  onOffsetChange(offset: number): void;
+  onOpenPicker(): void;
+}
+
+// webapp/src/screens/statistics.ts
+export type Grouping = "category" | "tag" | "budget";   // widened
+export interface StatisticsBudgetRow {
+  planId: Uuid; categoryId: Uuid; label: string; colorVar: string;
+  amountMinor: number; spentMinor: number; fillPct: number | null;
+  isOverThreshold: boolean; isExceeded: boolean;
+}
+// StatisticsData gains `budgetRows: StatisticsBudgetRow[]`.
+```
+New catalogue keys (EN; RU + UK same unit): `statistics.byBudget` = "Budgets",
+`statistics.bars.emptyBudget` = "No budgets set.",
+`statistics.budget.of` = "{spent} of {limit}",
+`statistics.budget.exceeded` = "Over by {amount}",
+`periodSelector.aria.unitUnavailable` = "{unit} — not available for budgets".
+
+## Units
+
+### M0 — Specs (`ui-spec` skill; nothing here writes code)
+- [x] **U0.1** `docs/ui/screens/03-expenses.md` + `05-statistics.md` — the tag
+      filter and the tag drill-down. In `03-expenses.md`: the filter banner and
+      the empty state gain a tag half (three combinations become six), the Data
+      section states `GET /expenses` now takes `tag_id` server-side for the same
+      reason it takes `category_id`, and the screen's fetch list gains
+      `GET /tags`. In `05-statistics.md`: the three lines that document the gap
+      invert — Delta ("tag bars have no drill-down target yet"), Interactions
+      ("Ranked bar, tag grouping | tap | nothing") and Telegram ("No haptic on a
+      tag-bar tap"). State explicitly that the tag tap carries the tag only, not
+      the period, mirroring the category tap (D801).
+      **AC:** neither file contains a sentence claiming a tag bar tap does
+      nothing; `03-expenses.md`'s Copy table lists every tag-filtered string
+      the contract above names.
+- [ ] **U0.2** `docs/ui/navigation.md` — **new** — plus the BackButton row in
+      every screen doc it contradicts. The new file owns: the stack model
+      (Home is the floor, a menu row is a push onto Home, a sub-screen is a
+      push onto its opener), what `replace` means (a retry/period/grouping
+      re-render is not a new step), what happens at the floor (BackButton
+      returns to Home, then Telegram's own close), and the one screen that
+      already behaves this way (Language → Settings) named as the model.
+      Then correct the "returns to Home" row in `03-expenses.md`,
+      `03b-expense-detail.md`, `04-budgets.md`, `04b-budget-form.md`,
+      `05-statistics.md`, `06-categories.md`, `06b-category-form.md`,
+      `06c-category-delete.md`, `07-tags.md`, `07b-tag-form.md`,
+      `08-settings.md`, `10-admin.md` — each to "returns one step, to the
+      screen that opened it (`../navigation.md`)".
+      **AC:** `grep -rl "returns to Home" docs/ui/screens/` returns nothing
+      that is not explicitly justified as a floor case in the same line.
+- [ ] **U0.3** `docs/ui/screens/05-statistics.md` — the Budgets grouping.
+      A third chip in region 4; a new bar anatomy for region 5 under that
+      grouping (name, `spent of limit`, fill bar, over-budget treatment —
+      reusing `04-budgets.md`'s existing budget-row vocabulary rather than
+      inventing a second one); the Month-only period rule and the dimmed
+      tabs; the coercion when Budgets is chosen under a non-month unit; the
+      new States rows (no budgets set; a budget whose category was archived);
+      the D807 limitation stated in the user's terms ("the limit shown is
+      today's limit"); Data gains `GET /statistics/by-budget`; Copy gains the
+      five keys above. **Depends on U0.1 (same file).**
+      **AC:** the spec states, in the Data section, that `by-budget` is
+      fetched in the same parallel load as the other three whenever the unit
+      is month, so the grouping toggle still never refetches (D810).
+- [ ] **U0.4** `docs/ui/components/period-selector.md` — the restricted-units
+      variant. A new row in Variants ("Restricted"), the `allowedUnits` prop in
+      Inputs, the visual treatment (50% opacity, `disabled`, no haptic, no
+      `onUnitChange`), the accessibility contract (`aria-disabled` and a
+      label saying *why*, not just that), and a note that the offset arrows
+      and the jump control stay live — only the unit tabs are restricted.
+      **AC:** the file names `05-statistics.md`'s Budgets grouping as the
+      variant's only consumer, the same way it names its two existing ones.
+
+### M1 — Tag drill-down (item 1)
+- [ ] **U1.1** Backend: `GET /expenses?tag_id=`. `expense_repo.list` gains the
+      `EXISTS` clause, `ExpenseRepositoryProtocol` and `ExpenseService.list`
+      gain the keyword, the route gains the query param. Tests: the filter
+      returns only tagged expenses, combines with `category_id` and with the
+      period bounds, survives pagination (an expense on page 2 of the
+      unfiltered list is on page 1 of the filtered one), and an unknown/foreign
+      `tag_id` returns `[]` rather than 404.
+      **AC:** `GET /expenses?tag_id=<id>&limit=1` returns the newest expense
+      carrying that tag, and no untagged expense appears in any page of a
+      tag-filtered list.
+- [ ] **U1.2** Expenses screen accepts a tag filter. `ExpensesFilter.tagId`,
+      `ApiClient.listExpenses({ tagId })`, `loadExpenses` also fetching
+      `GET /tags`, `buildExpensesData` labelling the banner and the empty
+      state from it, and the six catalogue keys in EN/RU/UK.
+      **AC:** with `{ tagId }` in force the banner reads the tag name, the
+      empty state names the tag ("Nothing tagged Coffee."), and a tag deleted
+      between the tap and the load renders "Unknown tag" rather than throwing.
+- [ ] **U1.3** Statistics' tag bar becomes tappable for real. `mount`'s bar
+      handler stops branching on `grouping === "category"`, fires the
+      `selection` haptic for both, and reports the tag id; `main.ts`'s
+      `onBarTap` widens to `(id, grouping)` and routes to
+      `showExpenses({ tagId })` for the tag arm.
+      **AC:** tapping a tag bar lands on Expenses filtered to that tag with the
+      banner naming it; tapping a category bar is byte-for-byte the behaviour
+      it had before this unit.
+
+### M2 — One-step Back (item 2)
+- [ ] **U2.1** `webapp/src/lib/nav-stack.ts` + `webapp/tests/nav-stack.test.ts`
+      — the pure module from Contracts, **not wired to anything**. Push/replace/
+      pop/reset/depth/peek, `pop` at the floor returning `null`, `replace` on an
+      empty stack behaving as `push`.
+      **AC:** `verify.sh` green with the module exercised only by its own tests;
+      `main.ts` is untouched by this unit and app behaviour is unchanged.
+- [ ] **U2.2** Wire the stack into `main.ts` for the menu-reachable screens.
+      A module-level `navStack`, a `navigate(screen, restore)` helper called at
+      the top of each `showX`, a `goBack()` that pops and restores, `showHome`
+      calling `reset()`, and every `onBack: () => void showHome()` in
+      `showExpenses`/`showBudgets`/`showStatistics`/`showSettings`/`showAdmin`
+      replaced by `goBack`. Retries and period/grouping re-renders use
+      `replace`, not `push` (else "back" walks through every period the user
+      tried). **Reviewer subagent before commit.**
+      **AC:** Home → menu → Statistics → back lands on Home (unchanged), and
+      Statistics → tag bar → Expenses → back lands on **Statistics with its
+      period and grouping intact**, not Home.
+- [ ] **U2.3** Retire the second mechanism. `showExpenseDetail`'s `onBack`
+      parameter, `categoriesReturnTo`, `tagsReturnTo`, `showBudgetForm`'s
+      return-to-Budgets closures and `showLanguage`'s `onBack: showSettings`
+      all become stack pops; the module-level `let` closures are deleted. The
+      Add-Expense-mid-draft returns (a category or tag created from the
+      composer) keep working because a stack entry is a thunk and can carry
+      the draft (D805). **Reviewer subagent before commit.**
+      **AC:** creating a category from inside Add expense still returns to Add
+      expense with the draft intact and the new category selected; no
+      `*ReturnTo` module-level variable remains in `main.ts`.
+
+### M3 — Budgets in Statistics (item 3)
+- [ ] **U3.1** Backend: `models.statistics.BudgetFill`,
+      `StatisticsService.by_budget`, `GET /statistics/by-budget`. Reuses
+      `budget_plan_repo.list`, `expense_repo.sum_by_category_month` (generic
+      bounds despite the name) and `budget_service.calculate_progress` — the
+      pure calc is imported, not re-implemented. Non-month units → 422.
+      **AC:** for an account with two plans, `GET /statistics/by-budget?period=
+      month&offset=-1` returns both plans scored against **last** month's
+      spend and this month's limits; `?period=day` returns 422; an account with
+      no plans returns `[]`, not 404.
+- [ ] **U3.2** `period-selector` gains `allowedUnits`. Disabled tabs render at
+      50% opacity with `disabled` + `aria-disabled`, fire no haptic and call no
+      handler; arrows and the jump control are unaffected. CSS in `app.css`
+      reuses the existing disabled treatment. Tests cover a restricted render,
+      a tap on a restricted tab being a no-op, and the default (prop absent)
+      still enabling all five.
+      **AC:** with `allowedUnits: ["month"]` the four other tabs are visibly
+      dimmed and inert, and the component's existing tests pass untouched.
+- [ ] **U3.3** Statistics renders the Budgets grouping. `Grouping` widens, the
+      third chip appears, `loadStatistics` also calls `by-budget` when the unit
+      is `month` (one `Promise.all`, D810), `buildStatisticsData` maps plans to
+      `StatisticsBudgetRow` (category name + colour from the categories already
+      loaded; an archived or missing category falls back the way
+      `budgets.ts:133` already does), and the bar list renders the budget row
+      shape from U0.3's spec. Five catalogue keys in EN/RU/UK.
+      **AC:** under `{unit:"month"}` with two plans the Budgets chip shows two
+      rows reading "spent of limit" with the over-budget one marked; with no
+      plans it shows "No budgets set."; the category and tag groupings still
+      swap with no network call.
+- [ ] **U3.4** `main.ts` wires the restriction. `showStatistics` passes
+      `allowedUnits: ["month"]` down when the grouping is `budget`, and
+      coerces the period to `{ unit: "month", offset: 0 }` when the user picks
+      the Budgets chip under any other unit (D809). Docs: `webapp/CLAUDE.md`
+      and this plan's STATE.
+      **AC:** picking Budgets while "Year" is active re-renders on the current
+      month with the four other tabs dimmed; picking "By category" again
+      re-enables all five and keeps the month in force.
+
+## Risks
+- **U2.2/U2.3 are the riskiest diffs in this plan.** `main.ts` is 1168 lines,
+  every screen enters through it, and `webapp/tests/main.test.ts` asserts
+  current back behaviour directly. Mitigations: the stack lands as a tested
+  pure module first (U2.1), the wiring is split in two, and both wiring units
+  get a reviewer pass. If U2.2's diff exceeds the 300-line budget, split it by
+  screen rather than widening the unit.
+- **Back-stack growth on retries.** A user retrying a failed load five times
+  must not need five back taps. `replace` (not `push`) on same-screen
+  re-renders is the whole defence — it is the first thing to check if "back
+  feels stuck".
+- **D807's honesty problem.** A user who raises a budget in October and then
+  looks at September sees September scored against the *new* limit. This is
+  the single most likely "that number is wrong" report from V8. It is stated
+  in the spec; if the user rejects it, the fix is a `budget_plan_history`
+  table and its own plan — not a patch inside these units.
+- **A budget whose category was archived** still has a plan row and still
+  accrues no new spend. The Budgets grouping shows it; `budgets.ts` already
+  has the fallback label path to copy.
+- **i18n key parity** breaks the build, not the runtime — but it breaks it in
+  a unit that "only touched the frontend". Add all three languages in the same
+  edit, every time.
+- **`own_only` and the tag filter.** The route's post-fetch `own_only` filter
+  still runs after the DB page, so a restricted caller can still get a short
+  page (the pre-existing "Pagination vs own_only" risk from the MVP plan). The
+  tag filter neither fixes nor worsens it; do not try to fix it here.
+
+## Decision log
+- 2026-09-04: **D800** — the three brief items ship as one plan file,
+  `mini-app-v8.md`, ids from D800. Because they share one screen (Statistics
+  is touched by items 1 and 3) and one router (`main.ts` by all three), so
+  three separate plans would have to cross-reference each other's units to
+  express the ordering constraint. Rejected: a plan per item.
+- 2026-09-04: **D801** — the tag bar tap carries **the tag only, not the
+  period**, exactly mirroring the category bar tap. Because the category tap's
+  period-dropping behaviour is documented, shipped and out of this brief's
+  scope; making the new tap smarter than the old one would create a second
+  divergence to explain instead of removing one. Rejected: carrying the period
+  on the new tap (asymmetric); fixing both taps here (unrequested scope, and
+  it changes a shipped behaviour the user did not complain about).
+- 2026-09-04: **D802** — the tag filter is **server-side** on `GET /expenses`,
+  not a client-side filter of the fetched page. Because
+  `docs/ui/screens/03-expenses.md`'s Data note already settled this argument
+  for `category_id`: a client-side filter makes pagination lie. Rejected:
+  filtering `buildExpensesData`'s input (the same bug the V4 unit removed).
+- 2026-09-04: **D803** — `category_id` and `tag_id` are AND-combined and may
+  both be sent. Because the route is a general list filter and orthogonal
+  parameters are cheaper to keep orthogonal than to guard; no UI sends both
+  today. Rejected: 422 on both-at-once.
+- 2026-09-04: **D804** — back behaviour becomes a **navigation stack owned by
+  `main.ts`**, replacing per-screen hard-coded `showHome()` targets. Because
+  the file already carries two mechanisms (hard-coded Home targets *and*
+  hand-rolled return closures) and the bug the user reported is exactly the
+  seam between them. Rejected: adding an `onBack` argument to every `showX`
+  (that *is* the closure mechanism, and it is what produced the
+  inconsistency); rejected: `history.pushState` (the app runs in a Telegram
+  webview whose own back gesture we do not own — out of scope, see Non-goals).
+- 2026-09-04: **D805** — stack entries are **thunks** (`{screen, restore}`),
+  not serialized state. Because a restore must re-run the screen's own loader
+  to show fresh data, and because a thunk can close over a draft — which is
+  what makes U2.3's deletion of `categoriesReturnTo`/`tagsReturnTo` a
+  simplification rather than a feature loss. Rejected: storing screen args and
+  a dispatch table (a second router to keep in sync).
+- 2026-09-04: **D806** — back behaviour gets its own spec file,
+  `docs/ui/navigation.md`, rather than twelve edited screen rows alone.
+  Because it is one rule that twelve screens obey, and repeating it twelve
+  times is how the current inconsistency became invisible. The screen rows are
+  still corrected, but they point at the one file.
+- 2026-09-04: **D807** — historical budget fill is computed against the plan's
+  **current** limit. Because `budget_plans` stores no per-month limit history
+  and adding one is a migration plus a write path plus a backfill — a feature,
+  not an implementation detail of a Statistics tab. The limitation is stated
+  in `05-statistics.md`. Rejected: a `budget_plan_history` table in V8;
+  rejected: hiding months before the plan's `created_at` (the spend figure is
+  still true and still useful).
+- 2026-09-04: **D808** — a **deleted** budget plan has no history at all; the
+  Budgets grouping lists only plans that exist today. Follows directly from
+  D807 and needs no separate mechanism.
+- 2026-09-04: **D809** — choosing Budgets under a non-month unit **coerces**
+  the period to `{unit: "month", offset: 0}` rather than disabling the chip.
+  Because the brief asks for the other tabs to be dimmed, which presumes the
+  Budgets chip is always reachable; and because a chip that disables itself
+  based on an unrelated control is the harder rule to explain. Rejected:
+  remembering the pre-Budgets unit and restoring it on the way out (state the
+  user cannot see).
+- 2026-09-04: **D810** — `GET /statistics/by-budget` is fetched in the **same
+  parallel load** as the other three whenever the active unit is `month`, so
+  the grouping toggle keeps its no-refetch invariant
+  (`05-statistics.md`). Under a non-month unit it is not fetched at all — the
+  only way to reach the Budgets grouping from there goes through D809's
+  coercion, which is a refetch anyway. Rejected: fetching on the chip tap (a
+  spinner inside a toggle that has never had one).
+- 2026-09-04: **D811** — the **Period (custom range)** tab is disabled under
+  Budgets too. Because a custom range is not a month, and a fill percentage
+  over 17 days against a monthly limit is a misleading number rather than a
+  partial one.
+- 2026-09-04: **D812** — a budget bar is **not** a drill-down target in V8.
+  Because the brief asks to see how budgets were filled, not for a fourth
+  navigation edge, and the obvious target (that category's expenses for that
+  month) is already reachable via the category grouping.
+- 2026-09-04: **D813** — `GET /statistics/by-budget` does **not** apply the
+  `own_only` restriction its three siblings apply. Because a budget limit is an
+  account-level number: scoring one caller's own spend against the whole
+  account's limit produces a fill percentage that is wrong in a way no label
+  can repair. A caller permitted to read expenses at all sees the account's
+  real fill. Flag this one to the reviewer explicitly — it is a deliberate
+  deviation from `_own_user_id`'s pattern, and it is the kind of line a
+  reviewer should challenge.
+
+## STATE (handoff)
+- **Done:** Planning only, 2026-09-04. The three brief items were read against
+  the code before decomposition; the "Review of the brief" section is the
+  result and no unit needs to re-derive it. The findings that changed the
+  shape of the plan: `GET /statistics/by-period` already takes `tag_id` but
+  `GET /expenses` does not (item 1 is a real backend unit, not wiring);
+  `main.ts:168` already documents its own lack of history and the file already
+  carries two competing back mechanisms (item 2 is a router refactor, and the
+  riskiest work here); `budget_plans` has no limit history and
+  `BudgetService.get_progress` hardcodes the current month (item 3 needs D807's
+  stated limitation, and a new endpoint rather than N+1 progress calls).
+  Fourteen decisions taken, D800–D813 — the ones a later session is most
+  likely to want to reopen are **D807** (fill against today's limit) and
+  **D813** (no `own_only` on `by-budget`).
+- **Done (U0.1, 2026-09-05):** `docs/ui/screens/03-expenses.md` and
+  `05-statistics.md` updated. In `03-expenses.md`: a `Changing (V8)` delta
+  bullet, `filter.tagOnly`/`filter.tagAndPeriod`/`empty.tag`/
+  `empty.tagPeriod`/`unknownTag` in the Copy table, `GET /tags` and `tag_id`
+  in the Data table plus a "Backend deltas (V8)" note, an edge case and three
+  new acceptance criteria for the tag-deleted-mid-flight fallback and the two
+  banner/empty combinations. In `05-statistics.md`: the three gap-documenting
+  lines inverted (Delta's "Taking" bullet, the tag-grouping Interactions row,
+  the Haptics line), a new `Changing (V8)` delta bullet stating the tag tap
+  carries only the tag per D801, the category-bar Edge case widened to cover
+  tag too, and two new acceptance criteria. No new decisions — this unit
+  applies D801/D802/D803, it doesn't make new ones. No code was touched
+  (M0 is spec-only); `scripts/verify.sh` was run as the Stop-gate and passed
+  because nothing it checks changed.
+- **Next:** `/clear`, then `/unit U0.2 docs/plans/mini-app-v8.md`. M0 is
+  `ui-spec` work and must land before any code — three of the three items
+  contradict a currently-written spec line. Do **not** start M1 until U0.1
+  and U0.2 are ticked.
+- **Gotchas:**
+  - U0.1 and U0.3 both edit `docs/ui/screens/05-statistics.md`, in different
+    sections, and must run in that order.
+  - No migration in V8. If a unit reaches for Alembic, a decision was missed —
+    stop and record it.
+  - Every new string needs EN + RU + UK in the same edit
+    (`webapp/tests/i18n.test.ts` enforces parity, and it fails the build, not
+    a runtime path).
+  - `expense_repo.sum_by_category_month` takes explicit bounds despite the
+    "month" in its name — U3.1 reuses it as-is; do not add a second sum query.
+  - `calculate_progress` in `services/budget_service.py` is already pure and
+    already correct; U3.1 imports it. A second fill calculation in
+    `statistics_service` would be the money-math duplication the root
+    CLAUDE.md exists to prevent.
+  - U2.2's `replace`-vs-`push` distinction is the whole reason retries don't
+    pile up in the stack. It is the first thing to check if back behaviour
+    feels wrong after M2.
