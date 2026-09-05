@@ -68,6 +68,13 @@ const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 // silently drift between screens).
 const MAX_DONUT_SLOTS = 6;
 
+// The Budgets grouping only makes sense against a single month's limit
+// (D807–D811) — passed to the period-selector's `allowedUnits` (U3.2) so the
+// other four tabs dim and go inert while this grouping is active. The actual
+// period coercion when a non-month unit is in force (D809) is main.ts's job,
+// not this module's (see this file's header comment).
+const BUDGET_ALLOWED_UNITS: readonly PeriodUnit[] = ["month"];
+
 export type Grouping = "category" | "tag" | "budget";
 
 export interface StatisticsSegment {
@@ -660,6 +667,7 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
           value: current.period,
           now,
           disabled: false,
+          allowedUnits: current.grouping === "budget" ? BUDGET_ALLOWED_UNITS : undefined,
           onUnitChange: handlers.onUnitChange,
           onOffsetChange: handlers.onOffsetChange,
           onOpenPicker: () => openPicker(root, current.period, now, handlers.onBack, handlers.onApplyCustomRange),
@@ -674,7 +682,16 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
     // Grouping toggle: re-renders locally, no refetch (AC's "re-renders
     // without refetching the period") — `onGroupingChange` is a side
     // channel telling the host which grouping is now on screen, not a
-    // re-render trigger of its own.
+    // re-render trigger of its own. Exception (D809): picking Budgets while
+    // a non-month unit is active is the one case where `onGroupingChange`
+    // itself triggers a refetch (main.ts's job) — by the time this handler
+    // returns, that refetch has already overwritten `root` with its own
+    // loading state (`showStatistics` mounts "loading" synchronously before
+    // its first `await`). Skipping this module's own local re-render there
+    // avoids clobbering that loading state right back with the stale,
+    // pre-coercion period and an empty `budgetRows` (D810 never fetched it
+    // for a non-month unit) — a self-contradictory active-and-disabled tab
+    // that would otherwise flash until the coerced fetch resolves.
     root.querySelectorAll<HTMLElement>("[data-grouping]").forEach((el) => {
       el.addEventListener("click", () => {
         const next = el.dataset.grouping as Grouping;
@@ -683,6 +700,9 @@ export function mount(root: HTMLElement, state: StatisticsState, handlers: Stati
         }
         haptics.selection();
         handlers.onGroupingChange(next);
+        if (next === "budget" && current.period.unit !== "month") {
+          return;
+        }
         render({ ...current, grouping: next });
       });
     });
